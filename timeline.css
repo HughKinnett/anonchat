@@ -1,0 +1,30 @@
+.feed {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+}
+.feed-item {
+    border: 1px solid #ccc;
+    margin-bottom: 10px;
+    padding: 10px;
+    border-radius: 5px;
+}
+.feed-item h3 {
+    margin: 0;
+}
+.feed-item p {
+    margin: 10px 0 0;
+}
+
+.profile-banner {
+    background-color: black;
+    color: white;
+    padding: 20px;
+    text-align: center;
+}
+
+.profile-banner img {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+}

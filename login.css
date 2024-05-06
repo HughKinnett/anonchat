@@ -1,0 +1,24 @@
+body {
+    background-image: url("anonchatlogin.png");
+    background-repeat: no-repeat;
+    background-size: 50%;
+   float: left;
+   position: fixed;
+}
+.background-color {
+    background-color: black;
+    background-repeat: no-repeat;
+    background-size: 50%;
+    float: right;
+    position: fixed;
+}
+.container {
+    float: right;
+    color:white
+}
+
+.input {
+    position: flex;
+    right: 0;
+    width: 50%; /* Adjust as needed */
+}

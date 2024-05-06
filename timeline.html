@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="timeline.css">
+    <title>Timeline</title>
+</head>
+<body>
+    <div class="profile-banner">
+        <img src="profile-pic.jpg" alt="Profile Picture">
+        <h1>User Name</h1>
+        <p>@username</p>
+    </div>
+    <form action="post_content.php" method="post">
+        <textarea name="post-content" placeholder="What's happening?" required></textarea>
+        <button type="submit">Post</button>
+    </form>
+    <ul class="feed">
+        <li class="feed-item">
+            <h3>User Name</h3>
+            <p>Content...</p>
+        </li>
+        <li class="feed-item">
+            <h3>User Name</h3>
+            <p>Content...</p>
+        </li>
+        <!-- Add more feed items as needed -->
+    </ul>
+</body>
+</html>
