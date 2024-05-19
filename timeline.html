@@ -2,6 +2,8 @@
 <html>
 <head>
     <link rel="stylesheet" href="timeline.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=>, initial-scale=1.0">
     <title>Timeline</title>
 </head>
 <body>
@@ -25,5 +27,39 @@
         </li>
         <!-- Add more feed items as needed -->
     </ul>
+    <script>
+        document.querySelector('form').addEventListener('submit', function(event) {
+            event.preventDefault();
+        
+            var postContent = document.querySelector('textarea[name="post-content"]').value;
+        
+            fetch('post_content.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'post-content=' + encodeURIComponent(postContent),
+            })
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(function(data) {
+                var feed = document.querySelector('.feed');
+                var newItem = document.createElement('li');
+                newItem.classList.add('feed-item');
+        
+                var newPost = '<h3>User Name</h3><p>' + postContent + '</p>';
+                newItem.innerHTML = newPost;
+        
+                feed.insertBefore(newItem, feed.firstChild);
+            })
+            .catch(function(error) {
+                console.error('There has been a problem with your fetch operation:', error);
+            });
+        });
+        </script>
 </body>
 </html>
