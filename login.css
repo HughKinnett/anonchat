@@ -1,20 +1,10 @@
 body {
-    background-image: url("anonchatlogin.png");
-    background-repeat: no-repeat;
-    background-size: 50%;
-   float: left;
-   position: fixed;
-}
-.background-color {
     background-color: black;
-    background-repeat: no-repeat;
-    background-size: 50%;
-    float: right;
-    position: fixed;
+    background-attachment: fixed;  
+    background-size: cover;
 }
 .container {
-    float: right;
-    color:white
+    float: left;
 }
 
 .input {
