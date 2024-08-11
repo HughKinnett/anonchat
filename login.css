@@ -3,7 +3,9 @@ body {
     background-image: url('Untitled.jpeg');
     background-attachment: fixed;  
     background-size: cover;
+    color: white; /* Set text color to white */
 }
+
 .login-container {
     float: left;
 }
@@ -12,4 +14,9 @@ body {
     position: flex;
     right: 0;
     width: 50%; /* Adjust as needed */
+}
+
+/* Ensure all text elements are white */
+h1, p, input, button {
+    color: white;
 }
