@@ -16,8 +16,8 @@ body {
     width: 50%; /* Adjust as needed */
 }
 
-/* Ensure all text elements are white */
-h1, p, input, button {
+
+.email .password {
     color: black;
 }
 
