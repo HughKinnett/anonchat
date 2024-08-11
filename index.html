@@ -6,21 +6,32 @@
     <meta name="viewport" content="width=>, initial-scale=1.0">
     <title>Document</title>
 </head>
+<body class="background-color">
+    
 <body>
     
     <form action="action_page.php" method="post">
 
-            <div class="container">
-                <label for="uname"><b>Username</b></label>
-                <input type="text" placeholder="Enter Username" name="uname" required>
-
-                <label for="psw"><b>Password</b></label>
-                <input type="password" placeholder="Enter Password" name="psw" required>
-
-                <button type="submit">Login</button>
-                <label>
-                    <input type="checkbox" checked="checked" name="remember"> Remember me
-                </label>
+        <div class = "login-container">
+            <div id= "main">
+              <h1>Sign In</h1>
+              <input id = "email" type = "text" placeholder = "Email"></input>
+              <input id = "password" type = "password" placeholder = "Password"></input>
+              <button id = "submit">Submit</button>
+              <p><span>or</span></p>
+              <button id = "sign-up">Sign Up</button>
             </div>
+        
+            <div id = "create-acct">
+              <h1>Create an Account</h1>
+              <input id = "email-signup" type = "text" placeholder = "Email *"></input>
+          <input id = "confirm-email-signup" type = "email" placeholder = "Confirm Email *"></input>
+              <input id = "password-signup" type = "password" placeholder = "Password *"></input>
+              <input id = "confirm-password-signup" type = "password" placeholder = "Confirm Password *"></input>
+              <button id = "create-acct-btn">Create Account</button>
+              <button id = "return-btn">Return to Login</button>
+            </div>
+          </div>
+            <script type = "module" src = "loginfirebase.js"></script>
 </body>
 </html>
