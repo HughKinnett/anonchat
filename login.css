@@ -25,3 +25,13 @@ h1, p, input, button {
     margin: 10px 0;
     color: black;
 }
+
+/* Make button text black */
+button {
+    color: black;
+}
+
+.email .password {
+    margin: 10px 0;
+    color: black;
+}
