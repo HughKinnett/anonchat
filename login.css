@@ -18,20 +18,6 @@ body {
 
 /* Ensure all text elements are white */
 h1, p, input, button {
-    color: white;
-}
-
-.email .password {
-    margin: 10px 0;
     color: black;
 }
 
-/* Make button text black */
-button {
-    color: black;
-}
-
-.email .password {
-    margin: 10px 0;
-    color: black;
-}
