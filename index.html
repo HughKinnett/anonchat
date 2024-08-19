@@ -35,5 +35,13 @@
             </div>
           </div>
             <script type = "module" src = "loginfirebase.js"></script>
+            <script>
+                document.getElementById('login-form').addEventListener('submit', function(event) {
+                    event.preventDefault();
+                    // Perform login validation here
+                    // If login is successful, redirect to the timeline page
+                    window.location.href = 'timeline.html';
+                });
+            </script>
 </body>
 </html>
