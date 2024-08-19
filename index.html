@@ -3,45 +3,31 @@
 <head>
     <link rel="stylesheet" href="login.css">
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=>, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
 </head>
 <body class="background-color">
-    
-<body>
-    
-    <form action="action_page.php" method="post">
-
-        <div class = "login-container">
-            <div id= "main">
-              <h1>Sign In</h1>
-              <div class = "input">
-              <input id = "email" class = "email" type = "text" placeholder = "Email"></input>
-              <input id = "password" class = "password" type = "password" placeholder = "Password"></input>
-              <button id = "submit">Submit</button>
-              
-              <button id = "sign-up">Sign Up</button>
-              </div>
+    <form id="login-form" action="javascript:void(0);">
+        <div class="login-container">
+            <div id="main">
+                <h1>Sign In</h1>
+                <div class="input">
+                    <input id="email" class="email" type="text" placeholder="Email">
+                    <input id="password" class="password" type="password" placeholder="Password">
+                    <button id="submit" type="submit">Submit</button>
+                    <button id="sign-up" type="button">Sign Up</button>
+                </div>
             </div>
-        
-            <div id = "create-acct">
-              <h1>Create an Account</h1>
-              <input id = "email-signup" type = "text" placeholder = "Email *"></input>
-          <input id = "confirm-email-signup" type = "email" placeholder = "Confirm Email *"></input>
-              <input id = "password-signup" type = "password" placeholder = "Password *"></input>
-              <input id = "confirm-password-signup" type = "password" placeholder = "Confirm Password *"></input>
-              <button id = "create-acct-btn">Create Account</button>
-              <button id = "return-btn">Return to Login</button>
-            </div>
-          </div>
-            <script type = "module" src = "loginfirebase.js"></script>
-            <script>
-                document.getElementById('login-form').addEventListener('submit', function(event) {
-                    event.preventDefault();
-                    // Perform login validation here
-                    // If login is successful, redirect to the timeline page
-                    window.location.href = 'timeline.html';
-                });
-            </script>
+        </div>
+    </form>
+    <script type="module" src="loginfirebase.js"></script>
+    <script>
+        document.getElementById('login-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+            // Perform login validation here
+            // If login is successful, redirect to the timeline page
+            window.location.href = 'timeline.html';
+        });
+    </script>
 </body>
 </html>
