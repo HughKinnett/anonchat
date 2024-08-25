@@ -16,15 +16,12 @@
         <textarea name="post-content" id="post-content" placeholder="What's happening?" required></textarea>
         <button type="submit">Post</button>
     </form>
-    <ul class="feed">
-        <li class="feed-item">
-            <h3>User Name</h3>
-            <p>Content...</p>
-        </li>
+    <ul class="feed" id="feed">
+        <!-- Existing feed items will be dynamically populated here -->
     </ul>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAyIEUtkZMQwjfDum146Hs1ThXpnbXilEk",
@@ -39,21 +36,33 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
+        // Function to render posts
+        function renderPost(doc) {
+            const feed = document.getElementById('feed');
+            const newPost = document.createElement('li');
+            newPost.classList.add('feed-item');
+            newPost.innerHTML = `<h3>User Name</h3><p>${doc.data().content}</p>`;
+            feed.prepend(newPost);
+        }
+
+        // Real-time listener for posts
+        const q = query(collection(db, "posts"), orderBy("timestamp", "desc"));
+        onSnapshot(q, (snapshot) => {
+            const feed = document.getElementById('feed');
+            feed.innerHTML = ''; // Clear the feed
+            snapshot.forEach((doc) => {
+                renderPost(doc);
+            });
+        });
+
         document.getElementById('post-form').addEventListener('submit', async function(event) {
             event.preventDefault();
             const postContent = document.getElementById('post-content').value;
             try {
-                const docRef = await addDoc(collection(db, "posts"), {
+                await addDoc(collection(db, "posts"), {
                     content: postContent,
                     timestamp: new Date()
                 });
-                console.log("Document written with ID: ", docRef.id);
-                // Update the feed with the new post without reloading the page
-                const feed = document.querySelector('.feed');
-                const newPost = document.createElement('li');
-                newPost.classList.add('feed-item');
-                newPost.innerHTML = `<h3>User Name</h3><p>${postContent}</p>`;
-                feed.prepend(newPost);
                 document.getElementById('post-content').value = ''; // Clear the textarea
             } catch (e) {
                 console.error("Error adding document: ", e);
