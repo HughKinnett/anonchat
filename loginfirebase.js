@@ -2,14 +2,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/fireba
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_AUTH_DOMAIN",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_BUCKET",
-    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-    appId: "YOUR_APP_ID",
-    measurementId: "YOUR_MEASUREMENT_ID"
-};
+  apiKey: "AIzaSyCTAxRZ7dsKhogtd6LVsfENLyXSu6GWXAg",
+  authDomain: "anon-chat-e7acd.firebaseapp.com",
+  databaseURL: "https://anon-chat-e7acd-default-rtdb.firebaseio.com",
+  projectId: "anon-chat-e7acd",
+  storageBucket: "anon-chat-e7acd.appspot.com",
+  messagingSenderId: "1063426879391",
+  appId: "1:1063426879391:web:34d84186bc665e487dd7aa",
+  measurementId: "G-LF1NTLY7JB"
+}
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
