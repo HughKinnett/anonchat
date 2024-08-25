@@ -1,16 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <link rel="stylesheet" href="timeline.css">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Timeline</title>
-</head>
-<body>
-    <div class="profile-banner">
-        <img src="profile-pic.jpg" alt="Profile Picture">
-        <h1>User Name</h1>
-        <p>@username</p>
+<p>@username</p>
     </div>
     <form id="post-form">
         <textarea name="post-content" id="post-content" placeholder="What's happening?" required></textarea>
@@ -19,7 +7,24 @@
     <ul class="feed" id="feed">
         <!-- Existing feed items will be dynamically populated here -->
     </ul>
-    <script> // Function to render posts
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAyIEUtkZMQwjfDum146Hs1ThXpnbXilEk",
+            authDomain: "anonchatlogin.firebaseapp.com",
+            projectId: "anonchatlogin",
+            storageBucket: "anonchatlogin.appspot.com",
+            messagingSenderId: "734396560776",
+            appId: "1:734396560776:web:7b93978b3ccaa3007ab63d",
+            measurementId: "G-WB746MBDXT"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Function to render posts
         function renderPost(doc) {
             const feed = document.getElementById('feed');
             const newPost = document.createElement('li');
@@ -42,15 +47,16 @@
             event.preventDefault();
             const postContent = document.getElementById('post-content').value;
             try {
-                await addDoc(collection(db, "posts"), {
+                const docRef = await addDoc(collection(db, "posts"), {
                     content: postContent,
                     timestamp: new Date()
                 });
+                console.log("Document written with ID: ", docRef.id);
+                // Render the new post immediately
+                renderPost({ data: () => ({ content: postContent }) });
                 document.getElementById('post-content').value = ''; // Clear the textarea
             } catch (e) {
                 console.error("Error adding document: ", e);
             }
         });
     </script>
-</body>
-</html>
