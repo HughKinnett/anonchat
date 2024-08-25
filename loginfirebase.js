@@ -1,19 +1,18 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "AIzaSyCTAxRZ7dsKhogtd6LVsfENLyXSu6GWXAg",
-  authDomain: "anon-chat-e7acd.firebaseapp.com",
-  databaseURL: "https://anon-chat-e7acd-default-rtdb.firebaseio.com",
-  projectId: "anon-chat-e7acd",
-  storageBucket: "anon-chat-e7acd.appspot.com",
-  messagingSenderId: "1063426879391",
-  appId: "1:1063426879391:web:34d84186bc665e487dd7aa",
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_AUTH_DOMAIN",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_BUCKET",
+    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+    appId: "YOUR_APP_ID",
+    measurementId: "YOUR_MEASUREMENT_ID"
 };
 
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+const auth = getAuth(app);
 
 document.getElementById('submit').addEventListener('click', function(event) {
     event.preventDefault();
@@ -25,7 +24,7 @@ document.getElementById('submit').addEventListener('click', function(event) {
             // Signed in
             const user = userCredential.user;
             console.log('User signed in:', user);
-            window.location.href = 'timeline.html';
+            window.location.href = 'timeline.html'; // Redirect to timeline
         })
         .catch((error) => {
             const errorCode = error.code;
@@ -45,7 +44,7 @@ document.getElementById('sign-up').addEventListener('click', function(event) {
             // Signed up
             const user = userCredential.user;
             console.log('User signed up:', user);
-            window.location.href = 'timeline.html';
+            window.location.href = 'timeline.html'; // Redirect to timeline
         })
         .catch((error) => {
             const errorCode = error.code;
