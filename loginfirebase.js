@@ -19,6 +19,8 @@ document.getElementById('submit').addEventListener('click', function(event) {
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
 
+    console.log('Attempting to sign in with email:', email);
+
     signInWithEmailAndPassword(auth, email, password)
         .then((userCredential) => {
             // Signed in
@@ -38,6 +40,8 @@ document.getElementById('sign-up').addEventListener('click', function(event) {
     event.preventDefault();
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
+
+    console.log('Attempting to sign up with email:', email);
 
     createUserWithEmailAndPassword(auth, email, password)
         .then((userCredential) => {
