@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCTAxRZ7dsKhogtd6LVsfENLyXSu6GWXAg",
   authDomain: "anon-chat-e7acd.firebaseapp.com",
@@ -9,7 +10,6 @@ const firebaseConfig = {
   storageBucket: "anon-chat-e7acd.appspot.com",
   messagingSenderId: "1063426879391",
   appId: "1:1063426879391:web:34d84186bc665e487dd7aa",
-  measurementId: "G-LF1NTLY7JB"
 };
 
 const app = initializeApp(firebaseConfig);
