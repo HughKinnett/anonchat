@@ -19,24 +19,7 @@
     <ul class="feed" id="feed">
         <!-- Existing feed items will be dynamically populated here -->
     </ul>
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyAyIEUtkZMQwjfDum146Hs1ThXpnbXilEk",
-            authDomain: "anonchatlogin.firebaseapp.com",
-            projectId: "anonchatlogin",
-            storageBucket: "anonchatlogin.appspot.com",
-            messagingSenderId: "734396560776",
-            appId: "1:734396560776:web:7b93978b3ccaa3007ab63d",
-            measurementId: "G-WB746MBDXT"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
-        // Function to render posts
+    <script> // Function to render posts
         function renderPost(doc) {
             const feed = document.getElementById('feed');
             const newPost = document.createElement('li');
