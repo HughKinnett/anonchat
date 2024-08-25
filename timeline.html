@@ -3,7 +3,7 @@
 <head>
     <link rel="stylesheet" href="timeline.css">
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=>, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Timeline</title>
 </head>
 <body>
@@ -12,8 +12,8 @@
         <h1>User Name</h1>
         <p>@username</p>
     </div>
-    <form action="post_content.php" method="post">
-        <textarea name="post-content" placeholder="What's happening?" required></textarea>
+    <form id="post-form">
+        <textarea name="post-content" id="post-content" placeholder="What's happening?" required></textarea>
         <button type="submit">Post</button>
     </form>
     <ul class="feed">
@@ -21,45 +21,44 @@
             <h3>User Name</h3>
             <p>Content...</p>
         </li>
-        <li class="feed-item">
-            <h3>User Name</h3>
-            <p>Content...</p>
-        </li>
-        <!-- Add more feed items as needed -->
     </ul>
-    <script>
-        document.querySelector('form').addEventListener('submit', function(event) {
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAyIEUtkZMQwjfDum146Hs1ThXpnbXilEk",
+            authDomain: "anonchatlogin.firebaseapp.com",
+            projectId: "anonchatlogin",
+            storageBucket: "anonchatlogin.appspot.com",
+            messagingSenderId: "734396560776",
+            appId: "1:734396560776:web:7b93978b3ccaa3007ab63d",
+            measurementId: "G-WB746MBDXT"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        document.getElementById('post-form').addEventListener('submit', async function(event) {
             event.preventDefault();
-        
-            var postContent = document.querySelector('textarea[name="post-content"]').value;
-        
-            fetch('post_content.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'post-content=' + encodeURIComponent(postContent),
-            })
-            .then(function(response) {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.text();
-            })
-            .then(function(data) {
-                var feed = document.querySelector('.feed');
-                var newItem = document.createElement('li');
-                newItem.classList.add('feed-item');
-        
-                var newPost = '<h3>User Name</h3><p>' + postContent + '</p>';
-                newItem.innerHTML = newPost;
-        
-                feed.insertBefore(newItem, feed.firstChild);
-            })
-            .catch(function(error) {
-                console.error('There has been a problem with your fetch operation:', error);
-            });
+            const postContent = document.getElementById('post-content').value;
+            try {
+                const docRef = await addDoc(collection(db, "posts"), {
+                    content: postContent,
+                    timestamp: new Date()
+                });
+                console.log("Document written with ID: ", docRef.id);
+                // Update the feed with the new post without reloading the page
+                const feed = document.querySelector('.feed');
+                const newPost = document.createElement('li');
+                newPost.classList.add('feed-item');
+                newPost.innerHTML = `<h3>User Name</h3><p>${postContent}</p>`;
+                feed.prepend(newPost);
+                document.getElementById('post-content').value = ''; // Clear the textarea
+            } catch (e) {
+                console.error("Error adding document: ", e);
+            }
         });
-        </script>
+    </script>
 </body>
 </html>
