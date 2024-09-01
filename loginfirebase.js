@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { getDatabase } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
 
-const provider = new GoogleAuthProvider();
 const firebaseConfig = {
   apiKey: "AIzaSyCTAxRZ7dsKhogtd6LVsfENLyXSu6GWXAg",
   authDomain: "anon-chat-e7acd.firebaseapp.com",
@@ -13,12 +13,12 @@ const firebaseConfig = {
   measurementId: "G-LF1NTLY7JB"
 };
 
-
 const app = initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const database = firebase.database();
+const auth = getAuth(app);
+const database = getDatabase(app);
+const provider = new GoogleAuthProvider();
 
-document.getElementById('submit').addEventListener('click', function(event) {
+document.getElementById('sign-in-form').addEventListener('submit', function(event) {
     event.preventDefault();
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
@@ -40,7 +40,7 @@ document.getElementById('submit').addEventListener('click', function(event) {
         });
 });
 
-document.getElementById('sign-up').addEventListener('click', function(event) {
+document.getElementById('sign-up-form').addEventListener('submit', function(event) {
     event.preventDefault();
     const username = document.getElementById('username').value;
     const email = document.getElementById('sign-up-email').value;
