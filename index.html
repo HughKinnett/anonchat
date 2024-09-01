@@ -9,21 +9,27 @@
 <body>
     <div id="main">
         <h1>Sign In</h1>
-        <div class="input">
-            <input id="email" class="email" type="text" placeholder="Email">
-            <input id="password" class="password" type="password" placeholder="Password">
-            <button id="submit" type="submit">Submit</button>
-            </div>
+        <form id="sign-in-form">
             <div class="input">
-                <input id="username" class="username" type="text" placeholder="Username">
-                <input id="sign-up-email" class="email" type="text" placeholder="Email">
-                <input id="sign-up-password" class="password" type="password" placeholder="Password">
-            <button id="sign-up" type="button">Sign Up</button>
-        </div>
+                <input id="email" class="email" type="text" placeholder="Email" required>
+                <input id="password" class="password" type="password" placeholder="Password" required>
+                <button id="submit" type="submit">Submit</button>
+            </div>
+        </form>
+        <h1>Sign Up</h1>
+        <form id="sign-up-form">
+            <div class="input">
+                <input id="username" class="username" type="text" placeholder="Username" required>
+                <input id="sign-up-email" class="email" type="text" placeholder="Email" required>
+                <input id="sign-up-password" class="password" type="password" placeholder="Password" required>
+                <button id="sign-up" type="submit">Sign Up</button>
+            </div>
+        </form>
     </div>
     <script type="module" src="https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js"></script>
     <script type="module" src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database.js"></script>
     <script type="module" src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
+    <script type="module" src="loginfirebase.js"></script>
     <script type="module" src="loginfirebase.js"></script>
 
 </body>
