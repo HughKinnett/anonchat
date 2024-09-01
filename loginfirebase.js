@@ -15,7 +15,8 @@ const firebaseConfig = {
 
 
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+const auth = firebase.auth();
+const database = firebase.database();
 
 document.getElementById('submit').addEventListener('click', function(event) {
     event.preventDefault();
