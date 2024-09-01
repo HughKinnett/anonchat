@@ -11,25 +11,37 @@
         <h1>Sign In</h1>
         <form id="sign-in-form">
             <div class="input">
-                <input id="email" class="email" type="text" placeholder="Email" required>
-                <input id="password" class="password" type="password" placeholder="Password" required>
+                <input id="email" class="email" type="text" placeholder="Email" autocomplete="email" required>
+                <input id="password" class="password" type="password" placeholder="Password" autocomplete="current-password" required>
                 <button id="submit" type="submit">Submit</button>
             </div>
         </form>
         <h1>Sign Up</h1>
         <form id="sign-up-form">
             <div class="input">
-                <input id="username" class="username" type="text" placeholder="Username" required>
-                <input id="sign-up-email" class="email" type="text" placeholder="Email" required>
-                <input id="sign-up-password" class="password" type="password" placeholder="Password" required>
+                <input id="username" class="username" type="text" placeholder="Username" autocomplete="username" required>
+                <input id="sign-up-email" class="email" type="text" placeholder="Email" autocomplete="email" required>
+                <input id="sign-up-password" class="password" type="password" placeholder="Password" autocomplete="new-password" required>
                 <button id="sign-up" type="submit">Sign Up</button>
             </div>
         </form>
     </div>
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCTAxRZ7dsKhogtd6LVsfENLyXSu6GWXAg",
+            authDomain: "anon-chat-e7acd.firebaseapp.com",
+            databaseURL: "https://anon-chat-e7acd-default-rtdb.firebaseio.com",
+            projectId: "anon-chat-e7acd",
+            storageBucket: "anon-chat-e7acd.appspot.com",
+            messagingSenderId: "1063426879391",
+            appId: "1:1063426879391:web:34d84186bc665e487dd7aa",
+            measurementId: "G-LF1NTLY7JB"
+          }; 
+    </script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
     <script type="module" src="https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js"></script>
     <script type="module" src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database.js"></script>
     <script type="module" src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
-    <script type="module" src="loginfirebase.js"></script>
     <script type="module" src="loginfirebase.js"></script>
 
 </body>
