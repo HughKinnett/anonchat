@@ -1,7 +1,5 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics.js";
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword  } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { GoogleAuthProvider } from "firebase/auth";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const provider = new GoogleAuthProvider();
 const firebaseConfig = {
@@ -14,6 +12,7 @@ const firebaseConfig = {
   appId: "1:1063426879391:web:34d84186bc665e487dd7aa",
   measurementId: "G-LF1NTLY7JB"
 };
+
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -37,5 +36,38 @@ document.getElementById('submit').addEventListener('click', function(event) {
             const errorMessage = error.message;
             console.error('Error signing in:', errorCode, errorMessage);
             alert('Login failed: ' + errorMessage);
+        });
+});
+
+document.getElementById('sign-up').addEventListener('click', function(event) {
+    event.preventDefault();
+    const username = document.getElementById('username').value;
+    const email = document.getElementById('sign-up-email').value;
+    const password = document.getElementById('sign-up-password').value;
+
+    console.log('Attempting to sign up with email:', email);
+
+    createUserWithEmailAndPassword(auth, email, password)
+        .then((userCredential) => {
+            // Signed up
+            const user = userCredential.user;
+            console.log('User signed up:', user);
+
+            // Update profile with username
+            updateProfile(user, {
+                displayName: username
+            }).then(() => {
+                console.log('Username updated:', username);
+                window.location.href = 'timeline.html'; // Redirect to timeline
+            }).catch((error) => {
+                console.error('Error updating username:', error);
+                alert('Sign up failed: ' + error.message);
+            });
+        })
+        .catch((error) => {
+            const errorCode = error.code;
+            const errorMessage = error.message;
+            console.error('Error signing up:', errorCode, errorMessage);
+            alert('Sign up failed: ' + errorMessage);
         });
 });
