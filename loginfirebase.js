@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { getDatabase } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+import { getDatabase, ref, set } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCTAxRZ7dsKhogtd6LVsfENLyXSu6GWXAg",
@@ -14,8 +14,23 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+function writeUserData(userID, username, email, password, imageURL) {   
+const db = getDatabase();
+const reference = ref(db, 'users/' + userID);
+
+set(reference, {
+    username: username,
+    email: email,
+    password: password,
+    profile_picture : imageURL
+});
+}
+
+writeUserData("andreawu", "awu", "myemail@me.com", "password", "myimageurl");
+
+
 const auth = getAuth(app);
-const database = getDatabase(app);
 const provider = new GoogleAuthProvider();
 
 document.getElementById('sign-in-form').addEventListener('submit', function(event) {
