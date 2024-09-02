@@ -27,7 +27,7 @@ set(reference, {
 });
 }
 
-writeUserData("andreawu", "awu", "myemail@me.com", "password", "myimageurl");
+writeUserData("andreawu", "awu", "myemail@me.com", "password", "myimageurl"); 
 
 
 const auth = getAuth(app);
