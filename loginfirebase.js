@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { getDatabase, ref, set } from "firebase/database";
+import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCTAxRZ7dsKhogtd6LVsfENLyXSu6GWXAg",
@@ -14,76 +14,42 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-function writeUserData(userID, username, email, password, imageURL) {   
-const db = getDatabase();
-const reference = ref(db, 'users/' + userID);
-
-set(reference, {
-    username: username,
-    email: email,
-    password: password,
-    profile_picture : imageURL
-});
+async function writeUserData(userID, username, email, password, imageURL) {
+  try {
+    await setDoc(doc(db, 'users', userID), {
+      username: username,
+      email: email,
+      password: password,
+      profile_picture: imageURL
+    });
+    console.log('Data saved successfully.');
+  } catch (error) {
+    console.error('Error saving data:', error);
+  }
 }
 
-writeUserData("andreawu", "awu", "myemail@me.com", "password", "myimageurl"); 
-
+// Example usage
+writeUserData("andreawu", "awu", "myemail@me.com", "password", "myimageurl");
 
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
 document.getElementById('sign-in-form').addEventListener('submit', function(event) {
-    event.preventDefault();
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
+  event.preventDefault();
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
 
-    console.log('Attempting to sign in with email:', email);
+  console.log('Attempting to sign in with email:', email);
 
-    signInWithEmailAndPassword(auth, email, password)
-        .then((userCredential) => {
-            // Signed in
-            const user = userCredential.user;
-            console.log('User signed in:', user);
-            window.location.href = 'timeline.html'; // Redirect to timeline
-        })
-        .catch((error) => {
-            const errorCode = error.code;
-            const errorMessage = error.message;
-            console.error('Error signing in:', errorCode, errorMessage);
-            alert('Login failed: ' + errorMessage);
-        });
-});
-
-document.getElementById('sign-up-form').addEventListener('submit', function(event) {
-    event.preventDefault();
-    const username = document.getElementById('username').value;
-    const email = document.getElementById('sign-up-email').value;
-    const password = document.getElementById('sign-up-password').value;
-
-    console.log('Attempting to sign up with email:', email);
-
-    createUserWithEmailAndPassword(auth, email, password)
-        .then((userCredential) => {
-            // Signed up
-            const user = userCredential.user;
-            console.log('User signed up:', user);
-
-            // Update profile with username
-            updateProfile(user, {
-                displayName: username
-            }).then(() => {
-                console.log('Username updated:', username);
-                window.location.href = 'timeline.html'; // Redirect to timeline
-            }).catch((error) => {
-                console.error('Error updating username:', error);
-                alert('Sign up failed: ' + error.message);
-            });
-        })
-        .catch((error) => {
-            const errorCode = error.code;
-            const errorMessage = error.message;
-            console.error('Error signing up:', errorCode, errorMessage);
-            alert('Sign up failed: ' + errorMessage);
-        });
+  signInWithEmailAndPassword(auth, email, password)
+    .then((userCredential) => {
+      // Signed in
+      const user = userCredential.user;
+      console.log('Signed in successfully:', user);
+    })
+    .catch((error) => {
+      console.error('Error signing in:', error);
+    });
 });
