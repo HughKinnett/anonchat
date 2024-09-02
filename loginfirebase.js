@@ -30,9 +30,6 @@ async function writeUserData(userID, username, email, password, imageURL) {
   }
 }
 
-// Example usage
-writeUserData("andreawu", "awu", "myemail@me.com", "password", "myimageurl");
-
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
@@ -40,6 +37,11 @@ document.getElementById('sign-in-form').addEventListener('submit', function(even
   event.preventDefault();
   const email = document.getElementById('email').value;
   const password = document.getElementById('password').value;
+
+  if (!validateEmail(email)) {
+    console.error('Invalid email format');
+    return;
+  }
 
   console.log('Attempting to sign in with email:', email);
 
@@ -53,3 +55,8 @@ document.getElementById('sign-in-form').addEventListener('submit', function(even
       console.error('Error signing in:', error);
     });
 });
+
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(String(email).toLowerCase());
+}
