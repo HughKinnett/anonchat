@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth.js";
 import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -12,50 +12,37 @@ const firebaseConfig = {
     measurementId: "G-2LDXDEGR8Y"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
 
-async function writeUserData(userID, username, email, password, imageURL) {
-  try {
-    await setDoc(doc(db, 'users', userID), {
-      username: username,
-      email: email,
-      password: password,
-      profile_picture: imageURL
-    });
-    console.log('Data saved successfully.');
-  } catch (error) {
-    console.error('Error saving data:', error);
-  }
-}
+// Initialize Firebase Authentication
+const auth = getAuth();
 
-const auth = getAuth(app);
-const provider = new GoogleAuthProvider();
+// Define email and password variables
+const email = "user@example.com";
+const password = "userPassword";
 
-document.getElementById('sign-in-form').addEventListener('submit', function(event) {
-  event.preventDefault();
-  const email = document.getElementById('email').value;
-  const password = document.getElementById('password').value;
+// Create a new user with email and password
+createUserWithEmailAndPassword(auth, email, password)
+  .then((userCredential) => {
+    // Signed in 
+    const user = userCredential.user;
+    console.log("User created:", user);
+  })
+  .catch((error) => {
+    const errorCode = error.code;
+    const errorMessage = error.message;
+    console.error("Error creating user:", errorCode, errorMessage);
+  });
 
-  if (!validateEmail(email)) {
-    console.error('Invalid email format');
-    return;
-  }
+// Sign in an existing user with email and password
+signInWithEmailAndPassword(auth, email, password)
+  .then((userCredential) => {
+    // Signed in 
+    const user = userCredential.user;
+    console.log("User signed in:", user);
+  })
+  .catch((error) => {
+    const errorCode = error.code;
+    const errorMessage = error.message;
+    console.error("Error signing in:", errorCode, errorMessage);
+  });
 
-  console.log('Attempting to sign in with email:', email);
-
-  signInWithEmailAndPassword(auth, email, password)
-    .then((userCredential) => {
-      // Signed in
-      const user = userCredential.user;
-      console.log('Signed in successfully:', user);
-    })
-    .catch((error) => {
-      console.error('Error signing in:', error);
-    });
-});
-
-function validateEmail(email) {
-  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return re.test(String(email).toLowerCase());
-}
