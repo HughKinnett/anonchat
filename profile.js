@@ -124,7 +124,16 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
-  const profileSnapshot = await getDoc(doc(db, "users", targetUserId));
+  const targetProfileRef = doc(db, "users", targetUserId);
+  let profileSnapshot = await getDoc(targetProfileRef);
+  if (!profileSnapshot.exists() && targetUserId === user.uid && /^[A-Za-z0-9_]{3,30}$/.test(user.displayName || "")) {
+    await setDoc(targetProfileRef, {
+      uid: user.uid,
+      username: user.displayName,
+      createdAt: serverTimestamp()
+    });
+    profileSnapshot = await getDoc(targetProfileRef);
+  }
   if (!profileSnapshot.exists()) {
     document.getElementById("profile-name").textContent = "Profile not found";
     setStatus("This anonymous profile does not exist.", true);
