@@ -77,22 +77,21 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
     }
 
+    match /{documentPath=**}/reactions/{reactionId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['heart', 'middle_finger']
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
     match /posts/{postId} {
       allow read: if signedIn();
       allow create: if signedIn() && (validOriginalPost() || validRepost(postId));
       allow update: if false;
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
-
-      match /reactions/{userId} {
-        allow read: if signedIn();
-        allow create, update: if signedIn()
-          && request.auth.uid == userId
-          && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.type in ['heart', 'middle_finger']
-          && request.resource.data.createdAt == request.time;
-        allow delete: if signedIn() && request.auth.uid == userId;
-      }
     }
   }
 }
