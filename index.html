@@ -1,38 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login</title>
-    <link rel="stylesheet" href="login.css">
-        <title>Firebase Auth</title>
-        <script type="module" src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"></script>
-        <script type="module" src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"></script>
-        <script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AnonChat — Sign in</title>
+  <link rel="stylesheet" href="login.css">
 </head>
 <body>
-    <div id="main">
-        <h1>Sign In</h1>
-        <form id="sign-in-form">
-            <div class="input">
-                <input id="email" class="email" type="text" placeholder="Email" autocomplete="email" required>
-                <input id="password" class="password" type="password" placeholder="Password" autocomplete="current-password" required>
-                <button id="submit" type="submit">Submit</button>
-            </div>
-        </form>
-        <h1>Sign Up</h1>
-        <form id="sign-up-form">
-            <div class="input">
-                <input id="username" class="username" type="text" placeholder="Username" autocomplete="username" required>
-                <input id="sign-up-email" class="email" type="text" placeholder="Email" autocomplete="email" required>
-                <input id="sign-up-password" class="password" type="password" placeholder="Password" autocomplete="new-password" required>
-                <button id="sign-up" type="submit">Sign Up</button>
-            </div>
-        </form>
-    </div>
-    <script type="module" src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"></script>
-    <script type="module" src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"></script>
-    <script type="module" src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js"></script>
-    <script type="module" src="loginfirebase.js"></script>
-   </body>
+  <main id="main">
+    <h1>Sign In</h1>
+    <form id="sign-in-form">
+      <div class="input">
+        <input id="email" class="email" type="email" placeholder="Email" autocomplete="email" required>
+        <input id="password" class="password" type="password" placeholder="Password" autocomplete="current-password" required>
+        <button id="submit" type="submit">Sign In</button>
+      </div>
+    </form>
+    <h1>Create Account</h1>
+    <form id="sign-up-form">
+      <div class="input">
+        <input id="username" class="username" type="text" placeholder="Username" autocomplete="username" minlength="3" maxlength="30" required>
+        <input id="sign-up-email" class="email" type="email" placeholder="Email" autocomplete="email" required>
+        <input id="sign-up-password" class="password" type="password" placeholder="Password (at least 8 characters)" autocomplete="new-password" minlength="8" required>
+        <button id="sign-up" type="submit">Sign Up</button>
+      </div>
+    </form>
+    <p id="auth-status" role="status" aria-live="polite"></p>
+  </main>
+  <script type="module" src="loginfirebase.js"></script>
+</body>
 </html>
