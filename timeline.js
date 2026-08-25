@@ -27,6 +27,7 @@ let currentUser;
 let profileUsername;
 let postDocs = [];
 let reactions = [];
+let comments = [];
 let follows = [];
 let users = [];
 let notificationReads = [];
@@ -132,6 +133,26 @@ const validProfile = (profile, userId) =>
 const formatNotificationTime = (timestamp) =>
   timestamp?.toDate ? timestamp.toDate().toLocaleString() : "Just now";
 
+const appendLinkedText = (container, value) => {
+  String(value || "").split(/(@[A-Za-z0-9_]{3,30})/g).forEach((part) => {
+    if (!part.startsWith("@")) {
+      container.append(document.createTextNode(part));
+      return;
+    }
+    const handle = part.slice(1).toLowerCase();
+    const profile = users.find((entry) => entry.data().username?.toLowerCase() === handle);
+    if (!profile) {
+      container.append(document.createTextNode(part));
+      return;
+    }
+    const link = document.createElement("a");
+    link.className = "mention-link";
+    link.href = `profile.html?uid=${encodeURIComponent(profile.id)}`;
+    link.textContent = part;
+    container.append(link);
+  });
+};
+
 const renderNotifications = () => {
   if (!currentUser) return;
   const ownedPosts = new Map(
@@ -236,6 +257,12 @@ const originalPostId = (postDoc) =>
 const postReactions = (postId) => reactions.filter((reaction) =>
   reaction.ref.parent.parent?.id === postId
 );
+
+const postComments = (postId) => comments
+  .filter((comment) => comment.ref.parent.parent?.id === postId)
+  .sort((a, b) =>
+    (a.data().createdAt?.toMillis?.() || 0) - (b.data().createdAt?.toMillis?.() || 0)
+  );
 
 const followerCount = (userId) =>
   follows.filter((follow) => follow.data().followingId === userId).length;
@@ -361,7 +388,7 @@ const renderPost = (postDoc) => {
   author.textContent = `@${displayedUsername}`;
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
-  text.textContent = post.content;
+  appendLinkedText(text, post.content);
   const time = document.createElement("small");
   time.textContent = post.createdAt?.toDate
     ? post.createdAt.toDate().toLocaleString()
@@ -374,6 +401,67 @@ const renderPost = (postDoc) => {
     reactionButton(sourceId, "heart", "❤️", reactionDocs),
     reactionButton(sourceId, "middle_finger", "🖕", reactionDocs)
   );
+
+  const commentDocs = postComments(sourceId);
+  const commentsSection = document.createElement("details");
+  commentsSection.className = "comments-section";
+  const commentsSummary = document.createElement("summary");
+  commentsSummary.textContent = `Comments · ${commentDocs.length}`;
+  const commentsList = document.createElement("ul");
+  commentsList.className = "comments-list";
+
+  commentDocs.forEach((commentDoc) => {
+    const comment = commentDoc.data();
+    const commentItem = document.createElement("li");
+    commentItem.className = "comment-item";
+    const commenter = document.createElement("a");
+    commenter.className = "comment-author";
+    commenter.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
+    commenter.textContent = `@${comment.username || "anonymous"}`;
+    const commentText = document.createElement("p");
+    appendLinkedText(commentText, comment.text);
+    const commentTime = document.createElement("time");
+    commentTime.textContent = comment.createdAt?.toDate
+      ? comment.createdAt.toDate().toLocaleString()
+      : "Posting…";
+    commentItem.append(commenter, commentText, commentTime);
+    commentsList.append(commentItem);
+  });
+
+  const commentForm = document.createElement("form");
+  commentForm.className = "comment-form";
+  const commentInput = document.createElement("input");
+  commentInput.type = "text";
+  commentInput.maxLength = 280;
+  commentInput.required = true;
+  commentInput.placeholder = "Comment or tag @username…";
+  commentInput.setAttribute("aria-label", "Write a comment");
+  const commentSubmit = document.createElement("button");
+  commentSubmit.type = "submit";
+  commentSubmit.textContent = "Comment";
+  commentForm.append(commentInput, commentSubmit);
+  commentForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = commentInput.value.trim();
+    if (!text) return;
+    commentSubmit.disabled = true;
+    try {
+      await addDoc(collection(db, "posts", sourceId, "comments"), {
+        uid: currentUser.uid,
+        username: profileUsername,
+        text,
+        createdAt: serverTimestamp()
+      });
+      commentInput.value = "";
+      commentsSection.open = true;
+    } catch {
+      setStatus("Could not post your comment.", true);
+    } finally {
+      commentSubmit.disabled = false;
+    }
+  });
+
+  commentsSection.append(commentsSummary, commentsList, commentForm);
 
   const actions = document.createElement("div");
   actions.className = "post-actions";
@@ -415,7 +503,7 @@ const renderPost = (postDoc) => {
     actions.append(remove);
   }
 
-  item.append(authorRow, text, time, reactionsBar, actions);
+  item.append(authorRow, text, time, reactionsBar, commentsSection, actions);
   return item;
 };
 
@@ -488,6 +576,15 @@ onAuthStateChanged(auth, async (user) => {
       renderFeed();
     },
     () => setStatus("Could not load reactions.", true)
+  ));
+
+  listeners.push(onSnapshot(
+    collectionGroup(db, "comments"),
+    (snapshot) => {
+      comments = snapshot.docs;
+      renderFeed();
+    },
+    () => setStatus("Could not load comments.", true)
   ));
 
   listeners.push(onSnapshot(
