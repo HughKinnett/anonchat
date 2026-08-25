@@ -54,6 +54,7 @@ const appendLinkedText = (container, value) => {
 
 const attachMentionAutocomplete = (input) => {
   const host = input.parentElement;
+  if (!host) return;
   host.classList.add("mention-input-host");
   const suggestions = document.createElement("div");
   suggestions.className = "mention-suggestions";
