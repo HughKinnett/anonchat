@@ -314,6 +314,23 @@ button:disabled { cursor: wait; opacity: 0.6; }
 
 .profile-content p { margin: 4px 0 5px; color: var(--muted); }
 
+.my-profile-link {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  margin-top: 5px;
+  padding: 0 12px;
+  border: 1px solid rgba(167, 139, 250, 0.55);
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.16);
+  color: #ddd6fe;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.my-profile-link:hover { background: rgba(139, 92, 246, 0.28); }
+
 .content-grid {
   display: grid;
   grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
