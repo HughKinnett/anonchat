@@ -1,11 +1,13 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureDefaultOwnerFollows } from "./default-follows.js";
 import {
+  browserLocalPersistence,
   createUserWithEmailAndPassword,
   deleteUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
+  setPersistence,
   updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
@@ -23,6 +25,21 @@ const setStatus = (message, isError = false) => {
   status.style.color = isError ? "#ff8080" : "white";
 };
 
+const invalidCredentialCodes = ["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found", "auth/invalid-email"];
+
+const signInAcrossDevices = async (email, password) => {
+  await setPersistence(auth, browserLocalPersistence);
+  try {
+    return await signInWithEmailAndPassword(auth, email, password);
+  } catch (error) {
+    const normalizedEmail = email.toLowerCase();
+    if (invalidCredentialCodes.includes(error.code) && normalizedEmail !== email) {
+      return signInWithEmailAndPassword(auth, normalizedEmail, password);
+    }
+    throw error;
+  }
+};
+
 const signInMessage = (error) => {
   if (error.message === "account-banned") return "This account has been banned.";
   if (error.code === "auth/too-many-requests") {
@@ -32,7 +49,7 @@ const signInMessage = (error) => {
     return "Your computer could not reach the sign-in service. Check its connection, VPN, or browser privacy settings and try again.";
   }
   if (error.code === "auth/user-disabled") return "This account has been disabled.";
-  if (["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found", "auth/invalid-email"].includes(error.code)) {
+  if (invalidCredentialCodes.includes(error.code)) {
     return "That email and password were not recognized. Use Forgot password below to reset it.";
   }
   return "Sign-in failed. Try again or use Forgot password below.";
@@ -53,11 +70,11 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
   event.preventDefault();
   authInProgress = true;
   setStatus("Signing in…");
-  const email = document.getElementById("email").value.trim().toLowerCase();
+  const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
 
   try {
-    const credential = await signInWithEmailAndPassword(auth, email, password);
+    const credential = await signInAcrossDevices(email, password);
     const profile = await getDoc(doc(db, "users", credential.user.uid));
     if (profile.exists() && profile.data().banned === true) {
       await signOut(auth);
@@ -74,7 +91,7 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
   event.preventDefault();
   const username = document.getElementById("username").value.trim();
   const normalizedUsername = username.toLowerCase();
-  const email = document.getElementById("sign-up-email").value.trim();
+  const email = document.getElementById("sign-up-email").value.trim().toLowerCase();
   const password = document.getElementById("sign-up-password").value;
 
   if (!/^[A-Za-z0-9_]{3,30}$/.test(username)) {
