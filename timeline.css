@@ -497,6 +497,14 @@ button:disabled { cursor: wait; opacity: 0.6; }
   background: var(--surface-2);
 }
 
+.mention-link {
+  color: #c4b5fd;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.mention-link:hover { text-decoration: underline; }
+
 .comment-author {
   color: #ddd6fe;
   font-size: 0.82rem;
