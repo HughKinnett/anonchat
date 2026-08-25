@@ -6,18 +6,31 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function activeUser() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true;
+    }
+
     function currentUsername() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username;
     }
 
     function validOriginalPost() {
-      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'imageData', 'createdAt'])
         && request.resource.data.type == 'original'
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
         && request.resource.data.content is string
-        && request.resource.data.content.size() >= 1
         && request.resource.data.content.size() <= 500
+        && (request.resource.data.content.size() >= 1
+          || request.resource.data.get('imageData', '').size() > 0)
+        && request.resource.data.get('imageData', '').size() <= 800000
         && request.resource.data.createdAt == request.time;
     }
 
@@ -25,7 +38,7 @@ service cloud.firestore {
       let original = get(/databases/$(database)/documents/posts/$(request.resource.data.originalPostId));
       return request.resource.data.keys().hasOnly([
           'type', 'authorId', 'username', 'originalPostId',
-          'originalAuthorId', 'originalUsername', 'content', 'createdAt'
+          'originalAuthorId', 'originalUsername', 'content', 'imageData', 'createdAt'
         ])
         && request.resource.data.type == 'repost'
         && request.resource.data.authorId == request.auth.uid
@@ -35,7 +48,42 @@ service cloud.firestore {
         && request.resource.data.originalAuthorId == original.data.authorId
         && request.resource.data.originalUsername == original.data.username
         && request.resource.data.content == original.data.content
+        && request.resource.data.get('imageData', '') == original.data.get('imageData', '')
         && request.resource.data.createdAt == request.time;
+    }
+
+    match /admins/{adminId} {
+      allow read: if signedIn() && (request.auth.uid == adminId || isAdmin());
+      allow write: if false;
+    }
+
+    match /system/accountStats {
+      allow read: if signedIn();
+      allow create: if false;
+      allow update: if signedIn()
+        && request.resource.data.keys().hasOnly(['count', 'limit', 'updatedAt'])
+        && request.resource.data.limit == 500
+        && request.resource.data.count == resource.data.count + 1
+        && request.resource.data.count <= request.resource.data.limit
+        && request.resource.data.updatedAt == request.time
+        && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid));
+      allow delete: if false;
+    }
+
+    match /pageViews/{day} {
+      allow read: if isAdmin();
+      allow create: if activeUser()
+        && request.resource.data.keys().hasOnly(['date', 'views', 'updatedAt'])
+        && request.resource.data.date == day
+        && request.resource.data.views == 1
+        && request.resource.data.updatedAt == request.time;
+      allow update: if activeUser()
+        && request.resource.data.keys().hasOnly(['date', 'views', 'updatedAt'])
+        && request.resource.data.date == resource.data.date
+        && request.resource.data.views == resource.data.views + 1
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
     }
 
     match /usernames/{normalizedUsername} {
@@ -59,23 +107,22 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username is string
         && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
-        && request.resource.data.createdAt == request.time;
-      allow update: if signedIn()
-        && request.auth.uid == userId
-        && (!(resource.data.username is string)
-          || !resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
-          || resource.data.uid != userId)
-        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
-        && request.resource.data.uid == userId
-        && request.resource.data.username is string
-        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
-        && request.resource.data.createdAt == request.time;
-      allow delete: if false;
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/system/accountStats).data.count
+          == get(/databases/$(database)/documents/system/accountStats).data.count + 1;
+      allow update: if isAdmin()
+        || (activeUser()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['profileImage', 'coverImage'])
+          && request.resource.data.get('profileImage', '').size() <= 800000
+          && request.resource.data.get('coverImage', '').size() <= 800000);
+      allow delete: if isAdmin();
     }
 
     match /follows/{followId} {
       allow read: if signedIn();
-      allow create: if signedIn()
+      allow create: if activeUser()
         && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
         && request.resource.data.followerId == request.auth.uid
         && request.resource.data.followingId is string
@@ -100,7 +147,7 @@ service cloud.firestore {
 
     match /{documentPath=**}/comments/{commentId} {
       allow read: if signedIn();
-      allow create: if signedIn()
+      allow create: if activeUser()
         && request.resource.data.keys().hasOnly(['uid', 'username', 'text', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username == currentUsername()
@@ -109,24 +156,26 @@ service cloud.firestore {
         && request.resource.data.text.size() <= 280
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow delete: if (signedIn() && resource.data.uid == request.auth.uid) || isAdmin();
     }
 
     match /{documentPath=**}/reactions/{reactionId} {
       allow read: if signedIn();
-      allow create: if signedIn()
+      allow create: if activeUser()
+        && reactionId == request.auth.uid
         && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.type in ['heart', 'middle_finger']
+        && request.resource.data.type in ['heart', 'middle_finger', 'laugh']
         && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
 
     match /posts/{postId} {
       allow read: if signedIn();
-      allow create: if signedIn() && (validOriginalPost() || validRepost(postId));
+      allow create: if activeUser() && (validOriginalPost() || validRepost(postId));
       allow update: if false;
-      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      allow delete: if (signedIn() && resource.data.authorId == request.auth.uid) || isAdmin();
     }
   }
 }
