@@ -8,8 +8,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   doc,
-  serverTimestamp,
-  setDoc
+  runTransaction,
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const status = document.getElementById("auth-status");
@@ -43,6 +43,7 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
 document.getElementById("sign-up-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const username = document.getElementById("username").value.trim();
+  const normalizedUsername = username.toLowerCase();
   const email = document.getElementById("sign-up-email").value.trim();
   const password = document.getElementById("sign-up-password").value;
 
@@ -52,24 +53,38 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
   }
 
   authInProgress = true;
-  setStatus("Creating your account…");
+  setStatus("Creating your anonymous account…");
   let newUser;
   try {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     newUser = credential.user;
-    await updateProfile(newUser, { displayName: username });
-    await setDoc(doc(db, "users", newUser.uid), {
-      uid: newUser.uid,
-      username,
-      createdAt: serverTimestamp()
+
+    await runTransaction(db, async (transaction) => {
+      const usernameRef = doc(db, "usernames", normalizedUsername);
+      if ((await transaction.get(usernameRef)).exists()) {
+        throw new Error("username-taken");
+      }
+
+      transaction.set(usernameRef, {
+        uid: newUser.uid,
+        username,
+        createdAt: serverTimestamp()
+      });
+      transaction.set(doc(db, "users", newUser.uid), {
+        uid: newUser.uid,
+        username,
+        createdAt: serverTimestamp()
+      });
     });
+
+    await updateProfile(newUser, { displayName: username });
     window.location.replace("timeline.html");
   } catch (error) {
     if (newUser) await deleteUser(newUser).catch(() => {});
     authInProgress = false;
-    const message = error.code === "auth/email-already-in-use"
-      ? "That email address already has an account."
-      : "Could not create the account. Please check the details and try again.";
+    let message = "Could not create the account. Please check the details and try again.";
+    if (error.message === "username-taken") message = "That anonymous username is already taken.";
+    if (error.code === "auth/email-already-in-use") message = "That email address already has an account.";
     setStatus(message, true);
   }
 });
