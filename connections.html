@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="stylesheet" href="timeline.css">
+  <title>Connections — AnonChat</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="timeline.html">AnonChat</a>
+    <div class="topbar-actions">
+      <a id="back-to-profile" class="secondary-button connections-back" href="profile.html">Back to profile</a>
+      <button id="connections-sign-out" class="secondary-button" type="button">Sign Out</button>
+    </div>
+  </header>
+  <main class="page-shell connections-page">
+    <header class="connections-heading">
+      <p class="eyebrow">Connections</p>
+      <h1 id="connections-title">Loading…</h1>
+      <p id="connections-status" role="status" aria-live="polite"></p>
+    </header>
+    <div class="connections-grid">
+      <section id="followers" class="connections-panel" aria-labelledby="followers-title">
+        <h2 id="followers-title">Followers <span id="followers-count">0</span></h2>
+        <div id="followers-list" class="connections-list"></div>
+      </section>
+      <section id="following" class="connections-panel" aria-labelledby="following-title">
+        <h2 id="following-title">Following <span id="following-count">0</span></h2>
+        <div id="following-list" class="connections-list"></div>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="connections.js"></script>
+</body>
+</html>

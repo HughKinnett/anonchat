@@ -125,6 +125,9 @@ const setStatus = (message, isError = false) => {
 const followerCount = () =>
   follows.filter((follow) => follow.data().followingId === targetUserId).length;
 
+const followingCount = () =>
+  follows.filter((follow) => follow.data().followerId === targetUserId).length;
+
 const isFollowing = () =>
   follows.some((follow) =>
     follow.data().followerId === currentUser.uid && follow.data().followingId === targetUserId
@@ -132,8 +135,13 @@ const isFollowing = () =>
 
 const renderFollowControl = () => {
   const count = followerCount();
-  document.getElementById("profile-followers").textContent =
-    `${count} ${count === 1 ? "follower" : "followers"}`;
+  const following = followingCount();
+  const followersLink = document.getElementById("profile-followers");
+  const followingLink = document.getElementById("profile-following");
+  followersLink.textContent = `${count} ${count === 1 ? "follower" : "followers"}`;
+  followingLink.textContent = `${following} following`;
+  followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
+  followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
 
   if (currentUser.uid === targetUserId) {
     followButton.hidden = true;
