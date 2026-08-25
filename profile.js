@@ -340,7 +340,7 @@ onAuthStateChanged(auth, async (user) => {
     document.getElementById("view-profile-cover").src = targetProfile.coverImage;
   }
   document.getElementById("profile-admin-link").hidden =
-    !(await getDoc(doc(db, "admins", user.uid))).exists();
+    !["i_love_you_h", "ownercybercapone"].includes(currentProfileUsername.toLowerCase());
   const viewDay = new Date().toISOString().slice(0, 10);
   setDoc(doc(db, "pageViews", viewDay), {
     date: viewDay,
