@@ -105,7 +105,11 @@ service cloud.firestore {
         && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
         && request.resource.data.username.lower() == normalizedUsername
         && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if activeUser()
+        && resource.data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower()
+          != normalizedUsername;
     }
 
     match /users/{userId} {
@@ -125,10 +129,79 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (activeUser()
           && request.auth.uid == userId
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['profileImage', 'coverImage'])
-          && request.resource.data.get('profileImage', '').size() <= 360000
-          && request.resource.data.get('coverImage', '').size() <= 360000);
+          && ((request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['profileImage', 'coverImage'])
+            && request.resource.data.get('profileImage', '').size() <= 360000
+            && request.resource.data.get('coverImage', '').size() <= 360000)
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
+            && request.resource.data.username is string
+            && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}
+      allow delete: if isAdmin();
+    }
+
+    match /follows/{followId} {
+      allow read: if signedIn();
+      allow create: if activeUser()
+        && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followingId is string
+        && request.resource.data.followingId != request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.followingId))
+        && followId == request.auth.uid + '_' + request.resource.data.followingId
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
+    }
+
+    match /notificationReads/{readId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if signedIn()
+        && readId == request.auth.uid + '_' + request.resource.data.reactionId
+        && request.resource.data.keys().hasOnly(['uid', 'reactionId', 'readAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.reactionId is string
+        && request.resource.data.readAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /{documentPath=**}/comments/{commentId} {
+      allow read: if signedIn();
+      allow create: if activeUser()
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'text', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 280
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if (signedIn() && resource.data.uid == request.auth.uid) || isAdmin();
+    }
+
+    match /{documentPath=**}/reactions/{reactionId} {
+      allow read: if signedIn();
+      allow create: if activeUser()
+        && reactionId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['heart', 'middle_finger', 'laugh', 'sad']
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if activeUser() && (validOriginalPost() || validRepost(postId));
+      allow update: if false;
+      allow delete: if (signedIn() && resource.data.authorId == request.auth.uid) || isAdmin();
+    }
+  }
+}
+)
+            && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
+            && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid
+              == request.auth.uid)));
       allow delete: if isAdmin();
     }
 
