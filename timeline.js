@@ -153,6 +153,75 @@ const appendLinkedText = (container, value) => {
   });
 };
 
+const attachMentionAutocomplete = (input) => {
+  const host = input.parentElement;
+  host.classList.add("mention-input-host");
+  const suggestions = document.createElement("div");
+  suggestions.className = "mention-suggestions";
+  suggestions.hidden = true;
+  host.append(suggestions);
+
+  const close = () => {
+    suggestions.hidden = true;
+    suggestions.replaceChildren();
+  };
+
+  const choose = (username) => {
+    const cursor = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, cursor);
+    const match = before.match(/@([A-Za-z0-9_]*)$/);
+    if (!match) return;
+    const after = input.value.slice(cursor);
+    input.value = `${before.slice(0, -match[0].length)}@${username} ${after}`;
+    const nextCursor = before.length - match[0].length + username.length + 2;
+    input.setSelectionRange(nextCursor, nextCursor);
+    close();
+    input.focus();
+  };
+
+  const render = () => {
+    const cursor = input.selectionStart ?? input.value.length;
+    const match = input.value.slice(0, cursor).match(/@([A-Za-z0-9_]*)$/);
+    if (!match) {
+      close();
+      return;
+    }
+    const queryText = match[1].toLowerCase();
+    const matches = users
+      .filter((entry) => entry.data().username?.toLowerCase().startsWith(queryText))
+      .slice(0, 6);
+    if (!matches.length) {
+      close();
+      return;
+    }
+    suggestions.replaceChildren(...matches.map((entry) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "mention-suggestion";
+      option.textContent = `@${entry.data().username}`;
+      option.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        choose(entry.data().username);
+      });
+      return option;
+    }));
+    suggestions.hidden = false;
+  };
+
+  input.addEventListener("input", render);
+  input.addEventListener("click", render);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+    if (event.key === "Enter" && !suggestions.hidden && input.tagName !== "TEXTAREA") {
+      event.preventDefault();
+      suggestions.querySelector("button")?.dispatchEvent(new PointerEvent("pointerdown"));
+    }
+  });
+  input.addEventListener("blur", () => window.setTimeout(close, 120));
+};
+
+attachMentionAutocomplete(content);
+
 const renderNotifications = () => {
   if (!currentUser) return;
   const ownedPosts = new Map(
@@ -436,6 +505,7 @@ const renderPost = (postDoc) => {
   commentInput.required = true;
   commentInput.placeholder = "Comment or tag @username…";
   commentInput.setAttribute("aria-label", "Write a comment");
+  attachMentionAutocomplete(commentInput);
   const commentSubmit = document.createElement("button");
   commentSubmit.type = "submit";
   commentSubmit.textContent = "Comment";
