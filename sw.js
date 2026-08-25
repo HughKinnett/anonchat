@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v4";
+const CACHE_NAME = "anonchat-v5";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ const APP_SHELL = [
   "./login.css",
   "./timeline.css",
   "./firebase-config.js",
+  "./legacy-profile.js",
   "./loginfirebase.js",
   "./timeline.js",
   "./profile.js",
