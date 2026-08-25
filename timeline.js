@@ -168,7 +168,9 @@ const renderPost = (postDoc) => {
   const displayedUsername = post.type === "repost" ? post.originalUsername : post.username;
   const authorRow = document.createElement("div");
   authorRow.className = "post-author-row";
-  const author = document.createElement("h3");
+  const author = document.createElement("a");
+  author.className = "author-link";
+  author.href = `profile.html?uid=${encodeURIComponent(displayedAuthorId)}`;
   author.textContent = `@${displayedUsername}`;
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
