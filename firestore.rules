@@ -127,8 +127,8 @@ service cloud.firestore {
           && request.auth.uid == userId
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['profileImage', 'coverImage'])
-          && request.resource.data.get('profileImage', '').size() <= 800000
-          && request.resource.data.get('coverImage', '').size() <= 800000);
+          && request.resource.data.get('profileImage', '').size() <= 360000
+          && request.resource.data.get('coverImage', '').size() <= 360000);
       allow delete: if isAdmin();
     }
 
