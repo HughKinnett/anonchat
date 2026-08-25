@@ -129,13 +129,19 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (activeUser()
           && request.auth.uid == userId
-          && ((request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['profileImage', 'coverImage'])
-            && request.resource.data.get('profileImage', '').size() <= 360000
-            && request.resource.data.get('coverImage', '').size() <= 360000)
-          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
-            && request.resource.data.username is string
-            && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}
+          && (
+            (request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['profileImage', 'coverImage'])
+              && request.resource.data.get('profileImage', '').size() <= 360000
+              && request.resource.data.get('coverImage', '').size() <= 360000)
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
+              && request.resource.data.username is string
+              && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+              && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
+              && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid
+                == request.auth.uid)
+          ));
       allow delete: if isAdmin();
     }
 
