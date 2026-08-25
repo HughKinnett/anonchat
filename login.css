@@ -191,3 +191,17 @@ input:focus {
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; }
 }
+
+
+.password-reset-card {
+  width: min(520px, 100%);
+  margin: 0 auto;
+}
+
+.password-reset-card > p { min-height: 0; }
+
+.password-reset-card .forgot-password {
+  display: inline-block;
+  margin-top: 18px;
+  text-decoration: none;
+}

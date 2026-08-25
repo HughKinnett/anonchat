@@ -33,6 +33,7 @@
           <ul id="notification-list" class="notification-list"></ul>
         </section>
       </div>
+      <button id="enable-alerts" class="secondary-button alerts-button" type="button">Enable alerts</button>
       <button class="install-app secondary-button" type="button">Install app</button>
       <button id="sign-out" class="secondary-button" type="button">Sign Out</button>
     </div>
@@ -51,7 +52,10 @@
         </button>
         <div>
           <h1 id="display-name">User Name</h1>
-          <p id="user-handle">@username</p>
+          <div class="username-edit-row">
+            <p id="user-handle">@username</p>
+            <button id="edit-username" class="edit-username" type="button">Edit</button>
+          </div>
           <div class="profile-links">
             <a id="my-profile-link" class="my-profile-link" href="profile.html">View profile</a>
             <a id="admin-link" class="my-profile-link admin-link" href="admin.html" hidden>Admin dashboard</a>

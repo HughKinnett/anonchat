@@ -786,3 +786,25 @@ button:disabled { cursor: wait; opacity: 0.6; }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; }
 }
+
+
+.username-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.username-edit-row #user-handle { margin: 0; }
+
+.edit-username {
+  padding: 3px 9px;
+  border: 1px solid rgba(196, 181, 253, 0.48);
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.12);
+  color: #ddd6fe;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.edit-username:hover { background: rgba(139, 92, 246, 0.28); }

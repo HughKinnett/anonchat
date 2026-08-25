@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -13,6 +13,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   where
@@ -46,6 +47,79 @@ let pendingPostImage = "";
 const postImageInput = document.getElementById("post-image-upload");
 const postImagePreviewWrap = document.getElementById("post-image-preview-wrap");
 const postImagePreview = document.getElementById("post-image-preview");
+const alertsButton = document.getElementById("enable-alerts");
+const editUsernameButton = document.getElementById("edit-username");
+let browserAlertIds = null;
+
+const updateAlertsButton = () => {
+  if (!alertsButton) return;
+  if (!("Notification" in window)) {
+    alertsButton.textContent = "Alerts unavailable";
+    alertsButton.disabled = true;
+    return;
+  }
+  alertsButton.textContent = Notification.permission === "granted" ? "Alerts on" : "Enable alerts";
+};
+
+alertsButton?.addEventListener("click", async () => {
+  if (!("Notification" in window)) return;
+  const permission = await Notification.requestPermission();
+  updateAlertsButton();
+  if (permission === "granted" && currentUser) {
+    browserAlertIds = new Set(currentNotificationIds);
+    localStorage.setItem(
+      `anonchat-browser-alerts-${currentUser.uid}`,
+      JSON.stringify([...browserAlertIds])
+    );
+    setStatus("Phone alerts are on while AnonChat is open or running in the background.");
+  } else if (permission !== "granted") {
+    setStatus("Allow notifications in your browser settings to receive alerts.", true);
+  }
+});
+updateAlertsButton();
+
+editUsernameButton?.addEventListener("click", async () => {
+  if (!currentUser || !profileUsername) return;
+  const nextUsername = window.prompt("Choose a new anonymous username:", profileUsername)?.trim();
+  if (!nextUsername || nextUsername === profileUsername) return;
+  if (!/^[A-Za-z0-9_]{3,30}$/.test(nextUsername)) {
+    setStatus("Username must be 3–30 letters, numbers, or underscores.", true);
+    return;
+  }
+  const oldNormalized = profileUsername.toLowerCase();
+  const nextNormalized = nextUsername.toLowerCase();
+  editUsernameButton.disabled = true;
+  try {
+    await runTransaction(db, async (transaction) => {
+      const userRef = doc(db, "users", currentUser.uid);
+      const nextRef = doc(db, "usernames", nextNormalized);
+      const nextSnapshot = await transaction.get(nextRef);
+      if (nextNormalized !== oldNormalized && nextSnapshot.exists()) throw new Error("username-taken");
+      if (nextNormalized !== oldNormalized) {
+        transaction.set(nextRef, {
+          uid: currentUser.uid,
+          username: nextUsername,
+          createdAt: serverTimestamp()
+        });
+      }
+      transaction.update(userRef, { username: nextUsername });
+      if (nextNormalized !== oldNormalized) {
+        transaction.delete(doc(db, "usernames", oldNormalized));
+      }
+    });
+    await updateProfile(currentUser, { displayName: nextUsername });
+    profileUsername = nextUsername;
+    document.getElementById("display-name").textContent = nextUsername;
+    document.getElementById("user-handle").textContent = `@${nextUsername}`;
+    setStatus("Username updated.");
+  } catch (error) {
+    setStatus(error.message === "username-taken"
+      ? "That username is already taken."
+      : "Could not change the username. Please try again.", true);
+  } finally {
+    editUsernameButton.disabled = false;
+  }
+});
 
 const compressPostImage = (file) => new Promise((resolve, reject) => {
   if (!file?.type.startsWith("image/") || file.size > 10 * 1024 * 1024) {
@@ -310,7 +384,9 @@ const renderNotifications = () => {
         ? `reacted ❤️ to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
         : data.type === "laugh"
           ? `reacted 😂 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-          : `reacted 🖕 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+          : data.type === "sad"
+            ? `reacted 😢 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+            : `reacted 🖕 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
     });
   });
 
@@ -362,6 +438,36 @@ const renderNotifications = () => {
     );
 
   currentNotificationIds = items.map((item) => item.id);
+  if ("Notification" in window && Notification.permission === "granted") {
+    if (browserAlertIds === null) {
+      browserAlertIds = new Set(currentNotificationIds);
+    } else {
+      items.filter((item) => !browserAlertIds.has(item.id)).forEach((notification) => {
+        const actor = usernames.get(notification.actorId) || "Anonymous user";
+        const alert = new Notification("AnonChat", {
+          body: `@${actor} ${notification.message}`,
+          icon: "Untitled.jpeg",
+          tag: `anonchat-${notification.id}`
+        });
+        alert.onclick = () => {
+          window.focus();
+          setFeedView(false);
+          requestAnimationFrame(() => {
+            document.getElementById(`post-${notification.postId}`)?.scrollIntoView({
+              behavior: "smooth",
+              block: "center"
+            });
+          });
+          alert.close();
+        };
+      });
+    }
+    currentNotificationIds.forEach((id) => browserAlertIds.add(id));
+    localStorage.setItem(
+      `anonchat-browser-alerts-${currentUser.uid}`,
+      JSON.stringify([...browserAlertIds])
+    );
+  }
   const unseenCount = currentNotificationIds.filter((id) => !seenNotificationIds.has(id)).length;
   notificationBadge.textContent = unseenCount > 99 ? "99+" : String(unseenCount);
   notificationBadge.hidden = unseenCount === 0;
@@ -595,7 +701,8 @@ const renderPost = (postDoc) => {
   reactionsBar.append(
     reactionButton(sourceId, "heart", "❤️", reactionDocs),
     reactionButton(sourceId, "middle_finger", "🖕", reactionDocs),
-    reactionButton(sourceId, "laugh", "😂", reactionDocs)
+    reactionButton(sourceId, "laugh", "😂", reactionDocs),
+    reactionButton(sourceId, "sad", "😢", reactionDocs)
   );
 
   const commentDocs = postComments(sourceId);
@@ -738,6 +845,9 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  const storedAlertIds = localStorage.getItem(`anonchat-browser-alerts-${user.uid}`);
+  browserAlertIds = storedAlertIds ? new Set(JSON.parse(storedAlertIds)) : null;
+  updateAlertsButton();
   try {
     seenNotificationIds = new Set(JSON.parse(
       localStorage.getItem(`anonchat-seen-notifications-${user.uid}`) || "[]"
