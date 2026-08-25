@@ -8,6 +8,8 @@ A responsive pseudonymous social timeline using Firebase Authentication and Clou
 - original posts with live ❤️ and 🖕 reaction counts
 - follow/unfollow controls with live follower totals beside each author
 - secure reposts to a user's profile without changing the original author's words
+- clickable author handles with dedicated user profiles
+- profiles show all original posts and reposts, follower totals, and follow controls
 - Timeline and My profile views
 - responsive desktop and mobile layouts
 - installable Progressive Web App with an offline app shell
