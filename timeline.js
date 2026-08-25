@@ -27,8 +27,74 @@ let profileUsername;
 let postDocs = [];
 let reactions = [];
 let follows = [];
+let users = [];
 let showingProfile = false;
 const listeners = [];
+const notificationButton = document.getElementById("notification-button");
+const notificationPanel = document.getElementById("notification-panel");
+const notificationList = document.getElementById("notification-list");
+const notificationBadge = document.getElementById("notification-badge");
+
+const validProfile = (profile, userId) =>
+  profile?.uid === userId &&
+  typeof profile.username === "string" &&
+  /^[A-Za-z0-9_]{3,30}$/.test(profile.username);
+
+const formatNotificationTime = (timestamp) =>
+  timestamp?.toDate ? timestamp.toDate().toLocaleString() : "Just now";
+
+const renderNotifications = () => {
+  if (!currentUser) return;
+  const ownedPosts = new Map(
+    postDocs
+      .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
+      .map((post) => [post.id, post.data()])
+  );
+  const usernames = new Map(users.map((profile) => [profile.id, profile.data().username]));
+  const items = reactions
+    .filter((reaction) => ownedPosts.has(reaction.ref.parent.parent?.id))
+    .filter((reaction) => reaction.data().uid !== currentUser.uid)
+    .sort((a, b) =>
+      (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0)
+    );
+
+  notificationBadge.textContent = items.length > 99 ? "99+" : String(items.length);
+  notificationBadge.hidden = items.length === 0;
+  notificationList.replaceChildren(...items.map((reaction) => {
+    const data = reaction.data();
+    const post = ownedPosts.get(reaction.ref.parent.parent.id);
+    const item = document.createElement("li");
+    item.className = "notification-item";
+    const message = document.createElement("p");
+    const actor = usernames.get(data.uid) || "Anonymous user";
+    const reactionLabel = data.type === "heart" ? "❤️ hearted" : "🖕 reacted to";
+    message.textContent = `@${actor} ${reactionLabel} your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`;
+    const time = document.createElement("time");
+    time.textContent = formatNotificationTime(data.createdAt);
+    item.append(message, time);
+    return item;
+  }));
+
+  if (!items.length) {
+    const empty = document.createElement("li");
+    empty.className = "notification-empty";
+    empty.textContent = "No reactions to your posts yet.";
+    notificationList.append(empty);
+  }
+};
+
+notificationButton.addEventListener("click", () => {
+  const opening = notificationPanel.hidden;
+  notificationPanel.hidden = !opening;
+  notificationButton.setAttribute("aria-expanded", String(opening));
+});
+
+document.addEventListener("click", (event) => {
+  if (!notificationPanel.hidden && !event.target.closest(".notification-center")) {
+    notificationPanel.hidden = true;
+    notificationButton.setAttribute("aria-expanded", "false");
+  }
+});
 
 const setStatus = (message, isError = false) => {
   status.textContent = message;
@@ -229,6 +295,7 @@ const renderFeed = () => {
     : postDocs;
 
   feed.replaceChildren(...visiblePosts.map(renderPost));
+  renderNotifications();
   setStatus(visiblePosts.length
     ? ""
     : showingProfile
@@ -256,7 +323,7 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
-  if (!profile.exists()) {
+  if (!profile.exists() || !validProfile(profile.data(), user.uid)) {
     profileUsername = await ensureUserProfile(user, db);
     profile = await getDoc(profileRef);
   } else {
@@ -281,6 +348,15 @@ onAuthStateChanged(auth, async (user) => {
       renderFeed();
     },
     () => setStatus("Could not load reactions.", true)
+  ));
+
+  listeners.push(onSnapshot(
+    collection(db, "users"),
+    (snapshot) => {
+      users = snapshot.docs;
+      renderNotifications();
+    },
+    () => setStatus("Could not load notification names.", true)
   ));
 
   listeners.push(onSnapshot(

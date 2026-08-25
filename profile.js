@@ -22,6 +22,11 @@ let follows = [];
 let targetProfile;
 let targetPosts = [];
 
+const validProfile = (profile, userId) =>
+  profile?.uid === userId &&
+  typeof profile.username === "string" &&
+  /^[A-Za-z0-9_]{3,30}$/.test(profile.username);
+
 const setStatus = (message, isError = false) => {
   status.textContent = message;
   status.style.color = isError ? "#fca5a5" : "inherit";
@@ -127,7 +132,10 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   const targetProfileRef = doc(db, "users", targetUserId);
   let profileSnapshot = await getDoc(targetProfileRef);
-  if (!profileSnapshot.exists() && targetUserId === user.uid) {
+  if (
+    targetUserId === user.uid &&
+    (!profileSnapshot.exists() || !validProfile(profileSnapshot.data(), user.uid))
+  ) {
     await ensureUserProfile(user, db);
     profileSnapshot = await getDoc(targetProfileRef);
   }

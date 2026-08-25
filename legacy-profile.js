@@ -5,36 +5,38 @@ import {
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
+const validUsername = (value) =>
+  typeof value === "string" && /^[A-Za-z0-9_]{3,30}$/.test(value);
+
 export const ensureUserProfile = async (user, db) => {
-  const preferred = /^[A-Za-z0-9_]{3,30}$/.test(user.displayName || "")
-    ? user.displayName
-    : `anon_${user.uid.slice(0, 8)}`;
-  const preferredKey = preferred.toLowerCase();
-  const fallback = `u_${user.uid}`;
-  const fallbackKey = fallback.toLowerCase();
-  let username = preferred;
+  let username;
 
   await runTransaction(db, async (transaction) => {
     const profileRef = doc(db, "users", user.uid);
-    const preferredRef = doc(db, "usernames", preferredKey);
-    const fallbackRef = doc(db, "usernames", fallbackKey);
+    const profileSnapshot = await transaction.get(profileRef);
+    const legacyUsername = profileSnapshot.exists() ? profileSnapshot.data().username : "";
+    const preferred = validUsername(legacyUsername)
+      ? legacyUsername
+      : validUsername(user.displayName)
+        ? user.displayName
+        : `anon_${user.uid.slice(0, 8)}`;
+    const fallback = `u_${user.uid}`;
+    const preferredRef = doc(db, "usernames", preferred.toLowerCase());
+    const fallbackRef = doc(db, "usernames", fallback.toLowerCase());
     const preferredSnapshot = await transaction.get(preferredRef);
-    const fallbackSnapshot = preferredKey === fallbackKey
+    const fallbackSnapshot = preferred.toLowerCase() === fallback.toLowerCase()
       ? preferredSnapshot
       : await transaction.get(fallbackRef);
 
     const preferredAvailable =
       !preferredSnapshot.exists() || preferredSnapshot.data().uid === user.uid;
+    username = preferredAvailable ? preferred : fallback;
+    const usernameRef = preferredAvailable ? preferredRef : fallbackRef;
+    const usernameSnapshot = preferredAvailable ? preferredSnapshot : fallbackSnapshot;
 
-    if (!preferredAvailable) {
-      if (fallbackSnapshot.exists() && fallbackSnapshot.data().uid !== user.uid) {
-        throw new Error("Could not reserve a unique legacy username.");
-      }
-      username = fallback;
+    if (usernameSnapshot.exists() && usernameSnapshot.data().uid !== user.uid) {
+      throw new Error("Could not reserve a unique legacy username.");
     }
-
-    const usernameRef = username === preferred ? preferredRef : fallbackRef;
-    const usernameSnapshot = username === preferred ? preferredSnapshot : fallbackSnapshot;
 
     if (!usernameSnapshot.exists()) {
       transaction.set(usernameRef, {

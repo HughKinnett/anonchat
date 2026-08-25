@@ -51,7 +51,77 @@ button:disabled { cursor: wait; opacity: 0.6; }
   text-decoration: none;
 }
 
-.topbar-actions { display: flex; gap: 8px; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+
+.notification-center { position: relative; }
+
+.notification-button {
+  position: relative;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 1.15rem;
+}
+
+.notification-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.2);
+}
+
+.notification-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 2px solid var(--bg);
+  border-radius: 999px;
+  background: #ef4444;
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 16px;
+}
+
+.notification-panel {
+  position: absolute;
+  z-index: 30;
+  top: 52px;
+  right: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 90px));
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.45);
+}
+
+.notification-panel h2 { margin: 0 0 10px; font-size: 1rem; }
+
+.notification-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+
+.notification-item, .notification-empty {
+  padding: 11px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.notification-item p { margin: 0; line-height: 1.35; }
+
+.notification-item time, .notification-empty {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.notification-item time { display: block; margin-top: 5px; }
 
 .primary-button, .secondary-button, .reaction-button, .share-button, .delete-button, .feed-tab, .follow-button {
   min-height: 42px;
@@ -349,6 +419,8 @@ button:disabled { cursor: wait; opacity: 0.6; }
     padding-right: 12px;
     padding-left: 12px;
   }
+
+  .notification-button { width: 40px; height: 40px; }
 
   .topbar-actions .secondary-button {
     min-height: 40px;
