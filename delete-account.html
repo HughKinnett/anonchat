@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0b0d12"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="timeline.css"><link rel="stylesheet" href="delete-account.css"><title>AnonChat — Delete account</title></head>
+<body>
+<header class="topbar"><a class="brand" href="timeline.html">AnonChat</a><div class="topbar-actions"><a class="secondary-button nav-button" href="timeline.html">← Keep my account</a></div></header>
+<main class="delete-shell">
+  <section class="delete-card">
+    <p class="danger-kicker">Permanent action</p>
+    <h1>Delete your AnonChat account</h1>
+    <p class="lead">This permanently removes your Firebase login and the AnonChat information that your account controls. It cannot be undone.</p>
+    <div class="delete-summary">
+      <h2>What will be removed</h2>
+      <ul><li>Your profile and reserved username</li><li>Your timeline and Community posts</li><li>Your comments, reactions, follows, poll votes, circle memberships, room messages, private messages, requests, reveal permissions, and privacy settings</li><li>Your Firebase email-and-password login</li></ul>
+      <p>Copies outside AnonChat, downloaded exports, and content quoted by other people cannot be recalled.</p>
+    </div>
+    <form id="delete-account-form">
+      <label>Email<input id="delete-email" type="email" autocomplete="username" required></label>
+      <label>Password<input id="delete-password" type="password" autocomplete="current-password" required></label>
+      <label class="confirm-row"><input id="delete-confirm" type="checkbox" required><span>I understand this is permanent and cannot be undone.</span></label>
+      <label>Type <strong>DELETE</strong> to confirm<input id="delete-word" autocomplete="off" required pattern="DELETE"></label>
+      <button id="delete-account-button" class="danger-button" type="submit">Permanently delete my account</button>
+    </form>
+    <p id="delete-status" role="status" aria-live="polite"></p>
+  </section>
+</main>
+<script type="module" src="delete-account.js"></script><script src="pwa.js" defer></script>
+</body></html>

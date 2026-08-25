@@ -25,6 +25,10 @@ const setStatus = (message, isError = false) => {
   status.style.color = isError ? "#ff8080" : "white";
 };
 
+if (new URLSearchParams(window.location.search).get("accountDeleted") === "1") {
+  setStatus("Your account and AnonChat login were permanently deleted.");
+}
+
 const invalidCredentialCodes = ["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found", "auth/invalid-email"];
 
 const signInAcrossDevices = async (email, password) => {
