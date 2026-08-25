@@ -33,11 +33,12 @@
         <p>Sign in to see the timeline.</p>
         <form id="sign-in-form">
           <label for="email">Email</label>
-          <input id="email" type="email" placeholder="you@example.com" autocomplete="email" required>
+          <input id="email" type="email" placeholder="you@example.com" autocomplete="email" autocapitalize="none" spellcheck="false" required>
           <label for="password">Password</label>
-          <input id="password" type="password" placeholder="Your password" autocomplete="current-password" required>
+          <div class="password-input-wrap"><input id="password" type="password" placeholder="Your password" autocomplete="current-password" required><button id="toggle-sign-in-password" class="password-toggle" type="button" aria-pressed="false">Show password</button></div>
           <button class="primary-button" id="submit" type="submit">Sign In</button>
           <a class="forgot-password" href="forgot-password.html">Forgot password?</a>
+          <small class="device-signin-note">The same email and password work on every device. Passwords are case-sensitive.</small>
         </form>
       </section>
 
