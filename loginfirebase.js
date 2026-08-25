@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { ensureDefaultOwnerFollows } from "./default-follows.js";
 import {
   createUserWithEmailAndPassword,
   deleteUser,
@@ -116,6 +117,7 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
     });
 
     await updateProfile(newUser, { displayName: username });
+    await ensureDefaultOwnerFollows(newUser.uid, db);
     window.location.replace("timeline.html");
   } catch (error) {
     if (newUser) await deleteUser(newUser).catch(() => {});
