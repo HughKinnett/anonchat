@@ -49,15 +49,18 @@ button:disabled { cursor: wait; opacity: 0.6; }
   font-weight: 800;
   letter-spacing: -0.04em;
   text-decoration: none;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 
 .topbar-search {
   position: relative;
-  flex: 1 1 360px;
-  max-width: 520px;
-  margin: 0 18px;
+  flex: 0 1 320px;
+  min-width: 180px;
+  max-width: 360px;
+  margin: 0 10px;
 }
 
 #site-search {
@@ -97,7 +100,7 @@ button:disabled { cursor: wait; opacity: 0.6; }
   top: 51px;
   right: 0;
   left: 0;
-  max-height: min(520px, calc(100vh - 90px));
+  max-height: min(560px, calc(100vh - 48px));
   overflow: auto;
   padding: 10px;
   border: 1px solid var(--border);
@@ -175,11 +178,12 @@ button:disabled { cursor: wait; opacity: 0.6; }
 }
 
 .notification-panel {
-  position: absolute;
+  position: fixed;
   z-index: 30;
-  top: 52px;
-  right: 0;
-  width: min(380px, calc(100vw - 24px));
+  top: 50%;
+  left: 50%;
+  width: min(460px, calc(100vw - 24px));
+  transform: translate(-50%, -50%);
   max-height: min(520px, calc(100vh - 90px));
   overflow: auto;
   padding: 14px;
