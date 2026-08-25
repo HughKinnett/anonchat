@@ -918,3 +918,10 @@ button:disabled { cursor: wait; opacity: 0.6; }
 #spotify-player-wrap iframe,#profile-spotify-player iframe{display:block;width:100%;height:152px;border:0;border-radius:14px}
 .profile-spotify-card{margin-bottom:22px}
 @media(max-width:640px){.spotify-profile-card{padding:14px}.spotify-card-heading{align-items:flex-start}.spotify-input-row{flex-wrap:wrap}.spotify-input-row input{flex-basis:100%}#spotify-player-wrap iframe,#profile-spotify-player iframe{height:152px}}
+
+
+.message-envelope{position:relative;display:grid;width:44px;height:44px;border:1px solid rgba(139,92,246,.38);border-radius:14px;background:linear-gradient(145deg,rgba(139,92,246,.24),rgba(37,99,235,.14));color:#ede9fe;text-decoration:none;box-shadow:0 10px 24px rgba(76,29,149,.2);place-items:center;transition:transform .18s ease,background .18s ease}
+.message-envelope:hover{transform:translateY(-1px);background:linear-gradient(145deg,rgba(139,92,246,.34),rgba(37,99,235,.22))}
+.envelope-icon{font-size:1.25rem;line-height:1}
+.message-badge{position:absolute;top:-6px;right:-7px;min-width:20px;height:20px;padding:0 5px;border:2px solid var(--bg);border-radius:999px;background:#f43f5e;color:#fff;font-size:.68rem;font-weight:900;line-height:16px;text-align:center}
+@media(max-width:640px){.message-envelope{width:40px;height:40px;border-radius:12px}.envelope-icon{font-size:1.1rem}}
