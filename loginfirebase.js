@@ -37,7 +37,7 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
   event.preventDefault();
   authInProgress = true;
   setStatus("Signing in…");
-  const email = document.getElementById("email").value.trim();
+  const email = document.getElementById("email").value.trim().toLowerCase();
   const password = document.getElementById("password").value;
 
   try {
