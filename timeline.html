@@ -1,27 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="stylesheet" href="timeline.css">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Timeline</title>
+  <link rel="stylesheet" href="timeline.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AnonChat — Timeline</title>
 </head>
 <body>
-    <div class="profile-banner">
-        <input type="file" id="banner-upload" accept="image/*" style="display: none;">
-        <img id="banner-pic" src="default-banner.jpg" alt="Banner Picture" onclick="document.getElementById('banner-upload').click();">
-        <input type="file" id="profile-upload" accept="image/*" style="display: none;">
-        <img id="profile-pic" src="profile-pic.jpg" alt="Profile Picture" onclick="document.getElementById('profile-upload').click();">
-        <h1>User Name</h1>
-        <p>@username</p>
-    </div>
+  <header class="profile-banner">
+    <h1 id="display-name">Loading…</h1>
+    <p id="user-handle"></p>
+    <button id="sign-out" type="button">Sign Out</button>
+  </header>
+  <main>
     <form id="post-form">
-        <textarea name="post-content" id="post-content" placeholder="What's happening?" required></textarea>
-        <button type="submit">Post</button>
+      <label for="post-content">Create a post</label>
+      <textarea name="post-content" id="post-content" maxlength="500" placeholder="What's happening?" required></textarea>
+      <button type="submit">Post</button>
     </form>
-    <ul class="feed" id="feed">
-    </ul>
-
-    <script src="upload.js"></script>
+    <p id="timeline-status" role="status" aria-live="polite"></p>
+    <ul class="feed" id="feed"></ul>
+  </main>
+  <script type="module" src="timeline.js"></script>
 </body>
 </html>
