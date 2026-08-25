@@ -342,9 +342,8 @@ service cloud.firestore {
         && request.resource.data.fromId == request.auth.uid
         && request.resource.data.toId != request.auth.uid
         && request.resource.data.status == 'pending'
-        && requestId == (request.resource.data.fromId < request.resource.data.toId
-          ? request.resource.data.fromId + '_' + request.resource.data.toId
-          : request.resource.data.toId + '_' + request.resource.data.fromId)
+        && (requestId == request.resource.data.fromId + '_' + request.resource.data.toId
+          || requestId == request.resource.data.toId + '_' + request.resource.data.fromId)
         && request.resource.data.createdAt == request.time;
       allow update: if activeUser()
         && resource.data.toId == request.auth.uid
