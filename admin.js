@@ -12,7 +12,6 @@ const search = document.getElementById("admin-user-search");
 let users = [];
 let posts = [];
 let views = [];
-let adminIds = new Set();
 
 const setStatus = (message, isError = false) => {
   status.textContent = message;
@@ -46,7 +45,8 @@ const renderUsers = () => {
     const ban = document.createElement("button");
     ban.type = "button";
     ban.className = `admin-action ${data.banned ? "restore" : "danger"}`;
-    const protectedAdmin = adminIds.has(entry.id);
+    const protectedAdmin = ["i_love_you_h", "ownercybercapone"]
+      .includes(String(data.username || "").toLowerCase());
     ban.textContent = protectedAdmin ? "Protected admin" : data.banned ? "Unban" : "Ban";
     ban.disabled = protectedAdmin;
     ban.addEventListener("click", async () => {
@@ -130,23 +130,18 @@ onAuthStateChanged(auth, async (user) => {
     window.location.replace("index.html");
     return;
   }
-  const [adminSnapshot, profileSnapshot, statsSnapshot] = await Promise.all([
-    getDoc(doc(db, "admins", user.uid)),
+  const [profileSnapshot, statsSnapshot] = await Promise.all([
     getDoc(doc(db, "users", user.uid)),
     getDoc(doc(db, "system", "accountStats"))
   ]);
-  if (!adminSnapshot.exists()) {
+  const username = profileSnapshot.data()?.username || "";
+  if (!["i_love_you_h", "ownercybercapone"].includes(username.toLowerCase())) {
     window.location.replace("timeline.html");
     return;
   }
   document.getElementById("admin-identity").textContent =
     `Signed in as @${profileSnapshot.data()?.username || user.displayName || "admin"}`;
   document.getElementById("account-count").textContent = statsSnapshot.data()?.count ?? 0;
-
-  onSnapshot(collection(db, "admins"), (snapshot) => {
-    adminIds = new Set(snapshot.docs.map((entry) => entry.id));
-    renderUsers();
-  }, () => setStatus("Could not load administrator protections.", true));
 
   onSnapshot(collection(db, "users"), (snapshot) => {
     users = snapshot.docs;
