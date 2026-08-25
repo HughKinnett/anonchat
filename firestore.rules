@@ -87,6 +87,17 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
     }
 
+    match /notificationReads/{readId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if signedIn()
+        && readId == request.auth.uid + '_' + request.resource.data.reactionId
+        && request.resource.data.keys().hasOnly(['uid', 'reactionId', 'readAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.reactionId is string
+        && request.resource.data.readAt == request.time;
+      allow update, delete: if false;
+    }
+
     match /{documentPath=**}/reactions/{reactionId} {
       allow read: if signedIn();
       allow create: if signedIn()

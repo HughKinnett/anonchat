@@ -15,6 +15,11 @@
 <body>
   <header class="topbar">
     <a class="brand" href="timeline.html">AnonChat</a>
+    <div class="topbar-search">
+      <label class="sr-only" for="site-search">Search users or posts</label>
+      <input id="site-search" type="search" placeholder="Search users or keywords" autocomplete="off" aria-controls="search-results" aria-expanded="false">
+      <div id="search-results" class="search-results" hidden></div>
+    </div>
     <div class="topbar-actions">
       <div class="notification-center">
         <button id="notification-button" class="notification-button" type="button" aria-label="Open notifications" aria-expanded="false" aria-controls="notification-panel">
