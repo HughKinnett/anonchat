@@ -468,6 +468,8 @@ onAuthStateChanged(auth, async (user) => {
   }
   document.getElementById("display-name").textContent = profileUsername || "AnonChat user";
   document.getElementById("user-handle").textContent = profileUsername ? `@${profileUsername}` : "";
+  document.getElementById("my-profile-link").href =
+    `profile.html?uid=${encodeURIComponent(user.uid)}`;
 
   listeners.push(onSnapshot(
     query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(100)),
