@@ -16,6 +16,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -50,6 +51,74 @@ const postImagePreview = document.getElementById("post-image-preview");
 const alertsButton = document.getElementById("enable-alerts");
 const editUsernameButton = document.getElementById("edit-username");
 let browserAlertIds = null;
+const spotifyCard = document.querySelector(".spotify-profile-card");
+const spotifyPlayerWrap = document.getElementById("spotify-player-wrap");
+const spotifyForm = document.getElementById("spotify-song-form");
+const spotifyInput = document.getElementById("spotify-song-url");
+const spotifyToggle = document.getElementById("spotify-edit-toggle");
+const spotifyRemove = document.getElementById("spotify-song-remove");
+const spotifyStatus = document.getElementById("spotify-song-status");
+
+const spotifyTrackId = (value) => {
+  try {
+    const url = new URL(String(value || "").trim());
+    if (!/(^|\.)spotify\.com$/i.test(url.hostname)) return "";
+    const match = url.pathname.match(/\/track\/([A-Za-z0-9]{22})(?:\/|$)/);
+    return match?.[1] || "";
+  } catch {
+    return "";
+  }
+};
+
+const renderSpotifySong = (url = "") => {
+  const id = spotifyTrackId(url);
+  spotifyPlayerWrap.replaceChildren();
+  spotifyPlayerWrap.hidden = !id;
+  spotifyCard?.classList.toggle("has-song", Boolean(id));
+  spotifyToggle.textContent = id ? "Change song" : "Add song";
+  spotifyInput.value = id ? `https://open.spotify.com/track/${id}` : "";
+  if (!id) return;
+  const frame = document.createElement("iframe");
+  frame.src = `https://open.spotify.com/embed/track/${id}?utm_source=generator&theme=0`;
+  frame.title = "Spotify profile song";
+  frame.loading = "lazy";
+  frame.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";
+  spotifyPlayerWrap.append(frame);
+};
+
+spotifyToggle?.addEventListener("click", () => {
+  spotifyForm.hidden = !spotifyForm.hidden;
+  if (!spotifyForm.hidden) spotifyInput.focus();
+});
+
+spotifyForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = spotifyTrackId(spotifyInput.value);
+  if (!id) {
+    spotifyStatus.textContent = "Paste a valid Spotify song link.";
+    return;
+  }
+  const url = `https://open.spotify.com/track/${id}`;
+  try {
+    await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: url });
+    renderSpotifySong(url);
+    spotifyForm.hidden = true;
+    spotifyStatus.textContent = "Your profile song was saved.";
+  } catch {
+    spotifyStatus.textContent = "Could not save that song. Please try again.";
+  }
+});
+
+spotifyRemove?.addEventListener("click", async () => {
+  try {
+    await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: "" });
+    renderSpotifySong("");
+    spotifyForm.hidden = true;
+    spotifyStatus.textContent = "Profile song removed.";
+  } catch {
+    spotifyStatus.textContent = "Could not remove that song.";
+  }
+});
 
 const updateAlertsButton = () => {
   if (!alertsButton) return;
@@ -880,6 +949,7 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     profileUsername = profile.data().username;
   }
+  renderSpotifySong(profile.data().spotifyTrackUrl || "");
   document.getElementById("display-name").textContent = profileUsername || "AnonChat user";
   document.getElementById("user-handle").textContent = profileUsername ? `@${profileUsername}` : "";
   document.getElementById("my-profile-link").href =

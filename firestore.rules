@@ -157,6 +157,13 @@ service cloud.firestore {
               && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
               && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid
                 == request.auth.uid)
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['spotifyTrackUrl'])
+              && request.resource.data.get('spotifyTrackUrl', '') is string
+              && request.resource.data.get('spotifyTrackUrl', '').size() <= 200
+              && (request.resource.data.get('spotifyTrackUrl', '') == ''
+                || request.resource.data.get('spotifyTrackUrl', '')
+                  .matches('https://open[.]spotify[.]com/track/[A-Za-z0-9]{22}')))
           ));
       allow delete: if isAdmin()
         || (activeUser()

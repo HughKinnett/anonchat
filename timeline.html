@@ -65,12 +65,21 @@
           </div>
           <div class="profile-links">
             <a id="my-profile-link" class="my-profile-link" href="profile.html">View profile</a>
-            <a class="my-profile-link" href="community.html">Community hub</a>
-            <a class="my-profile-link delete-account-link" href="delete-account.html">Delete account</a>
             <a id="admin-link" class="my-profile-link admin-link" href="admin.html" hidden>Admin dashboard</a>
           </div>
         </div>
       </div>
+    </section>
+
+    <section class="spotify-profile-card" aria-labelledby="spotify-profile-title">
+      <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="spotify-profile-title">Add a Spotify song</h2></div><button id="spotify-edit-toggle" class="secondary-button" type="button">Add song</button></div>
+      <div id="spotify-player-wrap" hidden></div>
+      <form id="spotify-song-form" class="spotify-song-form" hidden>
+        <label for="spotify-song-url">Spotify song link</label>
+        <div class="spotify-input-row"><input id="spotify-song-url" type="url" inputmode="url" maxlength="200" placeholder="https://open.spotify.com/track/..." autocomplete="off"><button class="primary-button" type="submit">Save</button><button id="spotify-song-remove" class="secondary-button" type="button">Remove</button></div>
+        <small>Open a song in Spotify, tap Share, then copy its link.</small>
+      </form>
+      <p id="spotify-song-status" class="spotify-song-status" role="status" aria-live="polite"></p>
     </section>
 
     <div class="content-grid">
