@@ -155,6 +155,7 @@ const appendLinkedText = (container, value) => {
 
 const attachMentionAutocomplete = (input) => {
   const host = input.parentElement;
+  if (!host) return;
   host.classList.add("mention-input-host");
   const suggestions = document.createElement("div");
   suggestions.className = "mention-suggestions";
@@ -566,11 +567,11 @@ const renderPost = (postDoc) => {
   commentInput.required = true;
   commentInput.placeholder = "Comment or tag @username…";
   commentInput.setAttribute("aria-label", "Write a comment");
-  attachMentionAutocomplete(commentInput);
   const commentSubmit = document.createElement("button");
   commentSubmit.type = "submit";
   commentSubmit.textContent = "Comment";
   commentForm.append(commentInput, commentSubmit);
+  attachMentionAutocomplete(commentInput);
   commentForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = commentInput.value.trim();
