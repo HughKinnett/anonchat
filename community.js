@@ -6,7 +6,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = (id) => document.getElementById(id);
-const state = { user:null, profile:null, users:[], posts:[], votes:[], circles:[], members:[], rooms:[], roomMessages:[], requests:[], messages:[], reveals:[], preferences:null, activeRoom:"" };
+const state = { user:null, profile:null, privateDetails:{}, users:[], posts:[], votes:[], circles:[], members:[], rooms:[], roomMessages:[], requests:[], messages:[], reveals:[], preferences:null, activeRoom:"" };
 const listeners = [];
 const status = $("status");
 const setStatus = (text, error=false) => { status.textContent=text; status.classList.toggle("danger",error); };
@@ -153,20 +153,20 @@ $("send-reveal").onclick=async()=>{const to=$("conversation-user").value;if(!to)
 const renderReveals=()=>{const other=$("conversation-user").value, incoming=state.reveals.find(r=>r.data().fromId===other&&r.data().toId===state.user.uid),out=state.reveals.find(r=>r.data().fromId===state.user.uid&&r.data().toId===other);
   const box=$("reveal-status");box.replaceChildren();
   if(incoming?.data().status==="pending"){const p=document.createElement("p");p.textContent="@"+userName(other)+" requested a controlled reveal.";const b=document.createElement("button");b.className="primary";b.textContent="Accept selected reveal";b.onclick=()=>updateDoc(incoming.ref,{status:"accepted",respondedAt:serverTimestamp()});box.append(p,b);}
-  if(incoming?.data().status==="accepted"&&out?.data().status==="accepted"){const theirs=state.users.find(u=>u.id===other)?.data(),p=document.createElement("p");const fields=incoming.data().fields,parts=[];if(fields.interests&&theirs?.privateInterests)parts.push("Interests: "+theirs.privateInterests);if(fields.region&&theirs?.privateRegion)parts.push("Region: "+theirs.privateRegion);if(fields.ageRange&&theirs?.privateAgeRange)parts.push("Age range: "+theirs.privateAgeRange);p.textContent=parts.join(" · ")||"They accepted but have not filled in those details.";box.append(p);}
+  if(incoming?.data().status==="accepted"&&out?.data().status==="accepted"){const p=document.createElement("p");p.textContent="Mutual reveal accepted. Loading the selected details…";box.append(p);getDoc(doc(db,"userPrivate",other)).then(s=>{const theirs=s.data()||{},fields=incoming.data().fields,parts=[];if(fields.interests&&theirs.interests)parts.push("Interests: "+theirs.interests);if(fields.region&&theirs.region)parts.push("Region: "+theirs.region);if(fields.ageRange&&theirs.ageRange)parts.push("Age range: "+theirs.ageRange);p.textContent=parts.join(" · ")||"They accepted but have not filled in those details.";}).catch(()=>{p.textContent="The selected details are not available.";});}
 };
 
 $("privacy-form").addEventListener("submit",async e=>{e.preventDefault();const muted=$("muted-keywords").value.split(",").map(x=>x.trim()).filter(Boolean).slice(0,20);
   try{await setDoc(doc(db,"userPreferences",state.user.uid),{uid:state.user.uid,mutedKeywords:muted,contextCheck:$("context-check").checked,updatedAt:serverTimestamp()},{merge:true});
-    await updateDoc(doc(db,"users",state.user.uid),{privateInterests:$("privacy-interests").value.trim(),privateRegion:$("privacy-region").value.trim(),privateAgeRange:$("privacy-age").value});
+    await setDoc(doc(db,"userPrivate",state.user.uid),{uid:state.user.uid,interests:$("privacy-interests").value.trim(),region:$("privacy-region").value.trim(),ageRange:$("privacy-age").value,updatedAt:serverTimestamp()},{merge:true}); state.privateDetails={interests:$("privacy-interests").value.trim(),region:$("privacy-region").value.trim(),ageRange:$("privacy-age").value};
     setStatus("Privacy choices saved.");}catch{setStatus("Could not save privacy choices.",true);}};
 const loadPrivacy=()=>{const p=state.preferences||{};$("muted-keywords").value=(p.mutedKeywords||[]).join(", ");$("context-check").checked=p.contextCheck!==false;
-  $("privacy-interests").value=state.profile?.privateInterests||"";$("privacy-region").value=state.profile?.privateRegion||"";$("privacy-age").value=state.profile?.privateAgeRange||"";};
+  $("privacy-interests").value=state.privateDetails.interests||"";$("privacy-region").value=state.privateDetails.region||"";$("privacy-age").value=state.privateDetails.ageRange||"";};
 $("download-data").onclick=()=>{const data={profile:{username:state.profile.username},preferences:state.preferences,communityPosts:state.posts.filter(p=>p.data().authorId===state.user.uid).map(p=>p.data()),circles:state.members.filter(m=>m.data().uid===state.user.uid).map(m=>m.data()),messages:state.messages.filter(m=>m.data().participants.includes(state.user.uid)).map(m=>m.data())};
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));a.download="anonchat-my-data.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);};
 
 const listen=(ref,key,render)=>listeners.push(onSnapshot(ref,s=>{state[key]=s.docs;render?.();},()=>setStatus("A community section could not load.",true)));
-onAuthStateChanged(auth,async user=>{if(!user){location.replace("index.html");return;}state.user=user;const snap=await getDoc(doc(db,"users",user.uid));if(!snap.exists()||snap.data().banned){await signOut(auth);location.replace("index.html");return;}state.profile=snap.data();loadPrivacy();renderIdentity();
+onAuthStateChanged(auth,async user=>{if(!user){location.replace("index.html");return;}state.user=user;const snap=await getDoc(doc(db,"users",user.uid));if(!snap.exists()||snap.data().banned){await signOut(auth);location.replace("index.html");return;}state.profile=snap.data();const privateSnap=await getDoc(doc(db,"userPrivate",user.uid));state.privateDetails=privateSnap.exists()?privateSnap.data():{};loadPrivacy();renderIdentity();
   listen(collection(db,"users"),"users",()=>{renderMessageUsers();renderRequests();});
   listen(query(collection(db,"communityPosts"),orderBy("createdAt","desc")),"posts",renderPosts);
   listen(collection(db,"communityVotes"),"votes",renderPosts);
