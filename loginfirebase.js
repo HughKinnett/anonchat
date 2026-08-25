@@ -86,7 +86,7 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
       if (usernameSnapshot.exists()) {
         throw new Error("username-taken");
       }
-      if (!statsSnapshot.exists() || statsSnapshot.data().count >= 500) {
+      if (statsSnapshot.exists() && statsSnapshot.data().count >= 500) {
         throw new Error("site-full");
       }
 
@@ -100,11 +100,19 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
         username,
         createdAt: serverTimestamp()
       });
-      transaction.update(statsRef, {
-        count: statsSnapshot.data().count + 1,
-        limit: 500,
-        updatedAt: serverTimestamp()
-      });
+      if (statsSnapshot.exists()) {
+        transaction.update(statsRef, {
+          count: statsSnapshot.data().count + 1,
+          limit: 500,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        transaction.set(statsRef, {
+          count: 6,
+          limit: 500,
+          updatedAt: serverTimestamp()
+        });
+      }
     });
 
     await updateProfile(newUser, { displayName: username });
