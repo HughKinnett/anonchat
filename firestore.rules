@@ -235,14 +235,15 @@ service cloud.firestore {
     }
 
     match /userPreferences/{userId} {
-      allow read, create, update, delete: if activeUser() && request.auth.uid == userId
-        && (request.method == 'delete' || (
-          request.resource.data.keys().hasOnly(['uid', 'mutedKeywords', 'contextCheck', 'updatedAt'])
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.mutedKeywords is list
-          && request.resource.data.mutedKeywords.size() <= 20
-          && request.resource.data.contextCheck is bool
-          && request.resource.data.updatedAt == request.time));
+      allow read: if activeUser() && request.auth.uid == userId;
+      allow create, update: if activeUser() && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['uid', 'mutedKeywords', 'contextCheck', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.mutedKeywords is list
+        && request.resource.data.mutedKeywords.size() <= 20
+        && request.resource.data.contextCheck is bool
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && request.auth.uid == userId;
     }
 
     match /circles/{circleId} {
