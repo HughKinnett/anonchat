@@ -1,66 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b0d12">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="AnonChat">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="timeline.css">
-  <link rel="stylesheet" href="admin.css">
-  <title>AnonChat — Admin</title>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12"><meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="timeline.css"><link rel="stylesheet" href="admin.css">
+  <title>AnonChat — Admin Intelligence</title>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="timeline.html">AnonChat Admin</a>
-    <div class="topbar-actions">
-      <a class="secondary-button nav-button" href="timeline.html">← Timeline</a>
-      <button id="admin-sign-out" class="secondary-button" type="button">Sign Out</button>
-    </div>
-  </header>
-  <main class="page-shell admin-shell">
-    <section class="admin-hero">
-      <div>
-        <p class="admin-kicker">Restricted access</p>
-        <h1>Community controls</h1>
-        <p id="admin-identity">Checking administrator access…</p>
-      </div>
-      <div class="admin-limit">
-        <strong id="account-count">—</strong>
-        <span>of 500 profiles</span>
-      </div>
-    </section>
+<header class="topbar"><a class="brand" href="timeline.html">AnonChat Admin</a><div class="topbar-actions"><a class="secondary-button nav-button" href="community.html">Community</a><a class="secondary-button nav-button" href="timeline.html">Timeline</a><button id="refresh-admin" class="secondary-button" type="button">Refresh</button><button id="admin-sign-out" class="secondary-button" type="button">Sign Out</button></div></header>
+<main class="page-shell admin-shell">
+  <section class="admin-hero">
+    <div><p class="admin-kicker">Restricted intelligence center</p><h1>Community health dashboard</h1><p id="admin-identity">Checking administrator access…</p><p id="last-updated">Waiting for live data…</p></div>
+    <div class="admin-limit"><strong id="account-count">—</strong><span>of 500 profiles</span><div class="capacity-track"><i id="capacity-bar"></i></div><small id="capacity-label">0% capacity</small></div>
+  </section>
+  <p id="admin-status" role="status" aria-live="polite"></p>
 
-    <p id="admin-status" role="status" aria-live="polite"></p>
+  <section class="admin-section-heading"><div><p class="admin-kicker">At a glance</p><h2>Platform overview</h2></div><label>Time window<select id="metric-window"><option value="1">Today</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option><option value="0">All time</option></select></label></section>
+  <section class="admin-metrics" aria-label="Site totals">
+    <article><strong id="metric-users">0</strong><span>Profiles</span><small id="metric-new-users">0 new</small></article>
+    <article><strong id="metric-active-users">0</strong><span>Active profiles</span><small id="metric-engaged-users">0 engaged</small></article>
+    <article><strong id="metric-banned">0</strong><span>Banned</span><small id="metric-ban-rate">0% of profiles</small></article>
+    <article><strong id="metric-views">0</strong><span>Page views</span><small id="metric-window-views">0 in window</small></article>
+    <article><strong id="metric-posts">0</strong><span>Timeline posts</span><small id="metric-new-posts">0 in window</small></article>
+    <article><strong id="metric-community-posts">0</strong><span>Community posts</span><small id="metric-expiring">0 expiring</small></article>
+    <article><strong id="metric-comments">0</strong><span>Comments</span><small id="metric-comments-per-post">0 per post</small></article>
+    <article><strong id="metric-reactions">0</strong><span>Reactions</span><small id="metric-reactions-per-post">0 per post</small></article>
+    <article><strong id="metric-follows">0</strong><span>Follow connections</span><small id="metric-follow-rate">0 per profile</small></article>
+    <article><strong id="metric-circles">0</strong><span>Circles</span><small id="metric-memberships">0 memberships</small></article>
+    <article><strong id="metric-rooms">0</strong><span>Temporary rooms</span><small id="metric-room-messages">0 room messages</small></article>
+    <article><strong id="metric-poll-votes">0</strong><span>Poll votes</span><small id="metric-engagement-rate">0% participation</small></article>
+  </section>
 
-    <section class="admin-metrics" aria-label="Site totals">
-      <article><strong id="metric-users">0</strong><span>Profiles</span></article>
-      <article><strong id="metric-posts">0</strong><span>Posts</span></article>
-      <article><strong id="metric-banned">0</strong><span>Banned</span></article>
-      <article><strong id="metric-views">0</strong><span>Page views</span></article>
-    </section>
+  <section class="admin-insights-grid">
+    <article class="admin-panel insight-card"><div class="admin-panel-heading"><h2>Growth & traffic</h2><span class="live-dot">Live</span></div><div id="growth-chart" class="mini-chart" aria-label="Daily profile growth and views"></div></article>
+    <article class="admin-panel insight-card"><div class="admin-panel-heading"><h2>Content mix</h2></div><div id="category-breakdown" class="breakdown"></div></article>
+    <article class="admin-panel insight-card"><div class="admin-panel-heading"><h2>Reaction mix</h2></div><div id="reaction-breakdown" class="breakdown"></div></article>
+    <article class="admin-panel insight-card"><div class="admin-panel-heading"><h2>Data health</h2></div><div id="data-health" class="health-list"></div></article>
+  </section>
 
-    <section class="admin-panel">
-      <div class="admin-panel-heading">
-        <h2>User profiles</h2>
-        <input id="admin-user-search" type="search" placeholder="Search username or UID">
-      </div>
-      <p class="admin-note">Free-plan bans block site access. Deleting the underlying Firebase Authentication login requires a trusted paid backend.</p>
-      <div id="admin-users" class="admin-list"></div>
-    </section>
+  <section class="admin-insights-grid three">
+    <article class="admin-panel"><div class="admin-panel-heading"><h2>Most active members</h2></div><div id="top-users" class="rank-list"></div></article>
+    <article class="admin-panel"><div class="admin-panel-heading"><h2>Most engaged posts</h2></div><div id="top-posts" class="rank-list"></div></article>
+    <article class="admin-panel"><div class="admin-panel-heading"><h2>Community pulse</h2></div><div id="community-pulse" class="health-list"></div></article>
+  </section>
 
-    <section class="admin-panel">
-      <div class="admin-panel-heading"><h2>Posts</h2></div>
-      <div id="admin-posts" class="admin-list"></div>
-    </section>
+  <section class="admin-panel">
+    <div class="admin-panel-heading"><div><h2>User profiles</h2><p class="admin-note">Firebase Authentication passwords and emails are intentionally unavailable to this page.</p></div><input id="admin-user-search" type="search" placeholder="Search username or UID"></div>
+    <div class="admin-filters"><button data-user-filter="all" aria-pressed="true">All</button><button data-user-filter="active" aria-pressed="false">Active</button><button data-user-filter="banned" aria-pressed="false">Banned</button><button data-user-filter="legacy" aria-pressed="false">Legacy/incomplete</button></div>
+    <div id="admin-users" class="admin-list"></div>
+  </section>
 
-    <section class="admin-panel">
-      <div class="admin-panel-heading"><h2>Daily page views</h2></div>
-      <div id="admin-views" class="admin-list"></div>
-    </section>
-  </main>
-  <script type="module" src="admin.js"></script>
-  <script src="pwa.js" defer></script>
-</body>
-</html>
+  <section class="admin-panel">
+    <div class="admin-panel-heading"><div><h2>Content management</h2><p class="admin-note">Review timeline and Community posts from one place.</p></div><div class="admin-content-tools"><input id="admin-content-search" type="search" placeholder="Search text or username"><select id="admin-content-type"><option value="all">All content</option><option value="timeline">Timeline</option><option value="community">Community</option></select></div></div>
+    <div id="admin-posts" class="admin-list"></div>
+  </section>
+
+  <section class="admin-panel">
+    <div class="admin-panel-heading"><h2>Daily page views</h2><button id="download-admin-data" class="admin-action" type="button">Download dashboard data</button></div>
+    <div id="admin-views" class="admin-list"></div>
+  </section>
+
+  <section class="admin-panel admin-privacy-note"><h2>Privacy boundary</h2><p>Admins can see public community activity and account health. Private-message contents, private profile details, passwords, and authentication credentials are deliberately excluded. This protects the anonymous promise while still providing operational visibility.</p></section>
+</main>
+<script type="module" src="admin.js"></script><script src="pwa.js" defer></script>
+</body></html>
