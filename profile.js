@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { ensureUserProfile } from "./legacy-profile.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection,
@@ -126,12 +127,8 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   const targetProfileRef = doc(db, "users", targetUserId);
   let profileSnapshot = await getDoc(targetProfileRef);
-  if (!profileSnapshot.exists() && targetUserId === user.uid && /^[A-Za-z0-9_]{3,30}$/.test(user.displayName || "")) {
-    await setDoc(targetProfileRef, {
-      uid: user.uid,
-      username: user.displayName,
-      createdAt: serverTimestamp()
-    });
+  if (!profileSnapshot.exists() && targetUserId === user.uid) {
+    await ensureUserProfile(user, db);
     profileSnapshot = await getDoc(targetProfileRef);
   }
   if (!profileSnapshot.exists()) {
