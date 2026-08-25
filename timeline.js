@@ -153,6 +153,82 @@ const appendLinkedText = (container, value) => {
   });
 };
 
+const attachMentionAutocomplete = (input) => {
+  const host = input.parentElement;
+  host.classList.add("mention-input-host");
+  const suggestions = document.createElement("div");
+  suggestions.className = "mention-suggestions";
+  suggestions.hidden = true;
+  host.append(suggestions);
+
+  const close = () => {
+    suggestions.hidden = true;
+    suggestions.replaceChildren();
+  };
+
+  const choose = (username) => {
+    const cursor = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, cursor);
+    const match = before.match(/@([A-Za-z0-9_]*)$/);
+    if (!match) return;
+    const after = input.value.slice(cursor);
+    input.value = `${before.slice(0, -match[0].length)}@${username} ${after}`;
+    const nextCursor = before.length - match[0].length + username.length + 2;
+    input.setSelectionRange(nextCursor, nextCursor);
+    close();
+    input.focus();
+  };
+
+  const render = () => {
+    const cursor = input.selectionStart ?? input.value.length;
+    const match = input.value.slice(0, cursor).match(/@([A-Za-z0-9_]*)$/);
+    if (!match) {
+      close();
+      return;
+    }
+    const queryText = match[1].toLowerCase();
+    const matches = users
+      .filter((entry) => entry.data().username?.toLowerCase().startsWith(queryText))
+      .slice(0, 6);
+    if (!matches.length) {
+      close();
+      return;
+    }
+    suggestions.replaceChildren(...matches.map((entry) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "mention-suggestion";
+      option.textContent = `@${entry.data().username}`;
+      option.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        choose(entry.data().username);
+      });
+      return option;
+    }));
+    suggestions.hidden = false;
+  };
+
+  input.addEventListener("input", render);
+  input.addEventListener("click", render);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+    if (event.key === "Enter" && !suggestions.hidden && input.tagName !== "TEXTAREA") {
+      event.preventDefault();
+      suggestions.querySelector("button")?.dispatchEvent(new PointerEvent("pointerdown"));
+    }
+  });
+  input.addEventListener("blur", () => window.setTimeout(close, 120));
+};
+
+attachMentionAutocomplete(content);
+
+const mentionsCurrentUser = (value) => {
+  if (!profileUsername) return false;
+  const target = profileUsername.toLowerCase();
+  return (String(value || "").match(/@[A-Za-z0-9_]{3,30}/g) || [])
+    .some((handle) => handle.slice(1).toLowerCase() === target);
+};
+
 const renderNotifications = () => {
   if (!currentUser) return;
   const ownedPosts = new Map(
@@ -160,49 +236,103 @@ const renderNotifications = () => {
       .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
       .map((post) => [post.id, post.data()])
   );
+  const allPosts = new Map(postDocs.map((post) => [post.id, post.data()]));
   const usernames = new Map(users.map((profile) => [profile.id, profile.data().username]));
   const readIds = new Set(notificationReads.map((read) => read.data().reactionId));
-  const items = reactions
-    .filter((reaction) => ownedPosts.has(reaction.ref.parent.parent?.id))
-    .filter((reaction) => reaction.data().uid !== currentUser.uid)
-    .filter((reaction) => !readIds.has(reaction.id))
+  const notificationItems = [];
+
+  reactions.forEach((reaction) => {
+    const postId = reaction.ref.parent.parent?.id;
+    const data = reaction.data();
+    const post = ownedPosts.get(postId);
+    if (!post || data.uid === currentUser.uid) return;
+    notificationItems.push({
+      id: reaction.id,
+      postId,
+      actorId: data.uid,
+      createdAt: data.createdAt,
+      message: data.type === "heart"
+        ? `hearted your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+        : `gave Fuck You to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+    });
+  });
+
+  comments.forEach((comment) => {
+    const postId = comment.ref.parent.parent?.id;
+    const data = comment.data();
+    const post = allPosts.get(postId);
+    if (!post || data.uid === currentUser.uid) return;
+    if (ownedPosts.has(postId)) {
+      notificationItems.push({
+        id: `comment_${comment.id}`,
+        postId,
+        actorId: data.uid,
+        createdAt: data.createdAt,
+        message: `commented on your post “${post.content.slice(0, 55)}${post.content.length > 55 ? "…" : ""}”: “${data.text.slice(0, 70)}${data.text.length > 70 ? "…" : ""}”`
+      });
+    }
+    if (mentionsCurrentUser(data.text)) {
+      notificationItems.push({
+        id: `comment_mention_${comment.id}`,
+        postId,
+        actorId: data.uid,
+        createdAt: data.createdAt,
+        message: `tagged you in a comment: “${data.text.slice(0, 90)}${data.text.length > 90 ? "…" : ""}”`
+      });
+    }
+  });
+
+  postDocs.forEach((postDoc) => {
+    const post = postDoc.data();
+    if (
+      post.type === "repost" ||
+      post.authorId === currentUser.uid ||
+      !mentionsCurrentUser(post.content)
+    ) return;
+    notificationItems.push({
+      id: `post_mention_${postDoc.id}`,
+      postId: postDoc.id,
+      actorId: post.authorId,
+      createdAt: post.createdAt,
+      message: `tagged you in a post: “${post.content.slice(0, 100)}${post.content.length > 100 ? "…" : ""}”`
+    });
+  });
+
+  const items = notificationItems
+    .filter((item) => !readIds.has(item.id))
     .sort((a, b) =>
-      (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0)
+      (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
     );
 
-  currentNotificationIds = items.map((reaction) => reaction.id);
+  currentNotificationIds = items.map((item) => item.id);
   const unseenCount = currentNotificationIds.filter((id) => !seenNotificationIds.has(id)).length;
   notificationBadge.textContent = unseenCount > 99 ? "99+" : String(unseenCount);
   notificationBadge.hidden = unseenCount === 0;
-  notificationList.replaceChildren(...items.map((reaction) => {
-    const data = reaction.data();
-    const post = ownedPosts.get(reaction.ref.parent.parent.id);
+  notificationList.replaceChildren(...items.map((notification) => {
     const item = document.createElement("li");
     const open = document.createElement("button");
     open.className = "notification-item";
     open.type = "button";
     const message = document.createElement("span");
     message.className = "notification-message";
-    const actor = usernames.get(data.uid) || "Anonymous user";
-    const reactionLabel = data.type === "heart" ? "❤️ hearted" : "🖕 Fuck You reacted to";
-    message.textContent = `@${actor} ${reactionLabel} your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`;
+    const actor = usernames.get(notification.actorId) || "Anonymous user";
+    message.textContent = `@${actor} ${notification.message}`;
     const time = document.createElement("time");
-    time.textContent = formatNotificationTime(data.createdAt);
+    time.textContent = formatNotificationTime(notification.createdAt);
     open.append(message, time);
     open.addEventListener("click", async () => {
       open.disabled = true;
-      const postId = reaction.ref.parent.parent.id;
       try {
-        await setDoc(doc(db, "notificationReads", `${currentUser.uid}_${reaction.id}`), {
+        await setDoc(doc(db, "notificationReads", `${currentUser.uid}_${notification.id}`), {
           uid: currentUser.uid,
-          reactionId: reaction.id,
+          reactionId: notification.id,
           readAt: serverTimestamp()
         });
         notificationPanel.hidden = true;
         notificationButton.setAttribute("aria-expanded", "false");
         setFeedView(false);
         requestAnimationFrame(() => {
-          const target = document.getElementById(`post-${postId}`);
+          const target = document.getElementById(`post-${notification.postId}`);
           target?.scrollIntoView({ behavior: "smooth", block: "center" });
           target?.classList.add("notification-highlight");
           window.setTimeout(() => target?.classList.remove("notification-highlight"), 1800);
@@ -219,7 +349,7 @@ const renderNotifications = () => {
   if (!items.length) {
     const empty = document.createElement("li");
     empty.className = "notification-empty";
-    empty.textContent = "No reactions to your posts yet.";
+    empty.textContent = "No new reactions, comments, or tags.";
     notificationList.append(empty);
   }
 };
@@ -436,6 +566,7 @@ const renderPost = (postDoc) => {
   commentInput.required = true;
   commentInput.placeholder = "Comment or tag @username…";
   commentInput.setAttribute("aria-label", "Write a comment");
+  attachMentionAutocomplete(commentInput);
   const commentSubmit = document.createElement("button");
   commentSubmit.type = "submit";
   commentSubmit.textContent = "Comment";

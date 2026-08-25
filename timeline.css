@@ -469,6 +469,40 @@ button:disabled { cursor: wait; opacity: 0.6; }
   background: rgba(139, 92, 246, 0.2);
 }
 
+.mention-input-host { position: relative; }
+
+.mention-suggestions {
+  position: absolute;
+  z-index: 28;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: grid;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.48);
+}
+
+.mention-suggestion {
+  min-height: 40px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #ddd6fe;
+  font-weight: 800;
+  text-align: left;
+}
+
+.mention-suggestion:hover,
+.mention-suggestion:focus-visible {
+  background: rgba(139, 92, 246, 0.2);
+}
+
 .comments-section {
   margin-top: 14px;
   border-top: 1px solid var(--border);
