@@ -13,6 +13,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   where
@@ -76,6 +77,49 @@ alertsButton?.addEventListener("click", async () => {
   }
 });
 updateAlertsButton();
+
+editUsernameButton?.addEventListener("click", async () => {
+  if (!currentUser || !profileUsername) return;
+  const nextUsername = window.prompt("Choose a new anonymous username:", profileUsername)?.trim();
+  if (!nextUsername || nextUsername === profileUsername) return;
+  if (!/^[A-Za-z0-9_]{3,30}$/.test(nextUsername)) {
+    setStatus("Username must be 3–30 letters, numbers, or underscores.", true);
+    return;
+  }
+  const oldNormalized = profileUsername.toLowerCase();
+  const nextNormalized = nextUsername.toLowerCase();
+  editUsernameButton.disabled = true;
+  try {
+    await runTransaction(db, async (transaction) => {
+      const userRef = doc(db, "users", currentUser.uid);
+      const nextRef = doc(db, "usernames", nextNormalized);
+      const nextSnapshot = await transaction.get(nextRef);
+      if (nextNormalized !== oldNormalized && nextSnapshot.exists()) throw new Error("username-taken");
+      if (nextNormalized !== oldNormalized) {
+        transaction.set(nextRef, {
+          uid: currentUser.uid,
+          username: nextUsername,
+          createdAt: serverTimestamp()
+        });
+      }
+      transaction.update(userRef, { username: nextUsername });
+      if (nextNormalized !== oldNormalized) {
+        transaction.delete(doc(db, "usernames", oldNormalized));
+      }
+    });
+    await updateProfile(currentUser, { displayName: nextUsername });
+    profileUsername = nextUsername;
+    document.getElementById("display-name").textContent = nextUsername;
+    document.getElementById("user-handle").textContent = `@${nextUsername}`;
+    setStatus("Username updated.");
+  } catch (error) {
+    setStatus(error.message === "username-taken"
+      ? "That username is already taken."
+      : "Could not change the username. Please try again.", true);
+  } finally {
+    editUsernameButton.disabled = false;
+  }
+});
 
 const compressPostImage = (file) => new Promise((resolve, reject) => {
   if (!file?.type.startsWith("image/") || file.size > 10 * 1024 * 1024) {
