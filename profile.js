@@ -25,11 +25,32 @@ let comments = [];
 let follows = [];
 let targetProfile;
 let targetPosts = [];
+let users = [];
 
 const validProfile = (profile, userId) =>
   profile?.uid === userId &&
   typeof profile.username === "string" &&
   /^[A-Za-z0-9_]{3,30}$/.test(profile.username);
+
+const appendLinkedText = (container, value) => {
+  String(value || "").split(/(@[A-Za-z0-9_]{3,30})/g).forEach((part) => {
+    if (!part.startsWith("@")) {
+      container.append(document.createTextNode(part));
+      return;
+    }
+    const handle = part.slice(1).toLowerCase();
+    const profile = users.find((entry) => entry.data().username?.toLowerCase() === handle);
+    if (!profile) {
+      container.append(document.createTextNode(part));
+      return;
+    }
+    const link = document.createElement("a");
+    link.className = "mention-link";
+    link.href = `profile.html?uid=${encodeURIComponent(profile.id)}`;
+    link.textContent = part;
+    container.append(link);
+  });
+};
 
 const setStatus = (message, isError = false) => {
   status.textContent = message;
@@ -92,7 +113,7 @@ const renderPosts = () => {
     }
 
     const text = document.createElement("p");
-    text.textContent = post.content;
+    appendLinkedText(text, post.content);
     const time = document.createElement("small");
     time.textContent = post.createdAt?.toDate
       ? post.createdAt.toDate().toLocaleString()
@@ -114,7 +135,7 @@ const renderPosts = () => {
       author.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
       author.textContent = `@${comment.username || "anonymous"}`;
       const body = document.createElement("p");
-      body.textContent = comment.text;
+      appendLinkedText(body, comment.text);
       const commentTime = document.createElement("time");
       commentTime.textContent = comment.createdAt?.toDate
         ? comment.createdAt.toDate().toLocaleString()
@@ -129,7 +150,7 @@ const renderPosts = () => {
     input.type = "text";
     input.maxLength = 280;
     input.required = true;
-    input.placeholder = "Write a comment…";
+    input.placeholder = "Comment or tag @username…";
     input.setAttribute("aria-label", "Write a comment");
     const submit = document.createElement("button");
     submit.type = "submit";
@@ -228,6 +249,11 @@ onAuthStateChanged(auth, async (user) => {
   document.title = `@${targetProfile.username} — AnonChat`;
   document.getElementById("profile-name").textContent = targetProfile.username;
   document.getElementById("profile-handle").textContent = `@${targetProfile.username}`;
+
+  onSnapshot(collection(db, "users"), (snapshot) => {
+    users = snapshot.docs;
+    renderPosts();
+  }, () => setStatus("Could not load user tags.", true));
 
   onSnapshot(collectionGroup(db, "comments"), (snapshot) => {
     comments = snapshot.docs;
