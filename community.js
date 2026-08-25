@@ -159,7 +159,7 @@ const renderReveals=()=>{const other=$("conversation-user").value, incoming=stat
 $("privacy-form").addEventListener("submit",async e=>{e.preventDefault();const muted=$("muted-keywords").value.split(",").map(x=>x.trim()).filter(Boolean).slice(0,20);
   try{await setDoc(doc(db,"userPreferences",state.user.uid),{uid:state.user.uid,mutedKeywords:muted,contextCheck:$("context-check").checked,updatedAt:serverTimestamp()},{merge:true});
     await setDoc(doc(db,"userPrivate",state.user.uid),{uid:state.user.uid,interests:$("privacy-interests").value.trim(),region:$("privacy-region").value.trim(),ageRange:$("privacy-age").value,updatedAt:serverTimestamp()},{merge:true}); state.privateDetails={interests:$("privacy-interests").value.trim(),region:$("privacy-region").value.trim(),ageRange:$("privacy-age").value};
-    setStatus("Privacy choices saved.");}catch{setStatus("Could not save privacy choices.",true);}};
+    setStatus("Privacy choices saved.");}catch{setStatus("Could not save privacy choices.",true);}});
 const loadPrivacy=()=>{const p=state.preferences||{};$("muted-keywords").value=(p.mutedKeywords||[]).join(", ");$("context-check").checked=p.contextCheck!==false;
   $("privacy-interests").value=state.privateDetails.interests||"";$("privacy-region").value=state.privateDetails.region||"";$("privacy-age").value=state.privateDetails.ageRange||"";};
 $("download-data").onclick=()=>{const data={profile:{username:state.profile.username},preferences:state.preferences,communityPosts:state.posts.filter(p=>p.data().authorId===state.user.uid).map(p=>p.data()),circles:state.members.filter(m=>m.data().uid===state.user.uid).map(m=>m.data()),messages:state.messages.filter(m=>m.data().participants.includes(state.user.uid)).map(m=>m.data())};
