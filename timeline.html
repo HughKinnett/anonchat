@@ -52,7 +52,10 @@
         <div>
           <h1 id="display-name">User Name</h1>
           <p id="user-handle">@username</p>
-          <a id="my-profile-link" class="my-profile-link" href="profile.html">View profile</a>
+          <div class="profile-links">
+            <a id="my-profile-link" class="my-profile-link" href="profile.html">View profile</a>
+            <a id="admin-link" class="my-profile-link admin-link" href="admin.html" hidden>Admin dashboard</a>
+          </div>
         </div>
       </div>
     </section>
@@ -62,8 +65,14 @@
         <h2 id="composer-title">Post anonymously</h2>
         <form id="post-form">
           <label class="sr-only" for="post-content">Post content</label>
-          <textarea name="post-content" id="post-content" maxlength="500" placeholder="What's happening? Tag someone with @username" required></textarea>
+          <textarea name="post-content" id="post-content" maxlength="500" placeholder="What's happening? Tag someone with @username"></textarea>
+          <div id="post-image-preview-wrap" class="post-image-preview-wrap" hidden>
+            <img id="post-image-preview" alt="Selected post upload preview">
+            <button id="remove-post-image" type="button" aria-label="Remove selected photo">Remove photo</button>
+          </div>
           <div class="composer-footer">
+            <label class="photo-upload-button" for="post-image-upload">📷 Add photo</label>
+            <input id="post-image-upload" type="file" accept="image/*" hidden>
             <span>500 characters max</span>
             <button class="primary-button" type="submit">Post</button>
           </div>
@@ -85,7 +94,7 @@
     </div>
   </main>
 
-  <script src="upload.js"></script>
+  <script type="module" src="upload.js"></script>
   <script type="module" src="timeline.js"></script>
   <script src="pwa.js" defer></script>
 </body>
