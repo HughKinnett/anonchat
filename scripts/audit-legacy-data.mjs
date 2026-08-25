@@ -5,12 +5,11 @@ import { getFirestore } from "firebase-admin/firestore";
 initializeApp({ credential: applicationDefault(), projectId: process.env.GCLOUD_PROJECT || "anonchatlogin" });
 const auth = getAuth();
 const db = getFirestore();
-
 const authUsers = [];
 let pageToken;
 do {
   const page = await auth.listUsers(1000, pageToken);
-  authUsers.push(...page.users.map((user) => ({ uid: user.uid, displayName: user.displayName || null })));
+  authUsers.push(...page.users);
   pageToken = page.pageToken;
 } while (pageToken);
 
@@ -19,13 +18,21 @@ const [profiles, posts, follows] = await Promise.all([
   db.collection("posts").get(),
   db.collection("follows").get()
 ]);
-
+const authIds = new Set(authUsers.map((user) => user.uid));
+const profileIds = new Set(profiles.docs.map((entry) => entry.id));
+const valid = (entry) => {
+  const data = entry.data();
+  return data.uid === entry.id && typeof data.username === "string" && /^[A-Za-z0-9_]{3,30}$/.test(data.username);
+};
 console.log(JSON.stringify({
-  authUsers,
-  profiles: profiles.docs.map((entry) => ({ id: entry.id, fields: Object.keys(entry.data()), uid: entry.data().uid, username: entry.data().username })),
-  posts: posts.docs.map((entry) => {
-    const data = entry.data();
-    return { id: entry.id, fields: Object.keys(data), authorId: data.authorId || null, uid: data.uid || null, userId: data.userId || null, username: data.username || null, type: data.type || null };
-  }),
-  follows: follows.docs.map((entry) => ({ id: entry.id, ...entry.data() }))
-}, null, 2));
+  authAccounts: authUsers.length,
+  profileDocuments: profiles.size,
+  validProfiles: profiles.docs.filter(valid).length,
+  authWithoutProfile: authUsers.filter((user) => !profileIds.has(user.uid)).map((user) => user.uid),
+  profileWithoutAuth: profiles.docs.filter((entry) => !authIds.has(entry.id)).map((entry) => entry.id),
+  posts: posts.size,
+  postsMissingAuthorId: posts.docs.filter((entry) => !entry.data().authorId).map((entry) => ({ id: entry.id, fields: Object.keys(entry.data()), username: entry.data().username || null })),
+  postsWithUnknownAuthor: posts.docs.filter((entry) => entry.data().authorId && !authIds.has(entry.data().authorId)).map((entry) => ({ id: entry.id, authorId: entry.data().authorId, username: entry.data().username || null })),
+  follows: follows.size,
+  followsWithMissingProfiles: follows.docs.filter((entry) => !profileIds.has(entry.data().followerId) || !profileIds.has(entry.data().followingId)).map((entry) => entry.id)
+}));
