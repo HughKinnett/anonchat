@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -298,6 +298,7 @@ onAuthStateChanged(auth, async (user) => {
   const currentProfileRef = doc(db, "users", user.uid);
   let currentProfileSnapshot = await getDoc(currentProfileRef);
   if (currentProfileSnapshot.exists() && currentProfileSnapshot.data().banned === true) {
+    await signOut(auth);
     window.location.replace("index.html");
     return;
   }
