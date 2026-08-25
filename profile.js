@@ -373,8 +373,11 @@ onAuthStateChanged(auth, async (user) => {
   if (targetProfile.coverImage) {
     document.getElementById("view-profile-cover").src = targetProfile.coverImage;
   }
+  const adminUsernames = ["i_love_you_h", "ownercybercapone"];
+  const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
+  const profileIsAdmin = adminUsernames.includes(targetProfile.username.toLowerCase());
   document.getElementById("profile-admin-link").hidden =
-    !["i_love_you_h", "ownercybercapone"].includes(currentProfileUsername.toLowerCase());
+    !(viewerIsAdmin && profileIsAdmin);
   const viewDay = new Date().toISOString().slice(0, 10);
   setDoc(doc(db, "pageViews", viewDay), {
     date: viewDay,
