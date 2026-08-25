@@ -213,3 +213,10 @@ input:focus {
 .privacy-boundary p{margin:6px 0;color:var(--muted);line-height:1.55}
 .privacy-boundary .eyebrow{margin:0;color:#c4b5fd;font-size:.73rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
 @media(max-width:560px){.privacy-boundary{grid-template-columns:1fr;padding:15px}.privacy-boundary-icon{width:38px;height:38px}}
+
+
+.password-input-wrap{position:relative}
+.password-input-wrap input{width:100%;padding-right:112px}
+.password-toggle{position:absolute;top:50%;right:7px;min-height:36px;padding:6px 10px;transform:translateY(-50%);border:1px solid rgba(255,255,255,.13);border-radius:9px;background:rgba(255,255,255,.07);color:var(--text);font-size:.78rem;font-weight:750}
+.password-toggle:hover{background:rgba(139,92,246,.18)}
+.device-signin-note{display:block;margin-top:10px;color:var(--muted);line-height:1.45;text-align:center}
