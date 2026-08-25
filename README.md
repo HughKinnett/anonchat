@@ -1,6 +1,15 @@
 # AnonChat
 
-A pseudonymous social timeline using Firebase Authentication and Cloud Firestore. The original visual design is preserved.
+A responsive pseudonymous social timeline using Firebase Authentication and Cloud Firestore.
+
+## Features
+
+- unique anonymous handles; email addresses are never displayed
+- original posts with ❤️ and 🖕 reactions
+- secure reposts to a user's profile without changing the original author's words
+- Timeline and My profile views
+- responsive desktop and mobile layouts
+- installable Progressive Web App with an offline app shell
 
 ## Firebase setup
 
@@ -9,15 +18,19 @@ A pseudonymous social timeline using Firebase Authentication and Cloud Firestore
 3. Create the **Cloud Firestore** database.
 4. Install the Firebase CLI and sign in.
 5. Deploy the security rules with `firebase deploy --only firestore:rules`.
-6. Serve the site over HTTP. Firebase Hosting can be deployed with `firebase deploy --only hosting`.
+6. Deploy the HTTPS site with `firebase deploy --only hosting`.
 
-Passwords are managed by Firebase Authentication and are never written to Firestore. Email addresses are used only to sign in and are never displayed in posts. Users appear under unique pseudonymous usernames.
+Passwords are managed by Firebase Authentication and are never written to Firestore. Users appear under unique pseudonymous usernames.
+
+## Installing the app
+
+The **Install app** button opens the browser's native installation prompt on supported Android and desktop browsers. On iPhone and iPad, it explains how to use **Share → Add to Home Screen**. App installation and service workers require HTTPS (Firebase Hosting provides it).
 
 ## Data model
 
 - `usernames/{normalizedUsername}`: reserves each anonymous handle
 - `users/{uid}`: `uid`, `username`, `createdAt`
-- `posts/{postId}`: `authorId`, `username`, `content`, `createdAt`
+- `posts/{postId}`: an original post or a validated repost
 - `posts/{postId}/reactions/{uid}`: one ❤️ or 🖕 reaction per user
 
-The included rules require authentication, cap posts at 500 characters, prevent handle impersonation, and restrict post deletion to its author. Reaction counts are shown, but the interface does not display who reacted.
+The included rules require authentication, cap original posts at 500 characters, prevent handle impersonation, verify reposts against their original posts, and restrict deletion to the post or repost owner.
