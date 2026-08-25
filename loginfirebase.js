@@ -2,6 +2,8 @@ import { auth, db } from "./firebase-config.js";
 import { ensureDefaultOwnerFollows } from "./default-follows.js";
 import {
   browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence,
   createUserWithEmailAndPassword,
   deleteUser,
   onAuthStateChanged,
@@ -32,16 +34,23 @@ if (new URLSearchParams(window.location.search).get("accountDeleted") === "1") {
 const invalidCredentialCodes = ["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found", "auth/invalid-email"];
 
 const signInAcrossDevices = async (email, password) => {
-  await setPersistence(auth, browserLocalPersistence);
-  try {
-    return await signInWithEmailAndPassword(auth, email, password);
-  } catch (error) {
-    const normalizedEmail = email.toLowerCase();
-    if (invalidCredentialCodes.includes(error.code) && normalizedEmail !== email) {
-      return signInWithEmailAndPassword(auth, normalizedEmail, password);
+  // Some desktop privacy modes block IndexedDB/localStorage. Authentication must
+  // still work, so progressively fall back to a tab session and then memory.
+  for (const persistence of [
+    browserLocalPersistence,
+    browserSessionPersistence,
+    inMemoryPersistence
+  ]) {
+    try {
+      await setPersistence(auth, persistence);
+      break;
+    } catch {
+      // Continue to a storage mode supported by this browser.
     }
-    throw error;
   }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  return signInWithEmailAndPassword(auth, normalizedEmail, password);
 };
 
 const signInMessage = (error) => {
@@ -159,4 +168,15 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
     if (error.code === "auth/email-already-in-use") message = "That email address already has an account.";
     setStatus(message, true);
   }
+});
+
+
+const signInPassword = document.getElementById("password");
+const passwordToggle = document.getElementById("toggle-sign-in-password");
+passwordToggle?.addEventListener("click", () => {
+  const showing = signInPassword.type === "text";
+  signInPassword.type = showing ? "password" : "text";
+  passwordToggle.textContent = showing ? "Show password" : "Hide password";
+  passwordToggle.setAttribute("aria-pressed", String(!showing));
+  signInPassword.focus();
 });
