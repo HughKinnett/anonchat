@@ -13,7 +13,8 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  setDoc
+  setDoc,
+  where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const feed = document.getElementById("feed");
@@ -28,6 +29,7 @@ let postDocs = [];
 let reactions = [];
 let follows = [];
 let users = [];
+let notificationReads = [];
 let showingProfile = false;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -51,9 +53,11 @@ const renderNotifications = () => {
       .map((post) => [post.id, post.data()])
   );
   const usernames = new Map(users.map((profile) => [profile.id, profile.data().username]));
+  const readIds = new Set(notificationReads.map((read) => read.data().reactionId));
   const items = reactions
     .filter((reaction) => ownedPosts.has(reaction.ref.parent.parent?.id))
     .filter((reaction) => reaction.data().uid !== currentUser.uid)
+    .filter((reaction) => !readIds.has(reaction.id))
     .sort((a, b) =>
       (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0)
     );
@@ -64,14 +68,41 @@ const renderNotifications = () => {
     const data = reaction.data();
     const post = ownedPosts.get(reaction.ref.parent.parent.id);
     const item = document.createElement("li");
-    item.className = "notification-item";
-    const message = document.createElement("p");
+    const open = document.createElement("button");
+    open.className = "notification-item";
+    open.type = "button";
+    const message = document.createElement("span");
+    message.className = "notification-message";
     const actor = usernames.get(data.uid) || "Anonymous user";
     const reactionLabel = data.type === "heart" ? "❤️ hearted" : "🖕 reacted to";
     message.textContent = `@${actor} ${reactionLabel} your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`;
     const time = document.createElement("time");
     time.textContent = formatNotificationTime(data.createdAt);
-    item.append(message, time);
+    open.append(message, time);
+    open.addEventListener("click", async () => {
+      open.disabled = true;
+      const postId = reaction.ref.parent.parent.id;
+      try {
+        await setDoc(doc(db, "notificationReads", `${currentUser.uid}_${reaction.id}`), {
+          uid: currentUser.uid,
+          reactionId: reaction.id,
+          readAt: serverTimestamp()
+        });
+        notificationPanel.hidden = true;
+        notificationButton.setAttribute("aria-expanded", "false");
+        setFeedView(false);
+        requestAnimationFrame(() => {
+          const target = document.getElementById(`post-${postId}`);
+          target?.scrollIntoView({ behavior: "smooth", block: "center" });
+          target?.classList.add("notification-highlight");
+          window.setTimeout(() => target?.classList.remove("notification-highlight"), 1800);
+        });
+      } catch {
+        setStatus("Could not clear that notification.", true);
+        open.disabled = false;
+      }
+    });
+    item.append(open);
     return item;
   }));
 
@@ -213,6 +244,7 @@ const renderPost = (postDoc) => {
   const sourceId = originalPostId(postDoc);
   const item = document.createElement("li");
   item.className = "feed-item";
+  item.id = `post-${postDoc.id}`;
 
   if (post.type === "repost") {
     const repostLabel = document.createElement("p");
@@ -357,6 +389,15 @@ onAuthStateChanged(auth, async (user) => {
       renderNotifications();
     },
     () => setStatus("Could not load notification names.", true)
+  ));
+
+  listeners.push(onSnapshot(
+    query(collection(db, "notificationReads"), where("uid", "==", user.uid)),
+    (snapshot) => {
+      notificationReads = snapshot.docs;
+      renderNotifications();
+    },
+    () => setStatus("Could not load cleared notifications.", true)
   ));
 
   listeners.push(onSnapshot(
