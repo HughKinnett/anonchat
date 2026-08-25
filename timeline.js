@@ -764,7 +764,15 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
-    !(await getDoc(doc(db, "admins", user.uid))).exists();
+    !["i_love_you_h", "ownercybercapone"].includes(profileUsername.toLowerCase());
+  const statsRef = doc(db, "system", "accountStats");
+  if (!(await getDoc(statsRef)).exists()) {
+    await setDoc(statsRef, {
+      count: 5,
+      limit: 500,
+      updatedAt: serverTimestamp()
+    }).catch(() => {});
+  }
   const viewDay = new Date().toISOString().slice(0, 10);
   setDoc(doc(db, "pageViews", viewDay), {
     date: viewDay,
