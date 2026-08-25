@@ -174,7 +174,7 @@ const reactionButton = (postId, type, emoji, reactionDocs) => {
   const button = document.createElement("button");
   button.className = "reaction-button";
   button.type = "button";
-  button.textContent = type === "heart" ? `${emoji} Heart · ${count}` : `${emoji} ${count}`;
+  button.textContent = type === "heart" ? `${emoji} Heart · ${count}` : `${emoji} Fuck You · ${count}`;
   button.title = type === "heart" ? "Heart this post" : "Give this post the middle finger";
   button.addEventListener("click", async () => {
     button.disabled = true;
