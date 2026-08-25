@@ -8,7 +8,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return signedIn()
-        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower()
+          in ['i_love_you_h', 'ownercybercapone'];
     }
 
     function activeUser() {
@@ -53,13 +55,20 @@ service cloud.firestore {
     }
 
     match /admins/{adminId} {
-      allow read: if signedIn() && (request.auth.uid == adminId || isAdmin());
+      allow read: if isAdmin();
       allow write: if false;
     }
 
     match /system/accountStats {
       allow read: if signedIn();
-      allow create: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['count', 'limit', 'updatedAt'])
+        && request.resource.data.limit == 500
+        && request.resource.data.updatedAt == request.time
+        && ((activeUser() && request.resource.data.count == 5)
+          || (!exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid))
+            && request.resource.data.count == 6));
       allow update: if signedIn()
         && request.resource.data.keys().hasOnly(['count', 'limit', 'updatedAt'])
         && request.resource.data.limit == 500
@@ -108,8 +117,11 @@ service cloud.firestore {
         && request.resource.data.username is string
         && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
         && request.resource.data.createdAt == request.time
-        && getAfter(/databases/$(database)/documents/system/accountStats).data.count
-          == get(/databases/$(database)/documents/system/accountStats).data.count + 1;
+        && ((exists(/databases/$(database)/documents/system/accountStats)
+          && getAfter(/databases/$(database)/documents/system/accountStats).data.count
+            == get(/databases/$(database)/documents/system/accountStats).data.count + 1)
+          || (!exists(/databases/$(database)/documents/system/accountStats)
+            && getAfter(/databases/$(database)/documents/system/accountStats).data.count == 6));
       allow update: if isAdmin()
         || (activeUser()
           && request.auth.uid == userId
