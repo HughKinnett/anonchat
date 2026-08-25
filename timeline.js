@@ -36,6 +36,91 @@ const notificationButton = document.getElementById("notification-button");
 const notificationPanel = document.getElementById("notification-panel");
 const notificationList = document.getElementById("notification-list");
 const notificationBadge = document.getElementById("notification-badge");
+const searchInput = document.getElementById("site-search");
+const searchResults = document.getElementById("search-results");
+
+const closeSearch = () => {
+  searchResults.hidden = true;
+  searchInput.setAttribute("aria-expanded", "false");
+};
+
+const openPostFromSearch = (postId) => {
+  searchInput.value = "";
+  closeSearch();
+  setFeedView(false);
+  requestAnimationFrame(() => {
+    const target = document.getElementById(`post-${postId}`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    target?.classList.add("notification-highlight");
+    window.setTimeout(() => target?.classList.remove("notification-highlight"), 1800);
+  });
+};
+
+const renderSearchResults = () => {
+  const term = searchInput.value.trim().toLowerCase();
+  if (term.length < 2) {
+    closeSearch();
+    return;
+  }
+
+  const matchedUsers = users
+    .filter((profile) => profile.data().username?.toLowerCase().includes(term))
+    .slice(0, 5);
+  const matchedPosts = postDocs
+    .filter((post) =>
+      post.data().content?.toLowerCase().includes(term) ||
+      post.data().username?.toLowerCase().includes(term)
+    )
+    .slice(0, 8);
+  const groups = [];
+
+  if (matchedUsers.length) {
+    const heading = document.createElement("p");
+    heading.className = "search-heading";
+    heading.textContent = "Users";
+    groups.push(heading, ...matchedUsers.map((profile) => {
+      const link = document.createElement("a");
+      link.className = "search-result";
+      link.href = `profile.html?uid=${encodeURIComponent(profile.id)}`;
+      link.textContent = `@${profile.data().username}`;
+      return link;
+    }));
+  }
+
+  if (matchedPosts.length) {
+    const heading = document.createElement("p");
+    heading.className = "search-heading";
+    heading.textContent = "Posts";
+    groups.push(heading, ...matchedPosts.map((post) => {
+      const button = document.createElement("button");
+      button.className = "search-result search-post-result";
+      button.type = "button";
+      const data = post.data();
+      button.textContent = `@${data.username || data.originalUsername || "anonymous"}: ${data.content.slice(0, 90)}${data.content.length > 90 ? "…" : ""}`;
+      button.addEventListener("click", () => openPostFromSearch(post.id));
+      return button;
+    }));
+  }
+
+  if (!groups.length) {
+    const empty = document.createElement("p");
+    empty.className = "search-empty";
+    empty.textContent = "No matching users or posts.";
+    groups.push(empty);
+  }
+
+  searchResults.replaceChildren(...groups);
+  searchResults.hidden = false;
+  searchInput.setAttribute("aria-expanded", "true");
+};
+
+searchInput.addEventListener("input", renderSearchResults);
+searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    searchInput.value = "";
+    closeSearch();
+  }
+});
 
 const validProfile = (profile, userId) =>
   profile?.uid === userId &&
@@ -121,6 +206,7 @@ notificationButton.addEventListener("click", () => {
 });
 
 document.addEventListener("click", (event) => {
+  if (!event.target.closest(".topbar-search")) closeSearch();
   if (!notificationPanel.hidden && !event.target.closest(".notification-center")) {
     notificationPanel.hidden = true;
     notificationButton.setAttribute("aria-expanded", "false");
@@ -369,6 +455,7 @@ onAuthStateChanged(auth, async (user) => {
     (snapshot) => {
       postDocs = snapshot.docs;
       renderFeed();
+      renderSearchResults();
     },
     () => setStatus("Could not load posts.", true)
   ));
@@ -387,6 +474,7 @@ onAuthStateChanged(auth, async (user) => {
     (snapshot) => {
       users = snapshot.docs;
       renderNotifications();
+      renderSearchResults();
     },
     () => setStatus("Could not load notification names.", true)
   ));
