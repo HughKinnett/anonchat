@@ -57,10 +57,10 @@ button:disabled { cursor: wait; opacity: 0.6; }
 
 .topbar-search {
   position: relative;
-  flex: 0 1 320px;
+  flex: 0 1 260px;
   min-width: 180px;
-  max-width: 360px;
-  margin: 0 10px;
+  max-width: 300px;
+  margin: 0 8px;
 }
 
 #site-search {
