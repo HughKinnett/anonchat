@@ -72,11 +72,19 @@ service cloud.firestore {
       allow update: if signedIn()
         && request.resource.data.keys().hasOnly(['count', 'limit', 'updatedAt'])
         && request.resource.data.limit == 500
-        && request.resource.data.count == resource.data.count + 1
-        && request.resource.data.count <= request.resource.data.limit
         && request.resource.data.updatedAt == request.time
-        && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid));
+        && (
+          (request.resource.data.count == resource.data.count + 1
+            && request.resource.data.count <= request.resource.data.limit
+            && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)))
+          ||
+          (request.resource.data.count == resource.data.count - 1
+            && request.resource.data.count >= 0
+            && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
+            && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && !existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)))
+        );
       allow delete: if false;
     }
 
@@ -109,8 +117,13 @@ service cloud.firestore {
       allow update: if false;
       allow delete: if activeUser()
         && resource.data.uid == request.auth.uid
-        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower()
-          != normalizedUsername;
+        && (
+          (exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
+            && resource.data.username.lower() == normalizedUsername)
+          ||
+          (getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower()
+            != normalizedUsername)
+        );
     }
 
     match /users/{userId} {
@@ -145,7 +158,24 @@ service cloud.firestore {
               && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid
                 == request.auth.uid)
           ));
-      allow delete: if isAdmin();
+      allow delete: if isAdmin()
+        || (activeUser()
+          && request.auth.uid == userId
+          && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
+          && !(resource.data.username.lower() in ['i_love_you_h', 'ownercybercapone']));
+    }
+
+    match /accountDeletionRequests/{userId} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow create: if activeUser()
+        && request.auth.uid == userId
+        && !(currentUsername().lower() in ['i_love_you_h', 'ownercybercapone'])
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && request.auth.uid == userId;
     }
 
     match /follows/{followId} {
@@ -159,7 +189,8 @@ service cloud.firestore {
         && followId == request.auth.uid + '_' + request.resource.data.followingId
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
+      allow delete: if signedIn()
+        && (resource.data.followerId == request.auth.uid || resource.data.followingId == request.auth.uid);
     }
 
     match /notificationReads/{readId} {
@@ -170,7 +201,8 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.reactionId is string
         && request.resource.data.readAt == request.time;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
     match /{documentPath=**}/comments/{commentId} {
@@ -373,7 +405,7 @@ service cloud.firestore {
         && request.resource.data.text.size() <= 500
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if signedIn() && resource.data.senderId == request.auth.uid;
+      allow delete: if signedIn() && request.auth.uid in resource.data.participants;
     }
 
     match /reveals/{revealId} {
@@ -394,6 +426,16 @@ service cloud.firestore {
         && request.resource.data.respondedAt == request.time;
       allow delete: if signedIn()
         && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
+    }
+
+    match /posts/{postId}/comments/{commentId} {
+      allow delete: if signedIn()
+        && get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid;
+    }
+
+    match /posts/{postId}/reactions/{reactionId} {
+      allow delete: if signedIn()
+        && get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid;
     }
 
     match /posts/{postId} {
