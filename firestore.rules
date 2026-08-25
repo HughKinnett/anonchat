@@ -192,8 +192,17 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.type in ['heart', 'middle_finger', 'laugh', 'sad']
         && request.resource.data.createdAt == request.time;
-      allow update: if false;
-      allow delete: if isAdmin();
+      allow update: if activeUser()
+        && reactionId == request.auth.uid
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['heart', 'middle_finger', 'laugh', 'sad']
+        && request.resource.data.createdAt == request.time;
+      allow delete: if (signedIn()
+          && reactionId == request.auth.uid
+          && resource.data.uid == request.auth.uid)
+        || isAdmin();
     }
 
     match /posts/{postId} {

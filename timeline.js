@@ -610,8 +610,13 @@ const createFollowControl = (userId) => {
   return wrapper;
 };
 
-const addReaction = async (postId, type) => {
-  await setDoc(doc(db, "posts", postId, "reactions", currentUser.uid), {
+const toggleReaction = async (postId, type, currentType) => {
+  const reactionRef = doc(db, "posts", postId, "reactions", currentUser.uid);
+  if (currentType === type) {
+    await deleteDoc(reactionRef);
+    return;
+  }
+  await setDoc(reactionRef, {
     uid: currentUser.uid,
     type,
     createdAt: serverTimestamp()
@@ -620,19 +625,25 @@ const addReaction = async (postId, type) => {
 
 const reactionButton = (postId, type, emoji, reactionDocs) => {
   const count = reactionDocs.filter((reaction) => reaction.data().type === type).length;
-  const alreadyReacted = reactionDocs.some((reaction) => reaction.data().uid === currentUser.uid);
+  const myReaction = reactionDocs.find((reaction) => reaction.data().uid === currentUser.uid);
+  const currentType = myReaction?.data().type;
+  const selected = currentType === type;
   const button = document.createElement("button");
   button.className = "reaction-button";
   button.type = "button";
   button.textContent = `${emoji} ${count}`;
-  button.title = alreadyReacted ? "You already reacted to this post" : "React to this post";
-  button.disabled = alreadyReacted;
+  button.setAttribute("aria-pressed", String(selected));
+  button.title = selected
+    ? "Remove this reaction"
+    : currentType
+      ? `Change your reaction to ${emoji}`
+      : `React ${emoji}`;
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await addReaction(postId, type);
+      await toggleReaction(postId, type, currentType);
     } catch {
-      setStatus("Could not save your reaction.", true);
+      setStatus("Could not update your reaction.", true);
       button.disabled = false;
     }
   });
