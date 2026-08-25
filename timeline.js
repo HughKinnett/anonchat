@@ -25,6 +25,7 @@ let currentUser;
 let profileUsername;
 let postDocs = [];
 let reactions = [];
+let follows = [];
 let showingProfile = false;
 const listeners = [];
 
@@ -39,6 +40,59 @@ const originalPostId = (postDoc) =>
 const postReactions = (postId) => reactions.filter((reaction) =>
   reaction.ref.parent.parent?.id === postId
 );
+
+const followerCount = (userId) =>
+  follows.filter((follow) => follow.data().followingId === userId).length;
+
+const isFollowing = (userId) =>
+  follows.some((follow) =>
+    follow.data().followerId === currentUser.uid && follow.data().followingId === userId
+  );
+
+const toggleFollow = async (userId) => {
+  const followRef = doc(db, "follows", `${currentUser.uid}_${userId}`);
+  if (isFollowing(userId)) {
+    await deleteDoc(followRef);
+  } else {
+    await setDoc(followRef, {
+      followerId: currentUser.uid,
+      followingId: userId,
+      createdAt: serverTimestamp()
+    });
+  }
+};
+
+const createFollowControl = (userId) => {
+  const wrapper = document.createElement("div");
+  wrapper.className = "follow-control";
+  const count = followerCount(userId);
+
+  if (userId === currentUser.uid) {
+    const label = document.createElement("span");
+    label.className = "follower-count";
+    label.textContent = `${count} ${count === 1 ? "follower" : "followers"}`;
+    wrapper.append(label);
+    return wrapper;
+  }
+
+  const button = document.createElement("button");
+  button.className = "follow-button";
+  button.type = "button";
+  button.setAttribute("aria-pressed", String(isFollowing(userId)));
+  button.textContent = `${isFollowing(userId) ? "Following" : "Follow"} · ${count}`;
+  button.title = `${count} ${count === 1 ? "follower" : "followers"}`;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await toggleFollow(userId);
+    } catch {
+      setStatus("Could not update that follow.", true);
+      button.disabled = false;
+    }
+  });
+  wrapper.append(button);
+  return wrapper;
+};
 
 const toggleReaction = async (postId, type) => {
   const reactionRef = doc(db, "posts", postId, "reactions", currentUser.uid);
@@ -63,7 +117,7 @@ const reactionButton = (postId, type, emoji, reactionDocs) => {
   const button = document.createElement("button");
   button.className = "reaction-button";
   button.type = "button";
-  button.textContent = `${emoji} ${count}`;
+  button.textContent = type === "heart" ? `${emoji} Heart · ${count}` : `${emoji} ${count}`;
   button.setAttribute("aria-pressed", String(selected));
   button.title = type === "heart" ? "Heart this post" : "Give this post the middle finger";
   button.addEventListener("click", async () => {
@@ -110,8 +164,13 @@ const renderPost = (postDoc) => {
     item.append(repostLabel);
   }
 
+  const displayedAuthorId = post.type === "repost" ? post.originalAuthorId : post.authorId;
+  const displayedUsername = post.type === "repost" ? post.originalUsername : post.username;
+  const authorRow = document.createElement("div");
+  authorRow.className = "post-author-row";
   const author = document.createElement("h3");
-  author.textContent = `@${post.type === "repost" ? post.originalUsername : post.username}`;
+  author.textContent = `@${displayedUsername}`;
+  authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
   text.textContent = post.content;
   const time = document.createElement("small");
@@ -167,7 +226,7 @@ const renderPost = (postDoc) => {
     actions.append(remove);
   }
 
-  item.append(author, text, time, reactionsBar, actions);
+  item.append(authorRow, text, time, reactionsBar, actions);
   return item;
 };
 
@@ -223,6 +282,15 @@ onAuthStateChanged(auth, async (user) => {
       renderFeed();
     },
     () => setStatus("Could not load reactions.", true)
+  ));
+
+  listeners.push(onSnapshot(
+    collection(db, "follows"),
+    (snapshot) => {
+      follows = snapshot.docs;
+      renderFeed();
+    },
+    () => setStatus("Could not load follower counts.", true)
   ));
 });
 
