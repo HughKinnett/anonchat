@@ -10,6 +10,230 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username;
     }
 
+    function validProfile(userId) {
+      return request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == userId
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}
+    function validOriginalPost() {
+      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'createdAt'])
+        && request.resource.data.type == 'original'
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.content is string
+        && request.resource.data.content.size() >= 1
+        && request.resource.data.content.size() <= 500
+        && request.resource.data.createdAt == request.time;
+    }
+
+    function validRepost(postId) {
+      let original = get(/databases/$(database)/documents/posts/$(request.resource.data.originalPostId));
+      return request.resource.data.keys().hasOnly([
+          'type', 'authorId', 'username', 'originalPostId',
+          'originalAuthorId', 'originalUsername', 'content', 'createdAt'
+        ])
+        && request.resource.data.type == 'repost'
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && postId == 'repost_' + request.auth.uid + '_' + request.resource.data.originalPostId
+        && original.data.type == 'original'
+        && request.resource.data.originalAuthorId == original.data.authorId
+        && request.resource.data.originalUsername == original.data.username
+        && request.resource.data.content == original.data.content
+        && request.resource.data.createdAt == request.time;
+    }
+
+    match /usernames/{normalizedUsername} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/usernames/$(normalizedUsername))
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+        && request.resource.data.username.lower() == normalizedUsername
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && validProfile(userId);
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && (!(resource.data.username is string)
+          || !resource.data.username.matches('^[A-Za-z0-9_]{3,30}
+    }
+
+    match /follows/{followId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followingId is string
+        && request.resource.data.followingId != request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.followingId))
+        && followId == request.auth.uid + '_' + request.resource.data.followingId
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
+    }
+
+    match /{documentPath=**}/reactions/{reactionId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['heart', 'middle_finger']
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && (validOriginalPost() || validRepost(postId));
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+    }
+  }
+}
+)
+        && request.resource.data.createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid == userId;
+    }
+
+    function validOriginalPost() {
+      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'createdAt'])
+        && request.resource.data.type == 'original'
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.content is string
+        && request.resource.data.content.size() >= 1
+        && request.resource.data.content.size() <= 500
+        && request.resource.data.createdAt == request.time;
+    }
+
+    function validRepost(postId) {
+      let original = get(/databases/$(database)/documents/posts/$(request.resource.data.originalPostId));
+      return request.resource.data.keys().hasOnly([
+          'type', 'authorId', 'username', 'originalPostId',
+          'originalAuthorId', 'originalUsername', 'content', 'createdAt'
+        ])
+        && request.resource.data.type == 'repost'
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && postId == 'repost_' + request.auth.uid + '_' + request.resource.data.originalPostId
+        && original.data.type == 'original'
+        && request.resource.data.originalAuthorId == original.data.authorId
+        && request.resource.data.originalUsername == original.data.username
+        && request.resource.data.content == original.data.content
+        && request.resource.data.createdAt == request.time;
+    }
+
+    match /usernames/{normalizedUsername} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/usernames/$(normalizedUsername))
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+        && request.resource.data.username.lower() == normalizedUsername
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /follows/{followId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followingId is string
+        && request.resource.data.followingId != request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.followingId))
+        && followId == request.auth.uid + '_' + request.resource.data.followingId
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
+    }
+
+    match /{documentPath=**}/reactions/{reactionId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['heart', 'middle_finger']
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && (validOriginalPost() || validRepost(postId));
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+    }
+  }
+}
+)
+          || resource.data.uid != userId)
+        && validProfile(userId);
+      allow delete: if false;
+    }
+
+    match /follows/{followId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followingId is string
+        && request.resource.data.followingId != request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.followingId))
+        && followId == request.auth.uid + '_' + request.resource.data.followingId
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
+    }
+
+    match /{documentPath=**}/reactions/{reactionId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['heart', 'middle_finger']
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && (validOriginalPost() || validRepost(postId));
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+    }
+  }
+}
+)
+        && request.resource.data.createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid == userId;
+    }
+
     function validOriginalPost() {
       return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'createdAt'])
         && request.resource.data.type == 'original'
