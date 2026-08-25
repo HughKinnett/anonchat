@@ -99,6 +99,7 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn()
         && !exists(/databases/$(database)/documents/usernames/$(normalizedUsername))
+        && !(normalizedUsername in ['i_love_you_h', 'ownercybercapone'])
         && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username is string
@@ -136,6 +137,8 @@ service cloud.firestore {
               && request.resource.data.get('coverImage', '').size() <= 360000)
             ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
+              && (!(resource.data.username.lower() in ['i_love_you_h', 'ownercybercapone'])
+                || request.resource.data.username.lower() == resource.data.username.lower())
               && request.resource.data.username is string
               && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
               && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
