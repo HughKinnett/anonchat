@@ -63,6 +63,20 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /follows/{followId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followingId is string
+        && request.resource.data.followingId != request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.followingId))
+        && followId == request.auth.uid + '_' + request.resource.data.followingId
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
+    }
+
     match /posts/{postId} {
       allow read: if signedIn();
       allow create: if signedIn() && (validOriginalPost() || validRepost(postId));
