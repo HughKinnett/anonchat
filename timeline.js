@@ -38,6 +38,8 @@ const notificationList = document.getElementById("notification-list");
 const notificationBadge = document.getElementById("notification-badge");
 const searchInput = document.getElementById("site-search");
 const searchResults = document.getElementById("search-results");
+let currentNotificationIds = [];
+let seenNotificationIds = new Set();
 
 const closeSearch = () => {
   searchResults.hidden = true;
@@ -147,8 +149,10 @@ const renderNotifications = () => {
       (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0)
     );
 
-  notificationBadge.textContent = items.length > 99 ? "99+" : String(items.length);
-  notificationBadge.hidden = items.length === 0;
+  currentNotificationIds = items.map((reaction) => reaction.id);
+  const unseenCount = currentNotificationIds.filter((id) => !seenNotificationIds.has(id)).length;
+  notificationBadge.textContent = unseenCount > 99 ? "99+" : String(unseenCount);
+  notificationBadge.hidden = unseenCount === 0;
   notificationList.replaceChildren(...items.map((reaction) => {
     const data = reaction.data();
     const post = ownedPosts.get(reaction.ref.parent.parent.id);
@@ -159,7 +163,7 @@ const renderNotifications = () => {
     const message = document.createElement("span");
     message.className = "notification-message";
     const actor = usernames.get(data.uid) || "Anonymous user";
-    const reactionLabel = data.type === "heart" ? "❤️ hearted" : "🖕 reacted to";
+    const reactionLabel = data.type === "heart" ? "❤️ hearted" : "🖕 Fuck You reacted to";
     message.textContent = `@${actor} ${reactionLabel} your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`;
     const time = document.createElement("time");
     time.textContent = formatNotificationTime(data.createdAt);
@@ -203,6 +207,14 @@ notificationButton.addEventListener("click", () => {
   const opening = notificationPanel.hidden;
   notificationPanel.hidden = !opening;
   notificationButton.setAttribute("aria-expanded", String(opening));
+  if (opening && currentUser) {
+    currentNotificationIds.forEach((id) => seenNotificationIds.add(id));
+    localStorage.setItem(
+      `anonchat-seen-notifications-${currentUser.uid}`,
+      JSON.stringify([...seenNotificationIds])
+    );
+    notificationBadge.hidden = true;
+  }
 });
 
 document.addEventListener("click", (event) => {
@@ -439,6 +451,13 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  try {
+    seenNotificationIds = new Set(JSON.parse(
+      localStorage.getItem(`anonchat-seen-notifications-${user.uid}`) || "[]"
+    ));
+  } catch {
+    seenNotificationIds = new Set();
+  }
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
   if (!profile.exists() || !validProfile(profile.data(), user.uid)) {
