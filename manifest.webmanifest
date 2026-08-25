@@ -2,7 +2,7 @@
   "name": "AnonChat",
   "short_name": "AnonChat",
   "description": "A pseudonymous social timeline for anonymous posts and reactions.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0b0d12",
@@ -14,5 +14,10 @@
       "type": "image/jpeg",
       "purpose": "any"
     }
+  ],
+  "id": "./",
+  "display_override": [
+    "standalone",
+    "browser"
   ]
 }
