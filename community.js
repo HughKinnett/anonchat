@@ -174,8 +174,13 @@ onAuthStateChanged(auth,async user=>{if(!user){location.replace("index.html");re
   listen(collection(db,"circleMembers"),"members",()=>{renderCircles();renderPosts();});
   listen(query(collection(db,"rooms"),orderBy("createdAt","desc")),"rooms",renderRooms);
   listen(query(collection(db,"roomMessages"),orderBy("createdAt","asc")),"roomMessages",renderRoomMessages);
-  listen(collection(db,"messageRequests"),"requests",()=>{renderRequests();renderMessageUsers();});
-  listen(query(collection(db,"directMessages"),orderBy("createdAt","asc")),"messages",renderDirectMessages);
-  listen(collection(db,"reveals"),"reveals",renderReveals);
+  const mergePrivate = (key, firstQuery, secondQuery, render) => {
+    let first=[], second=[];
+    listeners.push(onSnapshot(firstQuery,s=>{first=s.docs;state[key]=[...first,...second];render();},()=>setStatus("A private section could not load.",true)));
+    listeners.push(onSnapshot(secondQuery,s=>{second=s.docs;state[key]=[...first,...second].filter((item,index,list)=>list.findIndex(x=>x.id===item.id)===index);render();},()=>setStatus("A private section could not load.",true)));
+  };
+  mergePrivate("requests",query(collection(db,"messageRequests"),where("fromId","==",user.uid)),query(collection(db,"messageRequests"),where("toId","==",user.uid)),()=>{renderRequests();renderMessageUsers();});
+  listen(query(collection(db,"directMessages"),where("participants","array-contains",user.uid)),"messages",renderDirectMessages);
+  mergePrivate("reveals",query(collection(db,"reveals"),where("fromId","==",user.uid)),query(collection(db,"reveals"),where("toId","==",user.uid)),renderReveals);
   listeners.push(onSnapshot(doc(db,"userPreferences",user.uid),s=>{state.preferences=s.exists()?s.data():{contextCheck:true,mutedKeywords:[]};loadPrivacy();renderPosts();}));
 });
