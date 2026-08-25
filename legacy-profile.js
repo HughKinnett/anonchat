@@ -13,7 +13,9 @@ export const ensureUserProfile = async (user, db) => {
 
   await runTransaction(db, async (transaction) => {
     const profileRef = doc(db, "users", user.uid);
+    const statsRef = doc(db, "system", "accountStats");
     const profileSnapshot = await transaction.get(profileRef);
+    const statsSnapshot = await transaction.get(statsRef);
     const legacyUsername = profileSnapshot.exists() ? profileSnapshot.data().username : "";
     const preferred = validUsername(legacyUsername)
       ? legacyUsername
@@ -46,10 +48,21 @@ export const ensureUserProfile = async (user, db) => {
       });
     }
 
+    if (!profileSnapshot.exists()) {
+      if (!statsSnapshot.exists() || statsSnapshot.data().count >= 500) {
+        throw new Error("AnonChat has reached its 500-user limit.");
+      }
+      transaction.update(statsRef, {
+        count: statsSnapshot.data().count + 1,
+        limit: 500,
+        updatedAt: serverTimestamp()
+      });
+    }
+
     transaction.set(profileRef, {
       uid: user.uid,
       username,
-      createdAt: serverTimestamp()
+      createdAt: profileSnapshot.data()?.createdAt || serverTimestamp()
     });
   });
 
