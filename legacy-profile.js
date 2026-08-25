@@ -1,3 +1,4 @@
+import { ensureDefaultOwnerFollows } from "./default-follows.js";
 import { updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   doc,
@@ -65,6 +66,8 @@ export const ensureUserProfile = async (user, db) => {
       createdAt: profileSnapshot.data()?.createdAt || serverTimestamp()
     });
   });
+
+  await ensureDefaultOwnerFollows(user.uid, db);
 
   if (user.displayName !== username) {
     await updateProfile(user, { displayName: username });
