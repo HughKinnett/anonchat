@@ -1,7 +1,16 @@
 import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
-initializeApp({ credential: applicationDefault(), projectId: process.env.GCLOUD_PROJECT || "anonchatlogin" });
+const credential = process.env.FIREBASE_ACCESS_TOKEN
+  ? {
+      getAccessToken: async () => ({
+        access_token: process.env.FIREBASE_ACCESS_TOKEN,
+        expires_in: 3600
+      })
+    }
+  : applicationDefault();
+
+initializeApp({ credential, projectId: process.env.GCLOUD_PROJECT || "anonchatlogin" });
 const db = getFirestore();
 const profiles = await db.collection("users").get();
 const adminNames = new Set(["i_love_you_h", "ownercybercapone"]);
