@@ -6,6 +6,19 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    match /usernames/{normalizedUsername} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/usernames/$(normalizedUsername))
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+        && request.resource.data.username.lower() == normalizedUsername
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
       allow create: if signedIn()
@@ -15,12 +28,7 @@ service cloud.firestore {
         && request.resource.data.username is string
         && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
         && request.resource.data.createdAt == request.time;
-      allow update: if signedIn()
-        && request.auth.uid == userId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
-        && request.resource.data.username is string
-        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$');
-      allow delete: if false;
+      allow update, delete: if false;
     }
 
     match /posts/{postId} {
@@ -28,15 +36,24 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['authorId', 'username', 'content', 'createdAt'])
         && request.resource.data.authorId == request.auth.uid
-        && request.resource.data.username is string
-        && request.resource.data.username.size() >= 3
-        && request.resource.data.username.size() <= 30
+        && request.resource.data.username == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username
         && request.resource.data.content is string
         && request.resource.data.content.size() >= 1
         && request.resource.data.content.size() <= 500
         && request.resource.data.createdAt == request.time;
       allow update: if false;
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+
+      match /reactions/{userId} {
+        allow read: if signedIn();
+        allow create, update: if signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.type in ['heart', 'middle_finger']
+          && request.resource.data.createdAt == request.time;
+        allow delete: if signedIn() && request.auth.uid == userId;
+      }
     }
   }
 }
