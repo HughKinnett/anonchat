@@ -27,6 +27,31 @@ let follows = [];
 let targetProfile;
 let targetPosts = [];
 let users = [];
+const profileSpotifyCard = document.getElementById("profile-spotify-card");
+const profileSpotifyPlayer = document.getElementById("profile-spotify-player");
+
+const spotifyTrackId = (value) => {
+  try {
+    const url = new URL(String(value || "").trim());
+    if (!/(^|\.)spotify\.com$/i.test(url.hostname)) return "";
+    return url.pathname.match(/\/track\/([A-Za-z0-9]{22})(?:\/|$)/)?.[1] || "";
+  } catch {
+    return "";
+  }
+};
+
+const renderProfileSpotifySong = (url) => {
+  const id = spotifyTrackId(url);
+  profileSpotifyPlayer.replaceChildren();
+  profileSpotifyCard.hidden = !id;
+  if (!id) return;
+  const frame = document.createElement("iframe");
+  frame.src = `https://open.spotify.com/embed/track/${id}?utm_source=generator&theme=0`;
+  frame.title = `@${targetProfile.username}'s Spotify profile song`;
+  frame.loading = "lazy";
+  frame.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";
+  profileSpotifyPlayer.append(frame);
+};
 
 const validProfile = (profile, userId) =>
   profile?.uid === userId &&
@@ -338,6 +363,7 @@ onAuthStateChanged(auth, async (user) => {
     setStatus("This account is banned.", true);
     return;
   }
+  renderProfileSpotifySong(targetProfile.spotifyTrackUrl || "");
   document.title = `@${targetProfile.username} — AnonChat`;
   document.getElementById("profile-name").textContent = targetProfile.username;
   document.getElementById("profile-handle").textContent = `@${targetProfile.username}`;
