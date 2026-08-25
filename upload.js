@@ -26,7 +26,7 @@ const compressImage = (file, maxWidth, maxHeight, quality = 0.72) => new Promise
       canvas.height = Math.max(1, Math.round(image.height * scale));
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       const data = canvas.toDataURL("image/jpeg", quality);
-      if (data.length > 780000) {
+      if (data.length > 360000) {
         reject(new Error("That image is still too large after compression."));
         return;
       }
