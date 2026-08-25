@@ -17,7 +17,7 @@
     <a class="brand" href="timeline.html">AnonChat</a>
     <div class="topbar-actions">
       <a class="secondary-button nav-button" href="timeline.html">← Timeline</a>
-      <button class="install-app secondary-button" type="button">Install app</button>
+      <div class="main-menu"><button id="main-menu-button" class="menu-button" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button><nav id="main-menu-panel" class="main-menu-panel" hidden><a href="timeline.html">Timeline</a><a href="community.html">Community</a><a href="toolkit.html">My tools</a><button class="install-app menu-install">Install AnonChat</button></nav></div>
     </div>
   </header>
 
@@ -39,6 +39,8 @@
       </div>
     </section>
 
+    <section id="profile-details-card" class="profile-details-card"><p id="profile-live-status"></p><p id="profile-bio"></p><p id="profile-interests"></p><a id="profile-music" target="_blank" rel="noopener"></a><div id="profile-badges"></div></section>
+    <section class="profile-question-card"><h2>Ask anonymously</h2><form id="anonymous-question-form"><input id="anonymous-question" maxlength="240" placeholder="Your identity will not be shown" required><button type="submit">Send question</button></form><div id="question-answers"></div><div id="question-inbox" hidden><h3>Your anonymous questions</h3></div></section>
     <section class="profile-posts-section" aria-labelledby="profile-posts-title">
       <div class="feed-header">
         <h2 id="profile-posts-title" class="section-title">Posts</h2>
@@ -51,6 +53,8 @@
   </main>
 
   <script type="module" src="profile.js"></script>
+  <script type="module" src="profile-extras.js"></script>
+  <script src="nav-menu.js" defer></script>
   <script src="pwa.js" defer></script>
 </body>
 </html>
