@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0b0d12"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="Untitled.jpeg"><link rel="stylesheet" href="messages.css"><title>AnonChat — Messages</title></head>
+<body>
+<header class="messages-topbar"><a class="brand" href="timeline.html">AnonChat</a><div><a class="header-link" href="timeline.html">Timeline</a><button id="sign-out" class="secondary" type="button">Sign out</button></div></header>
+<main class="messages-shell">
+<section class="messages-hero"><div><p class="eyebrow">Private conversations</p><h1><span aria-hidden="true">✉</span> Messages</h1><p>Only accepted conversations appear here. Your email and private credentials are never shown.</p></div><span id="message-count" class="message-count">0 unread</span></section>
+<p id="messages-status" role="status" aria-live="polite"></p>
+<section class="request-card"><div><h2>Conversation requests</h2><p>Choose who can start a private conversation with you.</p></div><div id="request-list" class="request-list"></div><form id="new-request-form" class="new-request-form"><label for="request-user">Start a conversation</label><select id="request-user"></select><button class="primary" type="submit">Send request</button></form></section>
+<div class="messages-layout">
+<aside class="conversation-panel"><div class="panel-heading"><h2>Conversations</h2><span id="conversation-total"></span></div><div id="conversation-list" class="conversation-list"></div></aside>
+<section class="chat-panel" aria-labelledby="chat-title"><div class="chat-heading"><div><p class="eyebrow">Conversation</p><h2 id="chat-title">Select a conversation</h2></div><a href="community.html#messages-panel" class="privacy-link">Privacy controls</a></div><div id="message-stream" class="message-stream"><p class="empty-state">Accepted conversations will appear here.</p></div><form id="message-form" class="message-form" hidden><label class="sr-only" for="message-text">Message</label><textarea id="message-text" maxlength="500" rows="2" placeholder="Write a private message…" required></textarea><button class="primary" type="submit">Send</button></form></section>
+</div></main>
+<script type="module" src="messages.js"></script><script src="pwa.js" defer></script>
+</body></html>
