@@ -23,6 +23,21 @@ const setStatus = (message, isError = false) => {
   status.style.color = isError ? "#ff8080" : "white";
 };
 
+const signInMessage = (error) => {
+  if (error.message === "account-banned") return "This account has been banned.";
+  if (error.code === "auth/too-many-requests") {
+    return "Too many sign-in attempts. Wait a few minutes or use Forgot password below.";
+  }
+  if (error.code === "auth/network-request-failed") {
+    return "Your computer could not reach the sign-in service. Check its connection, VPN, or browser privacy settings and try again.";
+  }
+  if (error.code === "auth/user-disabled") return "This account has been disabled.";
+  if (["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found", "auth/invalid-email"].includes(error.code)) {
+    return "That email and password were not recognized. Use Forgot password below to reset it.";
+  }
+  return "Sign-in failed. Try again or use Forgot password below.";
+};
+
 onAuthStateChanged(auth, async (user) => {
   if (!user || authInProgress) return;
   const profile = await getDoc(doc(db, "users", user.uid));
@@ -51,12 +66,7 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
     window.location.replace("timeline.html");
   } catch (error) {
     authInProgress = false;
-    setStatus(
-      error.message === "account-banned"
-        ? "This account has been banned."
-        : "Could not sign in. Check your email and password.",
-      true
-    );
+    setStatus(signInMessage(error), true);
   }
 });
 
