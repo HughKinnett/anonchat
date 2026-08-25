@@ -92,9 +92,11 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch(() => {
-        if (help) help.textContent = "App installation is unavailable until the site is served over HTTPS.";
-      });
+      navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
+        .then((registration) => registration.update())
+        .catch(() => {
+          if (help) help.textContent = "App installation is unavailable until the site is served over HTTPS.";
+        });
     });
   }
 })();
