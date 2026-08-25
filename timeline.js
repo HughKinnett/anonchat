@@ -46,6 +46,35 @@ let pendingPostImage = "";
 const postImageInput = document.getElementById("post-image-upload");
 const postImagePreviewWrap = document.getElementById("post-image-preview-wrap");
 const postImagePreview = document.getElementById("post-image-preview");
+const alertsButton = document.getElementById("enable-alerts");
+let browserAlertIds = null;
+
+const updateAlertsButton = () => {
+  if (!alertsButton) return;
+  if (!("Notification" in window)) {
+    alertsButton.textContent = "Alerts unavailable";
+    alertsButton.disabled = true;
+    return;
+  }
+  alertsButton.textContent = Notification.permission === "granted" ? "Alerts on" : "Enable alerts";
+};
+
+alertsButton?.addEventListener("click", async () => {
+  if (!("Notification" in window)) return;
+  const permission = await Notification.requestPermission();
+  updateAlertsButton();
+  if (permission === "granted" && currentUser) {
+    browserAlertIds = new Set(currentNotificationIds);
+    localStorage.setItem(
+      `anonchat-browser-alerts-${currentUser.uid}`,
+      JSON.stringify([...browserAlertIds])
+    );
+    setStatus("Phone alerts are on while AnonChat is open or running in the background.");
+  } else if (permission !== "granted") {
+    setStatus("Allow notifications in your browser settings to receive alerts.", true);
+  }
+});
+updateAlertsButton();
 
 const compressPostImage = (file) => new Promise((resolve, reject) => {
   if (!file?.type.startsWith("image/") || file.size > 10 * 1024 * 1024) {
@@ -310,7 +339,9 @@ const renderNotifications = () => {
         ? `reacted ❤️ to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
         : data.type === "laugh"
           ? `reacted 😂 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-          : `reacted 🖕 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+          : data.type === "sad"
+            ? `reacted 😢 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+            : `reacted 🖕 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
     });
   });
 
@@ -362,6 +393,36 @@ const renderNotifications = () => {
     );
 
   currentNotificationIds = items.map((item) => item.id);
+  if ("Notification" in window && Notification.permission === "granted") {
+    if (browserAlertIds === null) {
+      browserAlertIds = new Set(currentNotificationIds);
+    } else {
+      items.filter((item) => !browserAlertIds.has(item.id)).forEach((notification) => {
+        const actor = usernames.get(notification.actorId) || "Anonymous user";
+        const alert = new Notification("AnonChat", {
+          body: `@${actor} ${notification.message}`,
+          icon: "Untitled.jpeg",
+          tag: `anonchat-${notification.id}`
+        });
+        alert.onclick = () => {
+          window.focus();
+          setFeedView(false);
+          requestAnimationFrame(() => {
+            document.getElementById(`post-${notification.postId}`)?.scrollIntoView({
+              behavior: "smooth",
+              block: "center"
+            });
+          });
+          alert.close();
+        };
+      });
+    }
+    currentNotificationIds.forEach((id) => browserAlertIds.add(id));
+    localStorage.setItem(
+      `anonchat-browser-alerts-${currentUser.uid}`,
+      JSON.stringify([...browserAlertIds])
+    );
+  }
   const unseenCount = currentNotificationIds.filter((id) => !seenNotificationIds.has(id)).length;
   notificationBadge.textContent = unseenCount > 99 ? "99+" : String(unseenCount);
   notificationBadge.hidden = unseenCount === 0;
