@@ -8,6 +8,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  increment,
   limit,
   onSnapshot,
   orderBy,
@@ -41,6 +42,59 @@ const searchInput = document.getElementById("site-search");
 const searchResults = document.getElementById("search-results");
 let currentNotificationIds = [];
 let seenNotificationIds = new Set();
+let pendingPostImage = "";
+const postImageInput = document.getElementById("post-image-upload");
+const postImagePreviewWrap = document.getElementById("post-image-preview-wrap");
+const postImagePreview = document.getElementById("post-image-preview");
+
+const compressPostImage = (file) => new Promise((resolve, reject) => {
+  if (!file?.type.startsWith("image/") || file.size > 10 * 1024 * 1024) {
+    reject(new Error("Choose an image smaller than 10 MB."));
+    return;
+  }
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error("Could not read that image."));
+  reader.onload = () => {
+    const image = new Image();
+    image.onerror = () => reject(new Error("Could not open that image."));
+    image.onload = () => {
+      const scale = Math.min(1, 1400 / image.width, 1400 / image.height);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      const data = canvas.toDataURL("image/jpeg", 0.7);
+      if (data.length > 780000) {
+        reject(new Error("That image is still too large after compression."));
+        return;
+      }
+      resolve(data);
+    };
+    image.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+postImageInput.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  setStatus("Preparing your post photo…");
+  try {
+    pendingPostImage = await compressPostImage(file);
+    postImagePreview.src = pendingPostImage;
+    postImagePreviewWrap.hidden = false;
+    setStatus("Photo ready.");
+  } catch (error) {
+    pendingPostImage = "";
+    setStatus(error.message || "Could not prepare that photo.", true);
+  }
+});
+
+document.getElementById("remove-post-image").addEventListener("click", () => {
+  pendingPostImage = "";
+  postImageInput.value = "";
+  postImagePreviewWrap.hidden = true;
+});
 
 const closeSearch = () => {
   searchResults.hidden = true;
@@ -253,8 +307,10 @@ const renderNotifications = () => {
       actorId: data.uid,
       createdAt: data.createdAt,
       message: data.type === "heart"
-        ? `hearted your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-        : `gave Fuck You to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+        ? `reacted ❤️ to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+        : data.type === "laugh"
+          ? `reacted 😂 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
+          : `reacted 🖕 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
     });
   });
 
@@ -449,7 +505,7 @@ const createFollowControl = (userId) => {
 };
 
 const addReaction = async (postId, type) => {
-  await addDoc(collection(db, "posts", postId, "reactions"), {
+  await setDoc(doc(db, "posts", postId, "reactions", currentUser.uid), {
     uid: currentUser.uid,
     type,
     createdAt: serverTimestamp()
@@ -458,18 +514,19 @@ const addReaction = async (postId, type) => {
 
 const reactionButton = (postId, type, emoji, reactionDocs) => {
   const count = reactionDocs.filter((reaction) => reaction.data().type === type).length;
+  const alreadyReacted = reactionDocs.some((reaction) => reaction.data().uid === currentUser.uid);
   const button = document.createElement("button");
   button.className = "reaction-button";
   button.type = "button";
-  button.textContent = type === "heart" ? `${emoji} Heart · ${count}` : `${emoji} Fuck You · ${count}`;
-  button.title = type === "heart" ? "Heart this post" : "Give this post the middle finger";
+  button.textContent = `${emoji} ${count}`;
+  button.title = alreadyReacted ? "You already reacted to this post" : "React to this post";
+  button.disabled = alreadyReacted;
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
       await addReaction(postId, type);
     } catch {
       setStatus("Could not save your reaction.", true);
-    } finally {
       button.disabled = false;
     }
   });
@@ -491,6 +548,7 @@ const sharePost = async (postDoc) => {
     originalAuthorId: sourceAuthorId,
     originalUsername: sourceUsername,
     content: post.content,
+    imageData: post.imageData || "",
     createdAt: serverTimestamp()
   });
 };
@@ -520,6 +578,12 @@ const renderPost = (postDoc) => {
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
   appendLinkedText(text, post.content);
+  const postImage = post.imageData ? document.createElement("img") : null;
+  if (postImage) {
+    postImage.className = "post-image";
+    postImage.src = post.imageData;
+    postImage.alt = "Photo attached to this post";
+  }
   const time = document.createElement("small");
   time.textContent = post.createdAt?.toDate
     ? post.createdAt.toDate().toLocaleString()
@@ -530,7 +594,8 @@ const renderPost = (postDoc) => {
   reactionsBar.className = "reactions";
   reactionsBar.append(
     reactionButton(sourceId, "heart", "❤️", reactionDocs),
-    reactionButton(sourceId, "middle_finger", "🖕", reactionDocs)
+    reactionButton(sourceId, "middle_finger", "🖕", reactionDocs),
+    reactionButton(sourceId, "laugh", "😂", reactionDocs)
   );
 
   const commentDocs = postComments(sourceId);
@@ -635,7 +700,9 @@ const renderPost = (postDoc) => {
     actions.append(remove);
   }
 
-  item.append(authorRow, text, time, reactionsBar, commentsSection, actions);
+  item.append(authorRow, text);
+  if (postImage) item.append(postImage);
+  item.append(time, reactionsBar, commentsSection, actions);
   return item;
 };
 
@@ -680,6 +747,12 @@ onAuthStateChanged(auth, async (user) => {
   }
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
+  if (profile.exists() && profile.data().banned === true) {
+    setStatus("This account has been banned.", true);
+    await signOut(auth);
+    window.location.replace("index.html");
+    return;
+  }
   if (!profile.exists() || !validProfile(profile.data(), user.uid)) {
     profileUsername = await ensureUserProfile(user, db);
     profile = await getDoc(profileRef);
@@ -690,6 +763,22 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("user-handle").textContent = profileUsername ? `@${profileUsername}` : "";
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
+  document.getElementById("admin-link").hidden =
+    !["i_love_you_h", "ownercybercapone"].includes(profileUsername.toLowerCase());
+  const statsRef = doc(db, "system", "accountStats");
+  if (!(await getDoc(statsRef)).exists()) {
+    await setDoc(statsRef, {
+      count: 5,
+      limit: 500,
+      updatedAt: serverTimestamp()
+    }).catch(() => {});
+  }
+  const viewDay = new Date().toISOString().slice(0, 10);
+  setDoc(doc(db, "pageViews", viewDay), {
+    date: viewDay,
+    views: increment(1),
+    updatedAt: serverTimestamp()
+  }, { merge: true }).catch(() => {});
 
   listeners.push(onSnapshot(
     query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(100)),
@@ -751,7 +840,7 @@ onAuthStateChanged(auth, async (user) => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const postContent = content.value.trim();
-  if (!currentUser || !postContent || postContent.length > 500) return;
+  if (!currentUser || (!postContent && !pendingPostImage) || postContent.length > 500) return;
 
   const submit = form.querySelector("button[type='submit']");
   submit.disabled = true;
@@ -761,9 +850,13 @@ form.addEventListener("submit", async (event) => {
       authorId: currentUser.uid,
       username: profileUsername,
       content: postContent,
+      imageData: pendingPostImage,
       createdAt: serverTimestamp()
     });
     content.value = "";
+    pendingPostImage = "";
+    postImageInput.value = "";
+    postImagePreviewWrap.hidden = true;
   } catch {
     setStatus("Could not publish your post.", true);
   } finally {

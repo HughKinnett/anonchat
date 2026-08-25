@@ -1,16 +1,19 @@
-const CACHE_NAME = "anonchat-v15";
+const CACHE_NAME = "anonchat-v16";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./timeline.html",
   "./profile.html",
+  "./admin.html",
   "./login.css",
   "./timeline.css",
+  "./admin.css",
   "./firebase-config.js",
   "./legacy-profile.js",
   "./loginfirebase.js",
   "./timeline.js",
   "./profile.js",
+  "./admin.js",
   "./upload.js",
   "./pwa.js",
   "./manifest.webmanifest",

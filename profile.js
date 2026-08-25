@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -8,6 +8,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  increment,
   onSnapshot,
   query,
   serverTimestamp,
@@ -178,6 +179,12 @@ const renderPosts = () => {
 
     const text = document.createElement("p");
     appendLinkedText(text, post.content);
+    const postImage = post.imageData ? document.createElement("img") : null;
+    if (postImage) {
+      postImage.className = "post-image";
+      postImage.src = post.imageData;
+      postImage.alt = "Photo attached to this post";
+    }
     const time = document.createElement("small");
     time.textContent = post.createdAt?.toDate
       ? post.createdAt.toDate().toLocaleString()
@@ -243,7 +250,9 @@ const renderPosts = () => {
     });
     commentsSection.append(summary, list, form);
 
-    item.append(text, time, commentsSection);
+    item.append(text);
+    if (postImage) item.append(postImage);
+    item.append(time, commentsSection);
     return item;
   }));
 
@@ -288,6 +297,11 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   const currentProfileRef = doc(db, "users", user.uid);
   let currentProfileSnapshot = await getDoc(currentProfileRef);
+  if (currentProfileSnapshot.exists() && currentProfileSnapshot.data().banned === true) {
+    await signOut(auth);
+    window.location.replace("index.html");
+    return;
+  }
   if (!currentProfileSnapshot.exists() || !validProfile(currentProfileSnapshot.data(), user.uid)) {
     currentProfileUsername = await ensureUserProfile(user, db);
     currentProfileSnapshot = await getDoc(currentProfileRef);
@@ -311,9 +325,28 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   targetProfile = profileSnapshot.data();
+  if (targetProfile.banned === true && currentUser.uid !== targetUserId) {
+    document.getElementById("profile-name").textContent = "Unavailable profile";
+    setStatus("This account is banned.", true);
+    return;
+  }
   document.title = `@${targetProfile.username} — AnonChat`;
   document.getElementById("profile-name").textContent = targetProfile.username;
   document.getElementById("profile-handle").textContent = `@${targetProfile.username}`;
+  if (targetProfile.profileImage) {
+    document.getElementById("view-profile-avatar").src = targetProfile.profileImage;
+  }
+  if (targetProfile.coverImage) {
+    document.getElementById("view-profile-cover").src = targetProfile.coverImage;
+  }
+  document.getElementById("profile-admin-link").hidden =
+    !["i_love_you_h", "ownercybercapone"].includes(currentProfileUsername.toLowerCase());
+  const viewDay = new Date().toISOString().slice(0, 10);
+  setDoc(doc(db, "pageViews", viewDay), {
+    date: viewDay,
+    views: increment(1),
+    updatedAt: serverTimestamp()
+  }, { merge: true }).catch(() => {});
 
   onSnapshot(collection(db, "users"), (snapshot) => {
     users = snapshot.docs;
