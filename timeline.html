@@ -34,7 +34,14 @@
           <ul id="notification-list" class="notification-list"></ul>
         </section>
       </div>
-      <button class="install-app secondary-button" type="button">Install app</button>
+      <div class="main-menu">
+        <button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button>
+        <nav id="main-menu-panel" class="main-menu-panel" hidden>
+          <a href="timeline.html">Timeline</a><a href="community.html">Community</a>
+          <a id="menu-profile-link" href="profile.html">My profile</a><a href="connections.html">Followers & following</a>
+          <button class="install-app menu-install" type="button">Install AnonChat</button><a class="menu-danger" href="delete-account.html">Delete account</a>
+        </nav>
+      </div>
       <button id="sign-out" class="secondary-button" type="button">Sign Out</button>
     </div>
   </header>
@@ -77,7 +84,7 @@
             <button id="remove-post-image" type="button" aria-label="Remove selected photo">Remove photo</button>
           </div>
           <div class="composer-footer">
-            <label class="photo-upload-button" for="post-image-upload">📷 Add photo</label>
+            <label class="photo-upload-button modern-photo-button" for="post-image-upload"><span class="photo-button-icon" aria-hidden="true">＋</span><span><strong>Add photo</strong><small>Upload from your device</small></span></label>
             <input id="post-image-upload" type="file" accept="image/*" hidden>
             <span>500 characters max</span>
             <button class="primary-button" type="submit">Post</button>
@@ -102,6 +109,7 @@
 
   <script type="module" src="upload.js"></script>
   <script type="module" src="timeline.js"></script>
+  <script src="nav-menu.js" defer></script>
   <script src="pwa.js" defer></script>
 </body>
 </html>
