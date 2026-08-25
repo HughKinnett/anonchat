@@ -1,26 +1,181 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --panel: rgba(18, 21, 29, 0.9);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --text: #f7f8fb;
+  --muted: #a9b0c0;
+  --accent: #8b5cf6;
+  --accent-hover: #7c3aed;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { min-height: 100%; }
+
 body {
-    background-color: black;
-    background-image: url('Untitled.jpeg');
-    background-attachment: fixed;  
-    background-size: cover;
-    color: white; /* Set text color to white */
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0;
+  background:
+    linear-gradient(100deg, rgba(7, 9, 14, 0.94), rgba(7, 9, 14, 0.64)),
+    url("Untitled.jpeg") center / cover fixed;
+  color: var(--text);
 }
 
-.login-container {
-    float: left;
+button, input { font: inherit; }
+
+button { touch-action: manipulation; }
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: max(18px, env(safe-area-inset-top)) 0 18px;
 }
 
-.input {
-    position: flex;
-    right: 0;
-    width: 50%; /* Adjust as needed */
-}
-/* Ensure all text elements are white */
-h1, p, {
-    color: white;
-}
-.email .password {
-    color: black;
+.brand {
+  color: white;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  text-decoration: none;
 }
 
+.install-app {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
 
+.install-app:hover { background: rgba(255, 255, 255, 0.14); }
+
+.auth-shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: clamp(28px, 7vh, 86px) 0 max(40px, env(safe-area-inset-bottom));
+}
+
+.intro { max-width: 780px; }
+
+.eyebrow {
+  margin: 0 0 14px;
+  color: #c4b5fd;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.intro h1 {
+  margin: 0;
+  font-size: clamp(2.6rem, 7vw, 5.8rem);
+  line-height: 0.96;
+  letter-spacing: -0.06em;
+}
+
+.intro > p:last-child {
+  max-width: 590px;
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.65;
+}
+
+.auth-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  max-width: 820px;
+  margin-top: clamp(38px, 7vw, 72px);
+}
+
+.auth-card {
+  padding: clamp(22px, 4vw, 34px);
+  border: 1px solid var(--panel-border);
+  border-radius: 22px;
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(16px);
+}
+
+.auth-card h2 { margin: 0; font-size: 1.45rem; }
+
+.auth-card > p {
+  min-height: 42px;
+  margin: 8px 0 22px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+form { display: grid; gap: 9px; }
+
+label {
+  margin-top: 6px;
+  color: #d9dce5;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.07);
+  color: white;
+}
+
+input:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.24);
+}
+
+.primary-button {
+  min-height: 48px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: white;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.primary-button:hover { background: var(--accent-hover); }
+
+.primary-button:disabled { cursor: wait; opacity: 0.65; }
+
+#auth-status, .install-help {
+  max-width: 820px;
+  min-height: 24px;
+  margin: 18px 0 0;
+}
+
+.install-help { color: #c4b5fd; }
+
+@media (max-width: 720px) {
+  body { background-attachment: scroll; }
+  .auth-shell { padding-top: 34px; }
+  .auth-panels { grid-template-columns: 1fr; }
+  .auth-card > p { min-height: 0; }
+}
+
+@media (max-width: 420px) {
+  .site-header, .auth-shell { width: min(100% - 22px, 1180px); }
+  .intro h1 { font-size: clamp(2.35rem, 14vw, 3.4rem); }
+  .auth-card { border-radius: 17px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; }
+}

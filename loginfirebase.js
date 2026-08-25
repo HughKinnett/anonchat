@@ -1,74 +1,90 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { getDatabase } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+import { auth, db } from "./firebase-config.js";
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  updateProfile
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import {
+  doc,
+  runTransaction,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const firebaseConfig = {
-    apiKey: "AIzaSyAyIEUtkZMQwjfDuml46HslThXpnbXilEk",
-    authDomain: "anonchatlogin.firebaseapp.com",
-    projectId: "anonchatlogin",
-    storageBucket: "anonchatlogin.appspot.com",
-    messagingSenderId: "734396560776",
-    appId: "1:734396560776:web:49cb149c173633d77ab63d",
-    measurementId: "G-2LDXDEGR8Y"
+const status = document.getElementById("auth-status");
+let authInProgress = false;
+
+const setStatus = (message, isError = false) => {
+  status.textContent = message;
+  status.style.color = isError ? "#ff8080" : "white";
 };
 
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const database = getDatabase(app);
-const provider = new GoogleAuthProvider();
-
-document.getElementById('sign-in-form').addEventListener('submit', function(event) {
-    event.preventDefault();
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-
-    console.log('Attempting to sign in with email:', email);
-
-    signInWithEmailAndPassword(auth, email, password)
-        .then((userCredential) => {
-            // Signed in
-            const user = userCredential.user;
-            console.log('User signed in:', user);
-            window.location.href = 'timeline.html'; // Redirect to timeline
-        })
-        .catch((error) => {
-            const errorCode = error.code;
-            const errorMessage = error.message;
-            console.error('Error signing in:', errorCode, errorMessage);
-            alert('Login failed: ' + errorMessage);
-        });
+onAuthStateChanged(auth, (user) => {
+  if (user && !authInProgress) window.location.replace("timeline.html");
 });
-document.getElementById('sign-up-form').addEventListener('submit', function(event) {
-    event.preventDefault();
-    const username = document.getElementById('username').value;
-    const email = document.getElementById('sign-up-email').value;
-    const password = document.getElementById('sign-up-password').value;
 
-    console.log('Attempting to sign up with email:', email);
+document.getElementById("sign-in-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  authInProgress = true;
+  setStatus("Signing in…");
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
 
-    createUserWithEmailAndPassword(auth, email, password)
-        .then((userCredential) => {
-            // Signed up
-            const user = userCredential.user;
-            console.log('User signed up:', user);
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+    window.location.replace("timeline.html");
+  } catch {
+    authInProgress = false;
+    setStatus("Could not sign in. Check your email and password.", true);
+  }
+});
 
-            // Update profile with username
-            updateProfile(user, {
-                displayName: username
-            }).then(() => {
-                console.log('Username updated:', username);
-                window.location.href = 'timeline.html'; // Redirect to timeline
-            }).catch((error) => {
-                console.error('Error updating username:', error);
-                alert('Sign up failed: ' + error.message);
-            });
-        })
-        .catch((error) => {
-            const errorCode = error.code;
-            const errorMessage = error.message;
-            console.error('Error signing up:', errorCode, errorMessage);
-            alert('Sign up failed: ' + errorMessage);
-        });
+document.getElementById("sign-up-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const username = document.getElementById("username").value.trim();
+  const normalizedUsername = username.toLowerCase();
+  const email = document.getElementById("sign-up-email").value.trim();
+  const password = document.getElementById("sign-up-password").value;
+
+  if (!/^[A-Za-z0-9_]{3,30}$/.test(username)) {
+    setStatus("Username must be 3–30 letters, numbers, or underscores.", true);
+    return;
+  }
+
+  authInProgress = true;
+  setStatus("Creating your anonymous account…");
+  let newUser;
+  try {
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    newUser = credential.user;
+
+    await runTransaction(db, async (transaction) => {
+      const usernameRef = doc(db, "usernames", normalizedUsername);
+      if ((await transaction.get(usernameRef)).exists()) {
+        throw new Error("username-taken");
+      }
+
+      transaction.set(usernameRef, {
+        uid: newUser.uid,
+        username,
+        createdAt: serverTimestamp()
+      });
+      transaction.set(doc(db, "users", newUser.uid), {
+        uid: newUser.uid,
+        username,
+        createdAt: serverTimestamp()
+      });
+    });
+
+    await updateProfile(newUser, { displayName: username });
+    window.location.replace("timeline.html");
+  } catch (error) {
+    if (newUser) await deleteUser(newUser).catch(() => {});
+    authInProgress = false;
+    let message = "Could not create the account. Please check the details and try again.";
+    if (error.message === "username-taken") message = "That anonymous username is already taken.";
+    if (error.code === "auth/email-already-in-use") message = "That email address already has an account.";
+    setStatus(message, true);
+  }
 });

@@ -1,27 +1,74 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="stylesheet" href="timeline.css">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Timeline</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="description" content="The AnonChat pseudonymous timeline.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="Untitled.jpeg">
+  <link rel="stylesheet" href="timeline.css">
+  <title>AnonChat — Timeline</title>
 </head>
 <body>
-    <div class="profile-banner">
-        <input type="file" id="banner-upload" accept="image/*" style="display: none;">
-        <img id="banner-pic" src="default-banner.jpg" alt="Banner Picture" onclick="document.getElementById('banner-upload').click();">
-        <input type="file" id="profile-upload" accept="image/*" style="display: none;">
-        <img id="profile-pic" src="profile-pic.jpg" alt="Profile Picture" onclick="document.getElementById('profile-upload').click();">
-        <h1>User Name</h1>
-        <p>@username</p>
+  <header class="topbar">
+    <a class="brand" href="timeline.html">AnonChat</a>
+    <div class="topbar-actions">
+      <button class="install-app secondary-button" type="button">Install app</button>
+      <button id="sign-out" class="secondary-button" type="button">Sign Out</button>
     </div>
-    <form id="post-form">
-        <textarea name="post-content" id="post-content" placeholder="What's happening?" required></textarea>
-        <button type="submit">Post</button>
-    </form>
-    <ul class="feed" id="feed">
-    </ul>
+  </header>
 
-    <script src="upload.js"></script>
+  <main class="page-shell">
+    <section class="profile-banner" aria-labelledby="display-name">
+      <input type="file" id="banner-upload" accept="image/*" hidden>
+      <button class="banner-button" type="button" aria-label="Change banner" onclick="document.getElementById('banner-upload').click()">
+        <img id="banner-pic" src="Untitled.jpeg" alt="">
+      </button>
+      <div class="profile-content">
+        <input type="file" id="profile-upload" accept="image/*" hidden>
+        <button class="avatar-button" type="button" aria-label="Change profile picture" onclick="document.getElementById('profile-upload').click()">
+          <img id="profile-pic" src="Untitled.jpeg" alt="">
+        </button>
+        <div>
+          <h1 id="display-name">User Name</h1>
+          <p id="user-handle">@username</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="content-grid">
+      <section class="composer-card" aria-labelledby="composer-title">
+        <h2 id="composer-title">Post anonymously</h2>
+        <form id="post-form">
+          <label class="sr-only" for="post-content">Post content</label>
+          <textarea name="post-content" id="post-content" maxlength="500" placeholder="What's happening?" required></textarea>
+          <div class="composer-footer">
+            <span>500 characters max</span>
+            <button class="primary-button" type="submit">Post</button>
+          </div>
+        </form>
+        <p id="timeline-status" role="status" aria-live="polite"></p>
+        <p class="install-help" role="status" aria-live="polite"></p>
+      </section>
+
+      <section aria-labelledby="feed-title">
+        <div class="feed-header">
+          <h2 id="feed-title" class="section-title">Latest posts</h2>
+          <div class="feed-tabs" aria-label="Choose posts to show">
+            <button id="show-all-posts" class="feed-tab" type="button" aria-pressed="true">Timeline</button>
+            <button id="show-profile-posts" class="feed-tab" type="button" aria-pressed="false">My profile</button>
+          </div>
+        </div>
+        <ul class="feed" id="feed"></ul>
+      </section>
+    </div>
+  </main>
+
+  <script src="upload.js"></script>
+  <script type="module" src="timeline.js"></script>
+  <script src="pwa.js" defer></script>
 </body>
 </html>
