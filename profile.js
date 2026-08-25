@@ -2,7 +2,9 @@ import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
+  addDoc,
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
@@ -18,6 +20,8 @@ const feed = document.getElementById("profile-feed");
 const status = document.getElementById("profile-status");
 const followButton = document.getElementById("profile-follow-button");
 let currentUser;
+let currentProfileUsername;
+let comments = [];
 let follows = [];
 let targetProfile;
 let targetPosts = [];
@@ -56,6 +60,12 @@ const renderFollowControl = () => {
   followButton.disabled = false;
 };
 
+const postComments = (postId) => comments
+  .filter((comment) => comment.ref.parent.parent?.id === postId)
+  .sort((a, b) =>
+    (a.data().createdAt?.toMillis?.() || 0) - (b.data().createdAt?.toMillis?.() || 0)
+  );
+
 const renderPosts = () => {
   const sorted = [...targetPosts].sort((a, b) => {
     const aTime = a.data().createdAt?.toMillis?.() || 0;
@@ -87,7 +97,67 @@ const renderPosts = () => {
     time.textContent = post.createdAt?.toDate
       ? post.createdAt.toDate().toLocaleString()
       : "Posting…";
-    item.append(text, time);
+    const sourceId = post.type === "repost" ? post.originalPostId : postDoc.id;
+    const commentDocs = postComments(sourceId);
+    const commentsSection = document.createElement("details");
+    commentsSection.className = "comments-section";
+    const summary = document.createElement("summary");
+    summary.textContent = `Comments · ${commentDocs.length}`;
+    const list = document.createElement("ul");
+    list.className = "comments-list";
+    commentDocs.forEach((commentDoc) => {
+      const comment = commentDoc.data();
+      const commentItem = document.createElement("li");
+      commentItem.className = "comment-item";
+      const author = document.createElement("a");
+      author.className = "comment-author";
+      author.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
+      author.textContent = `@${comment.username || "anonymous"}`;
+      const body = document.createElement("p");
+      body.textContent = comment.text;
+      const commentTime = document.createElement("time");
+      commentTime.textContent = comment.createdAt?.toDate
+        ? comment.createdAt.toDate().toLocaleString()
+        : "Posting…";
+      commentItem.append(author, body, commentTime);
+      list.append(commentItem);
+    });
+
+    const form = document.createElement("form");
+    form.className = "comment-form";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 280;
+    input.required = true;
+    input.placeholder = "Write a comment…";
+    input.setAttribute("aria-label", "Write a comment");
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.textContent = "Comment";
+    form.append(input, submit);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const commentText = input.value.trim();
+      if (!commentText) return;
+      submit.disabled = true;
+      try {
+        await addDoc(collection(db, "posts", sourceId, "comments"), {
+          uid: currentUser.uid,
+          username: currentProfileUsername,
+          text: commentText,
+          createdAt: serverTimestamp()
+        });
+        input.value = "";
+        commentsSection.open = true;
+      } catch {
+        setStatus("Could not post your comment.", true);
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    commentsSection.append(summary, list, form);
+
+    item.append(text, time, commentsSection);
     return item;
   }));
 
@@ -130,6 +200,15 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  const currentProfileRef = doc(db, "users", user.uid);
+  let currentProfileSnapshot = await getDoc(currentProfileRef);
+  if (!currentProfileSnapshot.exists() || !validProfile(currentProfileSnapshot.data(), user.uid)) {
+    currentProfileUsername = await ensureUserProfile(user, db);
+    currentProfileSnapshot = await getDoc(currentProfileRef);
+  } else {
+    currentProfileUsername = currentProfileSnapshot.data().username;
+  }
+
   const targetProfileRef = doc(db, "users", targetUserId);
   let profileSnapshot = await getDoc(targetProfileRef);
   if (
@@ -149,6 +228,11 @@ onAuthStateChanged(auth, async (user) => {
   document.title = `@${targetProfile.username} — AnonChat`;
   document.getElementById("profile-name").textContent = targetProfile.username;
   document.getElementById("profile-handle").textContent = `@${targetProfile.username}`;
+
+  onSnapshot(collectionGroup(db, "comments"), (snapshot) => {
+    comments = snapshot.docs;
+    renderPosts();
+  }, () => setStatus("Could not load comments.", true));
 
   onSnapshot(collection(db, "follows"), (snapshot) => {
     follows = snapshot.docs;
