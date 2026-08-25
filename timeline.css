@@ -53,7 +53,7 @@ button:disabled { cursor: wait; opacity: 0.6; }
 
 .topbar-actions { display: flex; gap: 8px; }
 
-.primary-button, .secondary-button, .reaction-button, .share-button, .delete-button, .feed-tab {
+.primary-button, .secondary-button, .reaction-button, .share-button, .delete-button, .feed-tab, .follow-button {
   min-height: 42px;
   padding: 0 15px;
   border-radius: 999px;
@@ -68,7 +68,7 @@ button:disabled { cursor: wait; opacity: 0.6; }
 
 .primary-button:hover { background: var(--accent-hover); }
 
-.secondary-button, .reaction-button, .share-button, .delete-button, .feed-tab {
+.secondary-button, .reaction-button, .share-button, .delete-button, .feed-tab, .follow-button {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
@@ -219,6 +219,32 @@ button:disabled { cursor: wait; opacity: 0.6; }
 
 .feed-item h3, .feed-item p { margin: 0; }
 
+.post-author-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.follow-control { flex: 0 0 auto; }
+
+.follow-button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+}
+
+.follow-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.2);
+}
+
+.follower-count {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 .feed-item p { margin-top: 10px; line-height: 1.55; }
 
 .repost-label {
@@ -292,6 +318,13 @@ button:disabled { cursor: wait; opacity: 0.6; }
   .feed-header { align-items: flex-start; flex-direction: column; }
 
   .feed-item, .composer-card { border-radius: 14px; }
+
+  .post-author-row { align-items: flex-start; }
+
+  .follow-button {
+    min-height: 32px;
+    padding: 0 10px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
