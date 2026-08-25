@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -47,6 +47,7 @@ const postImageInput = document.getElementById("post-image-upload");
 const postImagePreviewWrap = document.getElementById("post-image-preview-wrap");
 const postImagePreview = document.getElementById("post-image-preview");
 const alertsButton = document.getElementById("enable-alerts");
+const editUsernameButton = document.getElementById("edit-username");
 let browserAlertIds = null;
 
 const updateAlertsButton = () => {
