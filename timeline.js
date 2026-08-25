@@ -34,12 +34,15 @@ let comments = [];
 let follows = [];
 let users = [];
 let notificationReads = [];
+let directMessages = [];
+let messageReadAt = 0;
 let showingProfile = false;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
 const notificationPanel = document.getElementById("notification-panel");
 const notificationList = document.getElementById("notification-list");
 const notificationBadge = document.getElementById("notification-badge");
+const messageBadge = document.getElementById("message-badge");
 const searchInput = document.getElementById("site-search");
 const searchResults = document.getElementById("search-results");
 let currentNotificationIds = [];
@@ -51,6 +54,19 @@ const postImagePreview = document.getElementById("post-image-preview");
 const alertsButton = document.getElementById("enable-alerts");
 const editUsernameButton = document.getElementById("edit-username");
 let browserAlertIds = null;
+
+const renderMessageBadge = () => {
+  if (!messageBadge || !currentUser) return;
+  const unread = directMessages.filter((entry) => {
+    const message = entry.data();
+    return message.senderId !== currentUser.uid &&
+      (message.createdAt?.toMillis?.() || 0) > messageReadAt;
+  }).length;
+  messageBadge.textContent = unread > 99 ? "99+" : String(unread);
+  messageBadge.hidden = unread === 0;
+  const link = messageBadge.closest("a");
+  if (link) link.setAttribute("aria-label", unread ? `Open messages, ${unread} unread` : "Open messages");
+};
 const spotifyCard = document.querySelector(".spotify-profile-card");
 const spotifyPlayerWrap = document.getElementById("spotify-player-wrap");
 const spotifyForm = document.getElementById("spotify-song-form");
@@ -970,6 +986,20 @@ onAuthStateChanged(auth, async (user) => {
     views: increment(1),
     updatedAt: serverTimestamp()
   }, { merge: true }).catch(() => {});
+
+  listeners.push(onSnapshot(
+    query(collection(db, "directMessages"), where("participants", "array-contains", user.uid)),
+    (snapshot) => { directMessages = snapshot.docs; renderMessageBadge(); },
+    () => {}
+  ));
+  listeners.push(onSnapshot(
+    doc(db, "messageReads", user.uid),
+    (snapshot) => {
+      messageReadAt = snapshot.data()?.lastReadAt?.toMillis?.() || 0;
+      renderMessageBadge();
+    },
+    () => {}
+  ));
 
   listeners.push(onSnapshot(
     query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(100)),
