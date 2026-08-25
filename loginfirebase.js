@@ -1,74 +1,66 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { getDatabase } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+import { auth, db } from "./firebase-config.js";
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  updateProfile
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import {
+  doc,
+  serverTimestamp,
+  setDoc
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const firebaseConfig = {
-    apiKey: "AIzaSyAyIEUtkZMQwjfDuml46HslThXpnbXilEk",
-    authDomain: "anonchatlogin.firebaseapp.com",
-    projectId: "anonchatlogin",
-    storageBucket: "anonchatlogin.appspot.com",
-    messagingSenderId: "734396560776",
-    appId: "1:734396560776:web:49cb149c173633d77ab63d",
-    measurementId: "G-2LDXDEGR8Y"
+const status = document.getElementById("auth-status");
+const setStatus = (message, isError = false) => {
+  status.textContent = message;
+  status.style.color = isError ? "#ff8080" : "white";
 };
 
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const database = getDatabase(app);
-const provider = new GoogleAuthProvider();
-
-document.getElementById('sign-in-form').addEventListener('submit', function(event) {
-    event.preventDefault();
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-
-    console.log('Attempting to sign in with email:', email);
-
-    signInWithEmailAndPassword(auth, email, password)
-        .then((userCredential) => {
-            // Signed in
-            const user = userCredential.user;
-            console.log('User signed in:', user);
-            window.location.href = 'timeline.html'; // Redirect to timeline
-        })
-        .catch((error) => {
-            const errorCode = error.code;
-            const errorMessage = error.message;
-            console.error('Error signing in:', errorCode, errorMessage);
-            alert('Login failed: ' + errorMessage);
-        });
+onAuthStateChanged(auth, (user) => {
+  if (user) window.location.replace("timeline.html");
 });
-document.getElementById('sign-up-form').addEventListener('submit', function(event) {
-    event.preventDefault();
-    const username = document.getElementById('username').value;
-    const email = document.getElementById('sign-up-email').value;
-    const password = document.getElementById('sign-up-password').value;
 
-    console.log('Attempting to sign up with email:', email);
+document.getElementById("sign-in-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setStatus("Signing in…");
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
 
-    createUserWithEmailAndPassword(auth, email, password)
-        .then((userCredential) => {
-            // Signed up
-            const user = userCredential.user;
-            console.log('User signed up:', user);
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+    window.location.replace("timeline.html");
+  } catch {
+    setStatus("Could not sign in. Check your email and password.", true);
+  }
+});
 
-            // Update profile with username
-            updateProfile(user, {
-                displayName: username
-            }).then(() => {
-                console.log('Username updated:', username);
-                window.location.href = 'timeline.html'; // Redirect to timeline
-            }).catch((error) => {
-                console.error('Error updating username:', error);
-                alert('Sign up failed: ' + error.message);
-            });
-        })
-        .catch((error) => {
-            const errorCode = error.code;
-            const errorMessage = error.message;
-            console.error('Error signing up:', errorCode, errorMessage);
-            alert('Sign up failed: ' + errorMessage);
-        });
+document.getElementById("sign-up-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const username = document.getElementById("username").value.trim();
+  const email = document.getElementById("sign-up-email").value.trim();
+  const password = document.getElementById("sign-up-password").value;
+
+  if (!/^[A-Za-z0-9_]{3,30}$/.test(username)) {
+    setStatus("Username must be 3–30 letters, numbers, or underscores.", true);
+    return;
+  }
+
+  setStatus("Creating your account…");
+  try {
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    await updateProfile(credential.user, { displayName: username });
+    await setDoc(doc(db, "users", credential.user.uid), {
+      uid: credential.user.uid,
+      username,
+      createdAt: serverTimestamp()
+    });
+    window.location.replace("timeline.html");
+  } catch (error) {
+    if (auth.currentUser) await auth.currentUser.delete().catch(() => {});
+    const message = error.code === "auth/email-already-in-use"
+      ? "That email address already has an account."
+      : "Could not create the account. Please check the details and try again.";
+    setStatus(message, true);
+  }
 });
