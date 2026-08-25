@@ -114,7 +114,20 @@ button:disabled { cursor: wait; opacity: 0.6; }
   background: var(--surface-2);
 }
 
-.notification-item p { margin: 0; line-height: 1.35; }
+.notification-item {
+  display: block;
+  width: 100%;
+  border: 1px solid transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.notification-item:hover, .notification-item:focus-visible {
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.18);
+}
+
+.notification-message { display: block; margin: 0; line-height: 1.35; }
 
 .notification-item time, .notification-empty {
   color: var(--muted);
@@ -122,6 +135,11 @@ button:disabled { cursor: wait; opacity: 0.6; }
 }
 
 .notification-item time { display: block; margin-top: 5px; }
+
+.feed-item.notification-highlight {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.22);
+}
 
 .primary-button, .secondary-button, .reaction-button, .share-button, .delete-button, .feed-tab, .follow-button {
   min-height: 42px;
