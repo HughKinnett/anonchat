@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { ensureUserProfile } from "./legacy-profile.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -94,38 +95,28 @@ const createFollowControl = (userId) => {
   return wrapper;
 };
 
-const toggleReaction = async (postId, type) => {
-  const reactionRef = doc(db, "posts", postId, "reactions", currentUser.uid);
-  const existing = reactions.find((reaction) => reaction.ref.path === reactionRef.path);
-
-  if (existing?.data().type === type) {
-    await deleteDoc(reactionRef);
-  } else {
-    await setDoc(reactionRef, {
-      uid: currentUser.uid,
-      type,
-      createdAt: serverTimestamp()
-    });
-  }
+const addReaction = async (postId, type) => {
+  await addDoc(collection(db, "posts", postId, "reactions"), {
+    uid: currentUser.uid,
+    type,
+    createdAt: serverTimestamp()
+  });
 };
 
 const reactionButton = (postId, type, emoji, reactionDocs) => {
   const count = reactionDocs.filter((reaction) => reaction.data().type === type).length;
-  const selected = reactionDocs.some((reaction) =>
-    reaction.id === currentUser.uid && reaction.data().type === type
-  );
   const button = document.createElement("button");
   button.className = "reaction-button";
   button.type = "button";
   button.textContent = type === "heart" ? `${emoji} Heart · ${count}` : `${emoji} ${count}`;
-  button.setAttribute("aria-pressed", String(selected));
   button.title = type === "heart" ? "Heart this post" : "Give this post the middle finger";
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await toggleReaction(postId, type);
+      await addReaction(postId, type);
     } catch {
       setStatus("Could not save your reaction.", true);
+    } finally {
       button.disabled = false;
     }
   });
@@ -263,8 +254,14 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
-  const profile = await getDoc(doc(db, "users", user.uid));
-  profileUsername = profile.exists() ? profile.data().username : user.displayName;
+  const profileRef = doc(db, "users", user.uid);
+  let profile = await getDoc(profileRef);
+  if (!profile.exists()) {
+    profileUsername = await ensureUserProfile(user, db);
+    profile = await getDoc(profileRef);
+  } else {
+    profileUsername = profile.data().username;
+  }
   document.getElementById("display-name").textContent = profileUsername || "AnonChat user";
   document.getElementById("user-handle").textContent = profileUsername ? `@${profileUsername}` : "";
 

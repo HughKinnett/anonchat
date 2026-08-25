@@ -5,7 +5,7 @@ A responsive pseudonymous social timeline using Firebase Authentication and Clou
 ## Features
 
 - unique anonymous handles; email addresses are never displayed
-- original posts with live ❤️ and 🖕 reaction counts
+- original posts with live ❤️ and 🖕 counts that increase on every press
 - follow/unfollow controls with live follower totals beside each author
 - secure reposts to a user's profile without changing the original author's words
 - clickable author handles with dedicated user profiles
@@ -35,6 +35,6 @@ The **Install app** button opens the browser's native installation prompt on sup
 - `users/{uid}`: `uid`, `username`, `createdAt`
 - `follows/{followerId_followingId}`: one validated follow relationship per user pair
 - `posts/{postId}`: an original post or a validated repost
-- `posts/{postId}/reactions/{uid}`: one ❤️ or 🖕 reaction per user
+- `posts/{postId}/reactions/{reactionId}`: an append-only ❤️ or 🖕 event for every press
 
 The included rules require authentication, cap original posts at 500 characters, prevent handle impersonation, verify reposts against their original posts, and restrict deletion to the post or repost owner.
