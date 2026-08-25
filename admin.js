@@ -12,6 +12,7 @@ const search = document.getElementById("admin-user-search");
 let users = [];
 let posts = [];
 let views = [];
+let adminIds = new Set();
 
 const setStatus = (message, isError = false) => {
   status.textContent = message;
@@ -45,7 +46,9 @@ const renderUsers = () => {
     const ban = document.createElement("button");
     ban.type = "button";
     ban.className = `admin-action ${data.banned ? "restore" : "danger"}`;
-    ban.textContent = data.banned ? "Unban" : "Ban";
+    const protectedAdmin = adminIds.has(entry.id);
+    ban.textContent = protectedAdmin ? "Protected admin" : data.banned ? "Unban" : "Ban";
+    ban.disabled = protectedAdmin;
     ban.addEventListener("click", async () => {
       ban.disabled = true;
       try {
@@ -139,6 +142,11 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("admin-identity").textContent =
     `Signed in as @${profileSnapshot.data()?.username || user.displayName || "admin"}`;
   document.getElementById("account-count").textContent = statsSnapshot.data()?.count ?? 0;
+
+  onSnapshot(collection(db, "admins"), (snapshot) => {
+    adminIds = new Set(snapshot.docs.map((entry) => entry.id));
+    renderUsers();
+  }, () => setStatus("Could not load administrator protections.", true));
 
   onSnapshot(collection(db, "users"), (snapshot) => {
     users = snapshot.docs;
