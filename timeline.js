@@ -133,6 +133,26 @@ const validProfile = (profile, userId) =>
 const formatNotificationTime = (timestamp) =>
   timestamp?.toDate ? timestamp.toDate().toLocaleString() : "Just now";
 
+const appendLinkedText = (container, value) => {
+  String(value || "").split(/(@[A-Za-z0-9_]{3,30})/g).forEach((part) => {
+    if (!part.startsWith("@")) {
+      container.append(document.createTextNode(part));
+      return;
+    }
+    const handle = part.slice(1).toLowerCase();
+    const profile = users.find((entry) => entry.data().username?.toLowerCase() === handle);
+    if (!profile) {
+      container.append(document.createTextNode(part));
+      return;
+    }
+    const link = document.createElement("a");
+    link.className = "mention-link";
+    link.href = `profile.html?uid=${encodeURIComponent(profile.id)}`;
+    link.textContent = part;
+    container.append(link);
+  });
+};
+
 const renderNotifications = () => {
   if (!currentUser) return;
   const ownedPosts = new Map(
@@ -368,7 +388,7 @@ const renderPost = (postDoc) => {
   author.textContent = `@${displayedUsername}`;
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
-  text.textContent = post.content;
+  appendLinkedText(text, post.content);
   const time = document.createElement("small");
   time.textContent = post.createdAt?.toDate
     ? post.createdAt.toDate().toLocaleString()
@@ -399,7 +419,7 @@ const renderPost = (postDoc) => {
     commenter.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
     commenter.textContent = `@${comment.username || "anonymous"}`;
     const commentText = document.createElement("p");
-    commentText.textContent = comment.text;
+    appendLinkedText(commentText, comment.text);
     const commentTime = document.createElement("time");
     commentTime.textContent = comment.createdAt?.toDate
       ? comment.createdAt.toDate().toLocaleString()
@@ -414,7 +434,7 @@ const renderPost = (postDoc) => {
   commentInput.type = "text";
   commentInput.maxLength = 280;
   commentInput.required = true;
-  commentInput.placeholder = "Write a comment…";
+  commentInput.placeholder = "Comment or tag @username…";
   commentInput.setAttribute("aria-label", "Write a comment");
   const commentSubmit = document.createElement("button");
   commentSubmit.type = "submit";
