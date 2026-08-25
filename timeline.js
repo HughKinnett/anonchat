@@ -656,7 +656,8 @@ const renderPost = (postDoc) => {
   reactionsBar.append(
     reactionButton(sourceId, "heart", "❤️", reactionDocs),
     reactionButton(sourceId, "middle_finger", "🖕", reactionDocs),
-    reactionButton(sourceId, "laugh", "😂", reactionDocs)
+    reactionButton(sourceId, "laugh", "😂", reactionDocs),
+    reactionButton(sourceId, "sad", "😢", reactionDocs)
   );
 
   const commentDocs = postComments(sourceId);
@@ -799,6 +800,9 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  const storedAlertIds = localStorage.getItem(`anonchat-browser-alerts-${user.uid}`);
+  browserAlertIds = storedAlertIds ? new Set(JSON.parse(storedAlertIds)) : null;
+  updateAlertsButton();
   try {
     seenNotificationIds = new Set(JSON.parse(
       localStorage.getItem(`anonchat-seen-notifications-${user.uid}`) || "[]"
