@@ -215,11 +215,11 @@ const renderPosts = () => {
     input.required = true;
     input.placeholder = "Comment or tag @username…";
     input.setAttribute("aria-label", "Write a comment");
-    attachMentionAutocomplete(input);
     const submit = document.createElement("button");
     submit.type = "submit";
     submit.textContent = "Comment";
     form.append(input, submit);
+    attachMentionAutocomplete(input);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const commentText = input.value.trim();
