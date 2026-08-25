@@ -177,7 +177,7 @@ service cloud.firestore {
         && reactionId == request.auth.uid
         && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.type in ['heart', 'middle_finger', 'laugh']
+        && request.resource.data.type in ['heart', 'middle_finger', 'laugh', 'sad']
         && request.resource.data.createdAt == request.time;
       allow update: if false;
       allow delete: if isAdmin();
