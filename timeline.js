@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { ensureUserProfile } from "./legacy-profile.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -255,15 +256,12 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
-  if (!profile.exists() && /^[A-Za-z0-9_]{3,30}$/.test(user.displayName || "")) {
-    await setDoc(profileRef, {
-      uid: user.uid,
-      username: user.displayName,
-      createdAt: serverTimestamp()
-    });
+  if (!profile.exists()) {
+    profileUsername = await ensureUserProfile(user, db);
     profile = await getDoc(profileRef);
+  } else {
+    profileUsername = profile.data().username;
   }
-  profileUsername = profile.exists() ? profile.data().username : user.displayName;
   document.getElementById("display-name").textContent = profileUsername || "AnonChat user";
   document.getElementById("user-handle").textContent = profileUsername ? `@${profileUsername}` : "";
 
