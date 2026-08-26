@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { messageRequestDecision } from "./message-request-policy.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc, collection, doc, getDoc, onSnapshot, orderBy, query,
@@ -213,6 +214,13 @@ const acceptedUsers = () => state.users.filter((user) =>
   user.id !== state.user.uid && requestFor(user.id)?.data().status === "accepted"
 );
 
+const createMessageRequest = (to) => {
+  const id = [state.user.uid, to].sort().join("_");
+  return setDoc(doc(db, "messageRequests", id), {
+    fromId: state.user.uid, toId: to, status: "pending", createdAt: serverTimestamp()
+  });
+};
+
 const renderMessageUsers = () => {
   const others = state.users.filter((user) => user.id !== state.user.uid);
   $("message-user").replaceChildren(...others.map((user) => new Option(`@${user.data().username}`, user.id)));
@@ -228,16 +236,26 @@ $("request-chat").addEventListener("click", async () => {
   const existing = requestFor(to);
   try {
     if (existing) {
-      if (existing.data().status === "accepted") {
+      const decision = messageRequestDecision(existing.data(), state.user.uid);
+      if (decision.action === "accepted") {
         setStatus("You already have an accepted conversation with this user.");
         return;
       }
-      await updateDoc(existing.ref, { status: "pending" });
-    } else {
-      const id = [state.user.uid, to].sort().join("_");
-      await setDoc(doc(db, "messageRequests", id), {
+      if (decision.action === "outgoing-pending" || decision.action === "incoming-pending") {
+        setStatus(decision.action === "outgoing-pending"
+          ? "Your conversation request is already pending."
+          : "This user already sent you a request. Accept or decline it below.");
+        return;
+      }
+      if (decision.action !== "retry") {
+        setStatus("This conversation request cannot be changed.", true);
+        return;
+      }
+      await updateDoc(existing.ref, {
         fromId: state.user.uid, toId: to, status: "pending", createdAt: serverTimestamp()
       });
+    } else {
+      await createMessageRequest(to);
     }
     setStatus("Conversation request sent.");
   } catch {

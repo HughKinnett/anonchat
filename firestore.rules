@@ -413,14 +413,25 @@ service cloud.firestore {
           || requestId == request.resource.data.toId + '_' + request.resource.data.fromId)
         && request.resource.data.createdAt == request.time;
       allow update: if activeUser()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
         && (
-          (resource.data.toId == request.auth.uid
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+            && resource.data.toId == request.auth.uid
             && request.resource.data.status in ['accepted', 'declined'])
           ||
-          (resource.data.fromId == request.auth.uid
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+            && resource.data.fromId == request.auth.uid
             && resource.data.status == 'declined'
             && request.resource.data.status == 'pending')
+          ||
+          (request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['fromId', 'toId', 'status', 'createdAt'])
+            && resource.data.status == 'declined'
+            && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid)
+            && request.resource.data.fromId == request.auth.uid
+            && request.resource.data.toId == (resource.data.fromId == request.auth.uid
+              ? resource.data.toId : resource.data.fromId)
+            && request.resource.data.status == 'pending'
+            && request.resource.data.createdAt == request.time)
         )
         && (!request.resource.data.keys().hasAny(['respondedAt'])
           || request.resource.data.respondedAt == resource.data.get('respondedAt', null)
