@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { messageRequestDecision } from "./message-request-policy.mjs";
+import { messageRequestButtonAction } from "./message-request-policy.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc, collection, doc, getDoc, onSnapshot, orderBy, query,
@@ -236,18 +236,21 @@ $("request-chat").addEventListener("click", async () => {
   const existing = requestFor(to);
   try {
     if (existing) {
-      const decision = messageRequestDecision(existing.data(), state.user.uid);
-      if (decision.action === "accepted") {
+      const action = messageRequestButtonAction(existing.data(), state.user.uid);
+      if (action === "accepted") {
         setStatus("You already have an accepted conversation with this user.");
         return;
       }
-      if (decision.action === "outgoing-pending" || decision.action === "incoming-pending") {
-        setStatus(decision.action === "outgoing-pending"
-          ? "Your conversation request is already pending."
-          : "This user already sent you a request. Accept or decline it below.");
+      if (action === "outgoing-pending") {
+        setStatus("Your conversation request is already pending.");
         return;
       }
-      if (decision.action !== "retry") {
+      if (action === "accept-incoming") {
+        await updateDoc(existing.ref, { status: "accepted", respondedAt: serverTimestamp() });
+        setStatus("Conversation accepted. You can message this user now.");
+        return;
+      }
+      if (action !== "retry") {
         setStatus("This conversation request cannot be changed.", true);
         return;
       }
@@ -281,7 +284,7 @@ const renderRequests = () => {
       button.addEventListener("click", async () => {
         button.disabled = true;
         try {
-          await updateDoc(request.ref, { status: label.toLowerCase() });
+          await updateDoc(request.ref, { status: label.toLowerCase(), respondedAt: serverTimestamp() });
           setStatus(label === "Accept" ? "Conversation accepted." : "Request declined.");
         } catch {
           setStatus("Could not update that request.", true);
