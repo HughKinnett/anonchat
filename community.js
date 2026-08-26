@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { messageRequestButtonAction } from "./message-request-policy.mjs";
+import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc, collection, doc, getDoc, onSnapshot, orderBy, query,
@@ -17,6 +17,10 @@ let communityAlertIds = new Set();
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
   $("status").classList.toggle("danger", error);
+};
+const setRequestStatus = (text, error = false) => {
+  $("request-status").textContent = text;
+  $("request-status").classList.toggle("danger", error);
 };
 const userName = (uid) => state.users.find((entry) => entry.id === uid)?.data().username || "anonymous";
 const now = () => Date.now();
@@ -222,36 +226,53 @@ const createMessageRequest = (to) => {
 };
 
 const renderMessageUsers = () => {
+  const selectedUser = $("message-user").value;
   const others = state.users.filter((user) => user.id !== state.user.uid);
   $("message-user").replaceChildren(...others.map((user) => new Option(`@${user.data().username}`, user.id)));
+  if (others.some((user) => user.id === selectedUser)) $("message-user").value = selectedUser;
   $("conversation-user").replaceChildren(...acceptedUsers().map((user) => new Option(`@${user.data().username}`, user.id)));
   $("direct-message-form").hidden = !acceptedUsers().length;
+  renderRequestAction();
   renderDirectMessages();
   renderReveals();
 };
 
+const renderRequestAction = () => {
+  const to = $("message-user").value;
+  const existing = to ? requestFor(to) : null;
+  const view = messageRequestButtonState(existing?.data(), state.user.uid);
+  $("request-chat").textContent = view.label;
+  $("request-chat").disabled = view.disabled;
+  setRequestStatus(to ? view.hint : "Choose a user to request a conversation.", !to);
+};
+
+$("message-user").addEventListener("change", renderRequestAction);
+
 $("request-chat").addEventListener("click", async () => {
   const to = $("message-user").value;
-  if (!to) return;
+  if (!to) {
+    setRequestStatus("Choose a user to request a conversation.", true);
+    return;
+  }
   const existing = requestFor(to);
   try {
     if (existing) {
       const action = messageRequestButtonAction(existing.data(), state.user.uid);
       if (action === "accepted") {
-        setStatus("You already have an accepted conversation with this user.");
+        setRequestStatus("You already have an accepted conversation with this user.");
         return;
       }
       if (action === "outgoing-pending") {
-        setStatus("Your conversation request is already pending.");
+        setRequestStatus("Request sent. Waiting for this user to accept or decline.");
         return;
       }
       if (action === "accept-incoming") {
         await updateDoc(existing.ref, { status: "accepted", respondedAt: serverTimestamp() });
-        setStatus("Conversation accepted. You can message this user now.");
+        setRequestStatus("Conversation accepted. You can message this user now.");
         return;
       }
       if (action !== "retry") {
-        setStatus("This conversation request cannot be changed.", true);
+        setRequestStatus("This conversation request cannot be changed.", true);
         return;
       }
       await updateDoc(existing.ref, {
@@ -260,9 +281,10 @@ $("request-chat").addEventListener("click", async () => {
     } else {
       await createMessageRequest(to);
     }
-    setStatus("Conversation request sent.");
-  } catch {
-    setStatus("Could not send request.", true);
+    setRequestStatus("Request sent. Waiting for this user to accept or decline.");
+  } catch (error) {
+    console.error("Message request failed", error);
+    setRequestStatus("Could not send request. Please try again.", true);
   }
 });
 
@@ -286,6 +308,7 @@ const renderRequests = () => {
         try {
           await updateDoc(request.ref, { status: label.toLowerCase(), respondedAt: serverTimestamp() });
           setStatus(label === "Accept" ? "Conversation accepted." : "Request declined.");
+          setRequestStatus(label === "Accept" ? "Conversation accepted. You can message this user now." : "Request declined.");
         } catch {
           setStatus("Could not update that request.", true);
           button.disabled = false;
