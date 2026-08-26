@@ -1,17 +1,15 @@
-const CACHE_NAME = "anonchat-v30";
+const CACHE_NAME = "anonchat-v31";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./timeline.html",
   "./profile.html",
-  "./admin.html",
   "./forgot-password.html",
   "./connections.html",
   "./community.html",
   "./delete-account.html",
   "./login.css",
   "./timeline.css",
-  "./admin.css",
   "./community.css",
   "./delete-account.css",
   "./firebase-config.js",
@@ -21,7 +19,6 @@ const APP_SHELL = [
   "./timeline.js",
   "./nav-menu.js",
   "./profile.js",
-  "./admin.js",
   "./forgot-password.js",
   "./connections.js",
   "./community.js",
