@@ -52,6 +52,21 @@ try {
     fromId: "user-b", toId: "user-a", status: "pending", createdAt: new Date(), injected: true
   }));
 
+  await testEnv.clearFirestore();
+  await seed({ ...declinedRequest, status: "pending" });
+  await assertSucceeds(updateDoc(doc(userB, requestPath), {
+    status: "accepted", respondedAt: new Date()
+  }));
+
+  await testEnv.clearFirestore();
+  await seed({ ...declinedRequest, status: "pending" });
+  await assertFails(updateDoc(doc(userA, requestPath), {
+    status: "accepted", respondedAt: new Date()
+  }));
+  await assertFails(updateDoc(doc(userC, requestPath), {
+    status: "accepted", respondedAt: new Date()
+  }));
+
   console.log("Firestore message request authorization regressions passed");
 } finally {
   await testEnv.cleanup();

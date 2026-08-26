@@ -9,3 +9,8 @@ export const messageRequestDecision = (request, currentUserId) => {
   if (request.status === "declined") return { action: "retry", otherId };
   return { action: "invalid", otherId };
 };
+
+export const messageRequestButtonAction = (request, currentUserId) => {
+  const decision = messageRequestDecision(request, currentUserId);
+  return decision.action === "incoming-pending" ? "accept-incoming" : decision.action;
+};
