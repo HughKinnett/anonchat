@@ -268,6 +268,7 @@ $("request-chat").addEventListener("click", async () => {
   const existing = requestFor(to);
   const initialAction = existing ? messageRequestButtonAction(existing.data(), state.user.uid) : "create";
   state.requestBusy = true;
+  $("message-user").disabled = true;
   $("request-chat").disabled = true;
   $("request-chat").setAttribute("aria-busy", "true");
   $("request-chat").textContent = initialAction === "accept-incoming" ? "Accepting…" : "Sending…";
@@ -308,6 +309,7 @@ $("request-chat").addEventListener("click", async () => {
     setRequestStatus("Could not send request. Please try again.", true);
   } finally {
     state.requestBusy = false;
+    $("message-user").disabled = false;
     $("request-chat").removeAttribute("aria-busy");
     if (!succeeded) renderRequestAction({ preserveStatus: true });
   }
