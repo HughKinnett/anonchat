@@ -26,6 +26,7 @@ let comments = [];
 let follows = [];
 let targetProfile;
 let targetPosts = [];
+let targetCommunityPosts = [];
 let users = [];
 const profileSpotifyCard = document.getElementById("profile-spotify-card");
 const profileSpotifyPlayer = document.getElementById("profile-spotify-player");
@@ -50,7 +51,13 @@ const renderProfileSpotifySong = (url) => {
   frame.title = `@${targetProfile.username}'s Spotify profile song`;
   frame.loading = "lazy";
   frame.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";
-  profileSpotifyPlayer.append(frame);
+  const open = document.createElement("a");
+  open.className = "spotify-open-link";
+  open.href = `https://open.spotify.com/track/${id}`;
+  open.target = "_blank";
+  open.rel = "noopener noreferrer";
+  open.textContent = "Open this song in Spotify";
+  profileSpotifyPlayer.append(frame, open);
 };
 
 const validProfile = (profile, userId) =>
@@ -186,7 +193,9 @@ const postComments = (postId) => comments
   );
 
 const renderPosts = () => {
-  const sorted = [...targetPosts].sort((a, b) => {
+  const sorted = [...targetPosts, ...targetCommunityPosts]
+    .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
+    .sort((a, b) => {
     const aTime = a.data().createdAt?.toMillis?.() || 0;
     const bTime = b.data().createdAt?.toMillis?.() || 0;
     return bTime - aTime;
@@ -223,6 +232,7 @@ const renderPosts = () => {
       ? post.createdAt.toDate().toLocaleString()
       : "Posting…";
     const sourceId = post.type === "repost" ? post.originalPostId : postDoc.id;
+    const sourceCollection = postDoc.ref.parent.id === "communityPosts" ? "communityPosts" : "posts";
     const commentDocs = postComments(sourceId);
     const commentsSection = document.createElement("details");
     commentsSection.className = "comments-section";
@@ -244,7 +254,35 @@ const renderPosts = () => {
       commentTime.textContent = comment.createdAt?.toDate
         ? comment.createdAt.toDate().toLocaleString()
         : "Posting…";
-      commentItem.append(author, body, commentTime);
+      const actions = document.createElement("div");
+      actions.className = "comment-actions";
+      const reply = document.createElement("button");
+      reply.type = "button";
+      reply.textContent = "Reply";
+      reply.addEventListener("click", () => {
+        input.value = `@${comment.username || "anonymous"} `;
+        commentsSection.open = true;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      });
+      actions.append(reply);
+      if (comment.uid === currentUser.uid || post.authorId === currentUser.uid) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "delete-comment-button";
+        remove.textContent = "Delete";
+        remove.addEventListener("click", async () => {
+          remove.disabled = true;
+          try {
+            await deleteDoc(commentDoc.ref);
+          } catch {
+            setStatus("Could not delete that comment.", true);
+            remove.disabled = false;
+          }
+        });
+        actions.append(remove);
+      }
+      commentItem.append(author, body, commentTime, actions);
       list.append(commentItem);
     });
 
@@ -267,7 +305,7 @@ const renderPosts = () => {
       if (!commentText) return;
       submit.disabled = true;
       try {
-        await addDoc(collection(db, "posts", sourceId, "comments"), {
+        await addDoc(collection(db, sourceCollection, sourceId, "comments"), {
           uid: currentUser.uid,
           username: currentProfileUsername,
           text: commentText,
@@ -375,9 +413,7 @@ onAuthStateChanged(auth, async (user) => {
   }
   const adminUsernames = ["i_love_you_h", "ownercybercapone"];
   const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
-  const profileIsAdmin = adminUsernames.includes(targetProfile.username.toLowerCase());
-  document.getElementById("profile-admin-link").hidden =
-    !(viewerIsAdmin && profileIsAdmin);
+  document.getElementById("profile-admin-link").hidden = !viewerIsAdmin;
   const viewDay = new Date().toISOString().slice(0, 10);
   setDoc(doc(db, "pageViews", viewDay), {
     date: viewDay,
@@ -407,5 +443,14 @@ onAuthStateChanged(auth, async (user) => {
       renderPosts();
     },
     () => setStatus("Could not load this user's posts.", true)
+  );
+
+  onSnapshot(
+    query(collection(db, "communityPosts"), where("authorId", "==", targetUserId)),
+    (snapshot) => {
+      targetCommunityPosts = snapshot.docs;
+      renderPosts();
+    },
+    () => setStatus("Could not load this user's earlier posts.", true)
   );
 });

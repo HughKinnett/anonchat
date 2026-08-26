@@ -24,7 +24,7 @@ service cloud.firestore {
     }
 
     function validOriginalPost() {
-      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'imageData', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'imageData', 'category', 'options', 'expiresAt', 'createdAt'])
         && request.resource.data.type == 'original'
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
@@ -33,6 +33,13 @@ service cloud.firestore {
         && (request.resource.data.content.size() >= 1
           || request.resource.data.get('imageData', '').size() > 0)
         && request.resource.data.get('imageData', '').size() <= 800000
+        && request.resource.data.get('category', 'Post') in ['Post', 'Question', 'Confession', 'Advice', 'Rant', 'Good News', 'Poll']
+        && request.resource.data.get('options', []) is list
+        && request.resource.data.get('options', []).size() <= 4
+        && (request.resource.data.get('category', 'Post') != 'Poll'
+          || request.resource.data.get('options', []).size() >= 2)
+        && (request.resource.data.get('expiresAt', null) == null
+          || (request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt > request.time))
         && request.resource.data.createdAt == request.time;
     }
 
@@ -361,6 +368,23 @@ service cloud.firestore {
       allow delete: if isAdmin() || (signedIn() && resource.data.ownerId == request.auth.uid);
     }
 
+    match /roomMembers/{memberId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if activeUser()
+        && memberId == request.resource.data.roomId + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['roomId', 'uid', 'joinedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && exists(/databases/$(database)/documents/rooms/$(request.resource.data.roomId))
+        && request.resource.data.joinedAt == request.time;
+      allow update: if activeUser()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinedAt'])
+        && request.resource.data.joinedAt == request.time;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
     match /roomMessages/{messageId} {
       allow read: if signedIn();
       allow create: if activeUser()
@@ -389,10 +413,18 @@ service cloud.firestore {
           || requestId == request.resource.data.toId + '_' + request.resource.data.fromId)
         && request.resource.data.createdAt == request.time;
       allow update: if activeUser()
-        && resource.data.toId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
-        && request.resource.data.status in ['accepted', 'declined']
-        && request.resource.data.respondedAt == request.time;
+        && (
+          (resource.data.toId == request.auth.uid
+            && request.resource.data.status in ['accepted', 'declined'])
+          ||
+          (resource.data.fromId == request.auth.uid
+            && resource.data.status == 'declined'
+            && request.resource.data.status == 'pending')
+        )
+        && (!request.resource.data.keys().hasAny(['respondedAt'])
+          || request.resource.data.respondedAt == resource.data.get('respondedAt', null)
+          || request.resource.data.respondedAt == request.time);
       allow delete: if signedIn()
         && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
     }
@@ -438,6 +470,11 @@ service cloud.firestore {
     match /posts/{postId}/comments/{commentId} {
       allow delete: if signedIn()
         && get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid;
+    }
+
+    match /communityPosts/{postId}/comments/{commentId} {
+      allow delete: if signedIn()
+        && get(/databases/$(database)/documents/communityPosts/$(postId)).data.authorId == request.auth.uid;
     }
 
     match /posts/{postId}/reactions/{reactionId} {

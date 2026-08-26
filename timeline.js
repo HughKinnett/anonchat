@@ -16,6 +16,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -34,6 +35,12 @@ let comments = [];
 let follows = [];
 let users = [];
 let notificationReads = [];
+let communityPostDocs = [];
+let pollVotes = [];
+let messageRequests = [];
+let roomMessages = [];
+let roomMemberships = [];
+let rooms = [];
 let showingProfile = false;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -58,6 +65,13 @@ const spotifyInput = document.getElementById("spotify-song-url");
 const spotifyToggle = document.getElementById("spotify-edit-toggle");
 const spotifyRemove = document.getElementById("spotify-song-remove");
 const spotifyStatus = document.getElementById("spotify-song-status");
+const postCategory = document.getElementById("post-category");
+const postExpiry = document.getElementById("post-expiry");
+const pollOptions = document.getElementById("poll-options");
+
+postCategory?.addEventListener("change", () => {
+  pollOptions.hidden = postCategory.value !== "Poll";
+});
 
 const spotifyTrackId = (value) => {
   try {
@@ -244,12 +258,16 @@ const closeSearch = () => {
   searchInput.setAttribute("aria-expanded", "false");
 };
 
+const findPostElement = (postId) =>
+  document.getElementById(`post-posts-${postId}`) ||
+  document.getElementById(`post-communityPosts-${postId}`);
+
 const openPostFromSearch = (postId) => {
   searchInput.value = "";
   closeSearch();
   setFeedView(false);
   requestAnimationFrame(() => {
-    const target = document.getElementById(`post-${postId}`);
+    const target = findPostElement(postId);
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
     target?.classList.add("notification-highlight");
     window.setTimeout(() => target?.classList.remove("notification-highlight"), 1800);
@@ -266,7 +284,7 @@ const renderSearchResults = () => {
   const matchedUsers = users
     .filter((profile) => profile.data().username?.toLowerCase().includes(term))
     .slice(0, 5);
-  const matchedPosts = postDocs
+  const matchedPosts = allTimelinePosts()
     .filter((post) =>
       post.data().content?.toLowerCase().includes(term) ||
       post.data().username?.toLowerCase().includes(term)
@@ -427,14 +445,16 @@ const mentionsCurrentUser = (value) => {
     .some((handle) => handle.slice(1).toLowerCase() === target);
 };
 
+const allTimelinePosts = () => [...postDocs, ...communityPostDocs];
+
 const renderNotifications = () => {
   if (!currentUser) return;
   const ownedPosts = new Map(
-    postDocs
+    allTimelinePosts()
       .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
       .map((post) => [post.id, post.data()])
   );
-  const allPosts = new Map(postDocs.map((post) => [post.id, post.data()]));
+  const allPosts = new Map(allTimelinePosts().map((post) => [post.id, post.data()]));
   const usernames = new Map(users.map((profile) => [profile.id, profile.data().username]));
   const readIds = new Set(notificationReads.map((read) => read.data().reactionId));
   const notificationItems = [];
@@ -484,7 +504,7 @@ const renderNotifications = () => {
     }
   });
 
-  postDocs.forEach((postDoc) => {
+  allTimelinePosts().forEach((postDoc) => {
     const post = postDoc.data();
     if (
       post.type === "repost" ||
@@ -500,6 +520,33 @@ const renderNotifications = () => {
     });
   });
 
+  messageRequests
+    .filter((request) => request.data().toId === currentUser.uid && request.data().status === "pending")
+    .forEach((request) => {
+      const data = request.data();
+      notificationItems.push({
+        id: `message_request_${request.id}`,
+        actorId: data.fromId,
+        createdAt: data.createdAt,
+        message: "sent you a message request",
+        url: "community.html#messages-panel"
+      });
+    });
+
+  const joinedRoomIds = new Set(roomMemberships.map((membership) => membership.data().roomId));
+  roomMessages.forEach((message) => {
+    const data = message.data();
+    if (data.senderId === currentUser.uid || !joinedRoomIds.has(data.roomId) || data.expiresAt?.toMillis?.() <= Date.now()) return;
+    const roomName = rooms.find((room) => room.id === data.roomId)?.data().name || "a temporary room";
+    notificationItems.push({
+      id: `room_message_${message.id}`,
+      actorLabel: data.tempName || "Someone",
+      createdAt: data.createdAt,
+      message: `posted in ${roomName}: “${data.text.slice(0, 90)}${data.text.length > 90 ? "…" : ""}”`,
+      url: "community.html#rooms-panel"
+    });
+  });
+
   const items = notificationItems
     .filter((item) => !readIds.has(item.id))
     .sort((a, b) =>
@@ -512,17 +559,22 @@ const renderNotifications = () => {
       browserAlertIds = new Set(currentNotificationIds);
     } else {
       items.filter((item) => !browserAlertIds.has(item.id)).forEach((notification) => {
-        const actor = usernames.get(notification.actorId) || "Anonymous user";
+        const actor = notification.actorLabel || usernames.get(notification.actorId) || "Anonymous user";
         const alert = new Notification("AnonChat", {
-          body: `@${actor} ${notification.message}`,
+          body: `${notification.actorLabel ? actor : `@${actor}`} ${notification.message}`,
           icon: "Untitled.jpeg",
           tag: `anonchat-${notification.id}`
         });
         alert.onclick = () => {
           window.focus();
+          if (notification.url) {
+            window.location.href = notification.url;
+            alert.close();
+            return;
+          }
           setFeedView(false);
           requestAnimationFrame(() => {
-            document.getElementById(`post-${notification.postId}`)?.scrollIntoView({
+            findPostElement(notification.postId)?.scrollIntoView({
               behavior: "smooth",
               block: "center"
             });
@@ -547,8 +599,8 @@ const renderNotifications = () => {
     open.type = "button";
     const message = document.createElement("span");
     message.className = "notification-message";
-    const actor = usernames.get(notification.actorId) || "Anonymous user";
-    message.textContent = `@${actor} ${notification.message}`;
+    const actor = notification.actorLabel || usernames.get(notification.actorId) || "Anonymous user";
+    message.textContent = `${notification.actorLabel ? actor : `@${actor}`} ${notification.message}`;
     const time = document.createElement("time");
     time.textContent = formatNotificationTime(notification.createdAt);
     open.append(message, time);
@@ -562,9 +614,13 @@ const renderNotifications = () => {
         });
         notificationPanel.hidden = true;
         notificationButton.setAttribute("aria-expanded", "false");
+        if (notification.url) {
+          window.location.href = notification.url;
+          return;
+        }
         setFeedView(false);
         requestAnimationFrame(() => {
-          const target = document.getElementById(`post-${notification.postId}`);
+          const target = findPostElement(notification.postId);
           target?.scrollIntoView({ behavior: "smooth", block: "center" });
           target?.classList.add("notification-highlight");
           window.setTimeout(() => target?.classList.remove("notification-highlight"), 1800);
@@ -581,7 +637,7 @@ const renderNotifications = () => {
   if (!items.length) {
     const empty = document.createElement("li");
     empty.className = "notification-empty";
-    empty.textContent = "No new reactions, comments, or tags.";
+    empty.textContent = "No new reactions, comments, tags, room messages, or message requests.";
     notificationList.append(empty);
   }
 };
@@ -742,9 +798,11 @@ const sharePost = async (postDoc) => {
 const renderPost = (postDoc) => {
   const post = postDoc.data();
   const sourceId = originalPostId(postDoc);
+  const collectionName = postDoc.ref.parent.id;
+  const sourceCollection = collectionName === "communityPosts" ? "communityPosts" : "posts";
   const item = document.createElement("li");
   item.className = "feed-item";
-  item.id = `post-${postDoc.id}`;
+  item.id = `post-${sourceCollection}-${postDoc.id}`;
 
   if (post.type === "repost") {
     const repostLabel = document.createElement("p");
@@ -771,19 +829,59 @@ const renderPost = (postDoc) => {
     postImage.alt = "Photo attached to this post";
   }
   const time = document.createElement("small");
-  time.textContent = post.createdAt?.toDate
+  const expiresAt = post.expiresAt?.toMillis?.();
+  time.textContent = (post.createdAt?.toDate
     ? post.createdAt.toDate().toLocaleString()
-    : "Posting…";
+    : "Posting…") + (expiresAt ? ` · Disappears ${new Date(expiresAt).toLocaleString()}` : "");
+
+  if (post.category && post.category !== "Post") {
+    const category = document.createElement("span");
+    category.className = "post-category-pill";
+    category.textContent = post.category;
+    item.append(category);
+  }
 
   const reactionDocs = postReactions(sourceId);
   const reactionsBar = document.createElement("div");
   reactionsBar.className = "reactions";
-  reactionsBar.append(
-    reactionButton(sourceId, "heart", "❤️", reactionDocs),
-    reactionButton(sourceId, "middle_finger", "🖕", reactionDocs),
-    reactionButton(sourceId, "laugh", "😂", reactionDocs),
-    reactionButton(sourceId, "sad", "😢", reactionDocs)
-  );
+  if (sourceCollection === "posts") {
+    reactionsBar.append(
+      reactionButton(sourceId, "heart", "❤️", reactionDocs),
+      reactionButton(sourceId, "middle_finger", "🖕", reactionDocs),
+      reactionButton(sourceId, "laugh", "😂", reactionDocs),
+      reactionButton(sourceId, "sad", "😢", reactionDocs)
+    );
+  }
+
+  const poll = document.createElement("div");
+  poll.className = "timeline-poll";
+  if (post.category === "Poll" && Array.isArray(post.options)) {
+    const votes = pollVotes.filter((vote) => vote.data().postId === sourceId);
+    const mine = votes.find((vote) => vote.data().uid === currentUser.uid);
+    post.options.forEach((option, index) => {
+      const count = votes.filter((vote) => vote.data().option === index).length;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(mine?.data().option === index));
+      const label = document.createElement("span");
+      label.textContent = option;
+      const total = document.createElement("strong");
+      total.textContent = `${count} vote${count === 1 ? "" : "s"}`;
+      button.append(label, total);
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        const voteRef = doc(db, "communityVotes", `${sourceId}_${currentUser.uid}`);
+        try {
+          if (mine?.data().option === index) await deleteDoc(voteRef);
+          else await setDoc(voteRef, { postId: sourceId, uid: currentUser.uid, option: index, createdAt: serverTimestamp() });
+        } catch {
+          setStatus("Could not update your vote.", true);
+          button.disabled = false;
+        }
+      });
+      poll.append(button);
+    });
+  }
 
   const commentDocs = postComments(sourceId);
   const commentsSection = document.createElement("details");
@@ -807,7 +905,35 @@ const renderPost = (postDoc) => {
     commentTime.textContent = comment.createdAt?.toDate
       ? comment.createdAt.toDate().toLocaleString()
       : "Posting…";
-    commentItem.append(commenter, commentText, commentTime);
+    const commentActions = document.createElement("div");
+    commentActions.className = "comment-actions";
+    const reply = document.createElement("button");
+    reply.type = "button";
+    reply.textContent = "Reply";
+    reply.addEventListener("click", () => {
+      commentInput.value = `@${comment.username || "anonymous"} `;
+      commentsSection.open = true;
+      commentInput.focus();
+      commentInput.setSelectionRange(commentInput.value.length, commentInput.value.length);
+    });
+    commentActions.append(reply);
+    if (comment.uid === currentUser.uid || displayedAuthorId === currentUser.uid) {
+      const removeComment = document.createElement("button");
+      removeComment.type = "button";
+      removeComment.className = "delete-comment-button";
+      removeComment.textContent = "Delete";
+      removeComment.addEventListener("click", async () => {
+        removeComment.disabled = true;
+        try {
+          await deleteDoc(commentDoc.ref);
+        } catch {
+          setStatus("Could not delete that comment.", true);
+          removeComment.disabled = false;
+        }
+      });
+      commentActions.append(removeComment);
+    }
+    commentItem.append(commenter, commentText, commentTime, commentActions);
     commentsList.append(commentItem);
   });
 
@@ -830,7 +956,7 @@ const renderPost = (postDoc) => {
     if (!text) return;
     commentSubmit.disabled = true;
     try {
-      await addDoc(collection(db, "posts", sourceId, "comments"), {
+      await addDoc(collection(db, sourceCollection, sourceId, "comments"), {
         uid: currentUser.uid,
         username: profileUsername,
         text,
@@ -852,7 +978,7 @@ const renderPost = (postDoc) => {
   const repostId = `repost_${currentUser.uid}_${sourceId}`;
   const alreadyShared = postDocs.some((candidate) => candidate.id === repostId);
 
-  if ((post.type === "repost" ? post.originalAuthorId : post.authorId) !== currentUser.uid) {
+  if (sourceCollection === "posts" && (post.type === "repost" ? post.originalAuthorId : post.authorId) !== currentUser.uid) {
     const share = document.createElement("button");
     share.className = "share-button";
     share.type = "button";
@@ -878,7 +1004,7 @@ const renderPost = (postDoc) => {
     remove.addEventListener("click", async () => {
       remove.disabled = true;
       try {
-        await deleteDoc(doc(db, "posts", postDoc.id));
+        await deleteDoc(doc(db, collectionName, postDoc.id));
       } catch {
         setStatus("Could not remove that post.", true);
         remove.disabled = false;
@@ -889,14 +1015,20 @@ const renderPost = (postDoc) => {
 
   item.append(authorRow, text);
   if (postImage) item.append(postImage);
-  item.append(time, reactionsBar, commentsSection, actions);
+  item.append(time);
+  if (poll.childElementCount) item.append(poll);
+  if (reactionsBar.childElementCount) item.append(reactionsBar);
+  item.append(commentsSection, actions);
   return item;
 };
 
 const renderFeed = () => {
+  const unexpiredPosts = allTimelinePosts()
+    .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
+    .sort((a, b) => (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0));
   const visiblePosts = showingProfile
-    ? postDocs.filter((post) => post.data().authorId === currentUser.uid)
-    : postDocs;
+    ? unexpiredPosts.filter((post) => post.data().authorId === currentUser.uid)
+    : unexpiredPosts;
 
   feed.replaceChildren(...visiblePosts.map(renderPost));
   renderNotifications();
@@ -982,6 +1114,24 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(onSnapshot(
+    query(collection(db, "communityPosts"), orderBy("createdAt", "desc"), limit(100)),
+    (snapshot) => {
+      communityPostDocs = snapshot.docs;
+      renderFeed();
+    },
+    () => setStatus("Could not load earlier community posts.", true)
+  ));
+
+  listeners.push(onSnapshot(
+    collection(db, "communityVotes"),
+    (snapshot) => {
+      pollVotes = snapshot.docs;
+      renderFeed();
+    },
+    () => setStatus("Could not load poll votes.", true)
+  ));
+
+  listeners.push(onSnapshot(
     collectionGroup(db, "reactions"),
     (snapshot) => {
       reactions = snapshot.docs;
@@ -1026,12 +1176,50 @@ onAuthStateChanged(auth, async (user) => {
     },
     () => setStatus("Could not load follower counts.", true)
   ));
+
+  listeners.push(onSnapshot(
+    query(collection(db, "messageRequests"), where("toId", "==", user.uid)),
+    (snapshot) => {
+      messageRequests = snapshot.docs;
+      renderNotifications();
+    },
+    () => setStatus("Could not load message-request notifications.", true)
+  ));
+
+  listeners.push(onSnapshot(
+    query(collection(db, "roomMembers"), where("uid", "==", user.uid)),
+    (snapshot) => {
+      roomMemberships = snapshot.docs;
+      renderNotifications();
+    },
+    () => setStatus("Could not load room memberships.", true)
+  ));
+
+  listeners.push(onSnapshot(collection(db, "rooms"), (snapshot) => {
+    rooms = snapshot.docs;
+    renderNotifications();
+  }));
+
+  listeners.push(onSnapshot(collection(db, "roomMessages"), (snapshot) => {
+    roomMessages = snapshot.docs;
+    renderNotifications();
+  }));
 });
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const postContent = content.value.trim();
   if (!currentUser || (!postContent && !pendingPostImage) || postContent.length > 500) return;
+
+  const category = postCategory.value;
+  const options = [...document.querySelectorAll(".poll-option")]
+    .map((input) => input.value.trim())
+    .filter(Boolean);
+  if (category === "Poll" && options.length < 2) {
+    setStatus("Add at least two poll choices.", true);
+    return;
+  }
+  const expiryHours = Number(postExpiry.value);
 
   const submit = form.querySelector("button[type='submit']");
   submit.disabled = true;
@@ -1042,12 +1230,18 @@ form.addEventListener("submit", async (event) => {
       username: profileUsername,
       content: postContent,
       imageData: pendingPostImage,
+      category,
+      options: category === "Poll" ? options : [],
+      expiresAt: expiryHours ? Timestamp.fromMillis(Date.now() + expiryHours * 3600000) : null,
       createdAt: serverTimestamp()
     });
     content.value = "";
     pendingPostImage = "";
     postImageInput.value = "";
     postImagePreviewWrap.hidden = true;
+    postCategory.value = "Post";
+    postExpiry.value = "0";
+    pollOptions.hidden = true;
   } catch {
     setStatus("Could not publish your post.", true);
   } finally {
