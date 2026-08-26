@@ -9,4 +9,6 @@
 .main-menu-panel a,.main-menu-panel button{display:flex;width:100%;min-height:44px;align-items:center;padding:10px 12px;border:0;border-radius:10px;background:transparent;color:#f7f8fb;text-align:left;text-decoration:none}
 .main-menu-panel a:hover,.main-menu-panel button:hover{background:rgba(139,92,246,.17)}
 .main-menu-panel .menu-danger{color:#fca5a5}
+.primary:disabled,.secondary:disabled{cursor:not-allowed}
+.primary[aria-busy=true],.secondary[aria-busy=true]{cursor:wait}
 @media(max-width:620px){.topbar{padding:10px 14px}.community-header-actions{gap:6px}.topbar .secondary{padding:9px 11px}}

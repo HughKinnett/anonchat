@@ -9,7 +9,8 @@ import {
 const $ = (id) => document.getElementById(id);
 const state = {
   user: null, profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
-  roomMemberships: [], requests: [], messages: [], reveals: [], preferences: null, activeRoom: ""
+  roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
+  messages: [], reveals: [], preferences: null, activeRoom: ""
 };
 const listeners = [];
 const notificationSessionStartedAt = Date.now();
@@ -237,27 +238,43 @@ const renderMessageUsers = () => {
   renderReveals();
 };
 
-const renderRequestAction = () => {
+const renderRequestAction = ({ preserveStatus = false } = {}) => {
   const to = $("message-user").value;
+  if (!state.requestsLoaded) {
+    $("request-chat").textContent = "Loading requests…";
+    $("request-chat").disabled = true;
+    $("request-chat").setAttribute("aria-busy", "true");
+    setRequestStatus("Checking existing requests…");
+    return;
+  }
+  if (state.requestBusy) return;
   const existing = to ? requestFor(to) : null;
   const view = messageRequestButtonState(existing?.data(), state.user.uid);
   $("request-chat").textContent = view.label;
   $("request-chat").disabled = view.disabled;
-  setRequestStatus(to ? view.hint : "Choose a user to request a conversation.", !to);
+  $("request-chat").removeAttribute("aria-busy");
+  if (!preserveStatus) setRequestStatus(to ? view.hint : "Choose a user to request a conversation.", !to);
 };
 
-$("message-user").addEventListener("change", renderRequestAction);
+$("message-user").addEventListener("change", () => renderRequestAction());
 
 $("request-chat").addEventListener("click", async () => {
+  if (state.requestBusy || !state.requestsLoaded) return;
   const to = $("message-user").value;
   if (!to) {
     setRequestStatus("Choose a user to request a conversation.", true);
     return;
   }
   const existing = requestFor(to);
+  const initialAction = existing ? messageRequestButtonAction(existing.data(), state.user.uid) : "create";
+  state.requestBusy = true;
+  $("request-chat").disabled = true;
+  $("request-chat").setAttribute("aria-busy", "true");
+  $("request-chat").textContent = initialAction === "accept-incoming" ? "Accepting…" : "Sending…";
+  let succeeded = false;
   try {
     if (existing) {
-      const action = messageRequestButtonAction(existing.data(), state.user.uid);
+      const action = initialAction;
       if (action === "accepted") {
         setRequestStatus("You already have an accepted conversation with this user.");
         return;
@@ -268,6 +285,8 @@ $("request-chat").addEventListener("click", async () => {
       }
       if (action === "accept-incoming") {
         await updateDoc(existing.ref, { status: "accepted", respondedAt: serverTimestamp() });
+        succeeded = true;
+        $("request-chat").textContent = "Conversation accepted";
         setRequestStatus("Conversation accepted. You can message this user now.");
         return;
       }
@@ -281,10 +300,16 @@ $("request-chat").addEventListener("click", async () => {
     } else {
       await createMessageRequest(to);
     }
+    succeeded = true;
+    $("request-chat").textContent = "Request sent";
     setRequestStatus("Request sent. Waiting for this user to accept or decline.");
   } catch (error) {
     console.error("Message request failed", error);
     setRequestStatus("Could not send request. Please try again.", true);
+  } finally {
+    state.requestBusy = false;
+    $("request-chat").removeAttribute("aria-busy");
+    if (!succeeded) renderRequestAction({ preserveStatus: true });
   }
 });
 
@@ -487,21 +512,25 @@ onAuthStateChanged(auth, async (user) => {
   listen(query(collection(db, "roomMessages"), orderBy("createdAt", "asc")), "roomMessages", renderRoomMessages);
   listen(query(collection(db, "roomMembers"), where("uid", "==", user.uid)), "roomMemberships", renderRooms);
 
-  const mergePrivate = (key, firstQuery, secondQuery, render) => {
+  const mergePrivate = (key, firstQuery, secondQuery, render, onReady) => {
     let first = [];
     let second = [];
+    let firstReady = false;
+    let secondReady = false;
     const merge = () => {
       state[key] = [...first, ...second].filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index);
       render();
+      if (firstReady && secondReady) onReady?.();
     };
-    listeners.push(onSnapshot(firstQuery, (snapshot) => { first = snapshot.docs; merge(); }, () => setStatus("A private section could not load.", true)));
-    listeners.push(onSnapshot(secondQuery, (snapshot) => { second = snapshot.docs; merge(); }, () => setStatus("A private section could not load.", true)));
+    listeners.push(onSnapshot(firstQuery, (snapshot) => { first = snapshot.docs; firstReady = true; merge(); }, () => setStatus("A private section could not load.", true)));
+    listeners.push(onSnapshot(secondQuery, (snapshot) => { second = snapshot.docs; secondReady = true; merge(); }, () => setStatus("A private section could not load.", true)));
   };
   mergePrivate(
     "requests",
     query(collection(db, "messageRequests"), where("fromId", "==", user.uid)),
     query(collection(db, "messageRequests"), where("toId", "==", user.uid)),
-    () => { renderRequests(); renderMessageUsers(); }
+    () => { renderRequests(); renderMessageUsers(); },
+    () => { state.requestsLoaded = true; renderRequestAction(); }
   );
   listen(query(collection(db, "directMessages"), where("participants", "array-contains", user.uid)), "messages", renderDirectMessages);
   mergePrivate(
