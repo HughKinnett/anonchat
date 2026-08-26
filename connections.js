@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { resolveConnectionsTarget } from "./connections-target.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection,
@@ -9,7 +10,7 @@ import {
   setDoc
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const targetUserId = new URLSearchParams(location.search).get("uid");
+let targetUserId = new URLSearchParams(location.search).get("uid");
 const status = document.getElementById("connections-status");
 const followersList = document.getElementById("followers-list");
 const followingList = document.getElementById("following-list");
@@ -113,9 +114,10 @@ onAuthStateChanged(auth, (user) => {
     location.replace("index.html");
     return;
   }
-  if (!targetUserId) {
-    location.replace(`profile.html?uid=${encodeURIComponent(user.uid)}`);
-    return;
+  const target = resolveConnectionsTarget(location.search, user.uid);
+  targetUserId = target.targetUserId;
+  if (location.search !== target.canonicalSearch) {
+    history.replaceState(null, "", `${location.pathname}${target.canonicalSearch}${location.hash}`);
   }
   currentUser = user;
   document.getElementById("back-to-profile").href =
