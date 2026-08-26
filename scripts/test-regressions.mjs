@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { messageRequestButtonAction, messageRequestDecision } from "../message-request-policy.mjs";
+import {
+  messageRequestButtonAction,
+  messageRequestButtonState,
+  messageRequestDecision
+} from "../message-request-policy.mjs";
 import { resolveConnectionsTarget } from "../connections-target.mjs";
 
 const me = "user-b";
@@ -33,6 +37,16 @@ assert.equal(
   messageRequestButtonAction({ fromId: me, toId: "user-a", status: "pending" }, me),
   "outgoing-pending",
   "the original sender still waits for the recipient"
+);
+assert.deepEqual(
+  messageRequestButtonState({ fromId: me, toId: "user-a", status: "pending" }, me),
+  { action: "outgoing-pending", label: "Request sent", disabled: true, hint: "Request sent. Waiting for this user to accept or decline." },
+  "an outgoing request is visibly pending instead of appearing to do nothing"
+);
+assert.deepEqual(
+  messageRequestButtonState({ fromId: "user-a", toId: me, status: "pending" }, me),
+  { action: "accept-incoming", label: "Accept request", disabled: false, hint: "This user already requested you. Accept to start messaging." },
+  "an incoming request turns the primary action into an explicit accept button"
 );
 assert.equal(
   messageRequestDecision({ fromId: "user-a", toId: "user-c", status: "declined" }, me).action,
