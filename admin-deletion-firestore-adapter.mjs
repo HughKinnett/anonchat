@@ -45,9 +45,10 @@ export const boundedDeleteQuery = async ({ fetchPage, deleteRefs, renewLease, be
 };
 
 export class FirestoreDeletionAdapter {
-  constructor({ db, auth, Timestamp, FieldPath, clock = () => Date.now(), tokenFactory }) {
+  constructor({ db, auth, Timestamp, FieldPath, clock = () => Date.now(), tokenFactory, authRenewIntervalMs }) {
     this.db = db; this.auth = auth; this.Timestamp = Timestamp; this.FieldPath = FieldPath;
     this.clock = clock; this.tokenFactory = tokenFactory ?? (() => crypto.randomUUID());
+    this.authRenewIntervalMs = authRenewIntervalMs ?? Math.floor(LEASE_MS / 3);
   }
   now() { return this.clock(); }
   timestamp(milliseconds) { return this.Timestamp.fromMillis(milliseconds); }
@@ -215,6 +216,7 @@ export class FirestoreDeletionAdapter {
       const jobRef = this.jobRef(targetUid); const profileRef = this.db.collection("users").doc(targetUid); const statsRef = this.db.doc("system/accountStats");
       const jobSnapshot = await transaction.get(jobRef); if (!jobSnapshot.exists) throw codedError("lease-lost");
       const job = jobSnapshot.data(); this.assertLeaseData(job, token);
+      if (job.phase !== "first-sweep") throw codedError("invalid-job");
       const profileSnapshot = await transaction.get(profileRef); const statsSnapshot = await transaction.get(statsRef);
       const usernameRef = this.db.collection("usernames").doc(normalizeAdministrator(job.targetUsername));
       const usernameSnapshot = await transaction.get(usernameRef);
@@ -239,8 +241,25 @@ export class FirestoreDeletionAdapter {
       transaction.update(reference, { phase: "auth-deleting", leaseExpiresAt: this.timestamp(this.now() + LEASE_MS) });
     });
   }
-  async deleteAuth(targetUid) {
-    try { await this.auth.deleteUser(targetUid); } catch (error) { if (error?.code !== "auth/user-not-found") throw error; }
+  async deleteAuth(targetUid, token) {
+    await this.renew(targetUid, token);
+    let renewal = Promise.resolve(); let renewalError;
+    const renewWhilePending = () => {
+      renewal = renewal.then(() => this.renew(targetUid, token)).catch((error) => { renewalError = error; });
+    };
+    const timer = setInterval(renewWhilePending, this.authRenewIntervalMs); timer.unref?.();
+    let authError;
+    try {
+      await this.auth.deleteUser(targetUid);
+    } catch (error) {
+      if (error?.code !== "auth/user-not-found") authError = error;
+    } finally {
+      clearInterval(timer);
+      await renewal;
+    }
+    if (renewalError) throw renewalError;
+    if (authError) throw authError;
+    await this.renew(targetUid, token);
   }
   async finishAuthDeletion(targetUid, token) {
     await this.db.runTransaction(async (transaction) => {

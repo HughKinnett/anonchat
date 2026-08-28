@@ -35,9 +35,10 @@ export const runDeletionProcessor = async ({ adapter, ownerId, dryRun = false, l
     for await (const markers of scanPages((cursor) => adapter.scanMarkersPage(cursor))) {
       for (const marker of markers) {
         try {
-          if (!isExactCompletionMarker(marker.data) || timestampToMillis(marker.data.purgeAfter) > adapter.now()) {
+          if (!isExactCompletionMarker(marker.data)) {
             throw Object.assign(new Error("malformed marker"), { code: "malformed-marker" });
           }
+          if (timestampToMillis(marker.data.purgeAfter) > adapter.now()) continue;
           await adapter.purgeMarker(marker.id, marker.data); result.purged += 1; safeLog(logger, "info", "MARKER_PURGED");
         } catch (error) { safeLog(logger, "error", fixedErrorCode(error)); }
       }

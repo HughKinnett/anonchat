@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { deleteApp, initializeApp } from "firebase-admin/app";
 import { FieldPath, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { FirestoreDeletionAdapter } from "../admin-deletion-firestore-adapter.mjs";
-import { LEASE_MS } from "../admin-deletion-processor-policy.mjs";
-import { scanPages } from "../admin-deletion-processor.mjs";
+import { COMPLETION_RETENTION_MS, LEASE_MS, cleanupQueries, isExactCompletionMarker } from "../admin-deletion-processor-policy.mjs";
+import { runDeletionProcessor, scanPages } from "../admin-deletion-processor.mjs";
 
 assert.ok(process.env.FIRESTORE_EMULATOR_HOST, "Firestore emulator is required");
 
 const apps = [];
 let scenarioNumber = 0;
-const scenario = ({ now = 1_800_000_000_000, auth } = {}) => {
+const scenario = ({ now = 1_800_000_000_000, auth, authRenewIntervalMs } = {}) => {
   scenarioNumber += 1;
   const projectId = `anonchat-deletion-integration-${scenarioNumber}`;
   const app = initializeApp({ projectId }, projectId);
@@ -27,6 +27,7 @@ const scenario = ({ now = 1_800_000_000_000, auth } = {}) => {
     Timestamp,
     FieldPath,
     clock: () => clock.now,
+    authRenewIntervalMs,
     tokenFactory: () => `${ownerPrefix}-token-${++tokenNumber}`
   });
   return { db, clock, deletedUsers, makeAdapter };
@@ -55,6 +56,39 @@ const validProfile = (now) => ({
   adminDeletionRequestedAt: Timestamp.fromMillis(now - 10_000)
 });
 
+const queuedJob = (targetUid, now) => ({
+  targetUid,
+  requesterUid: "administrator",
+  requestedAt: Timestamp.fromMillis(now - 10_000),
+  status: "queued"
+});
+
+const internalJob = (targetUid, now, overrides = {}) => {
+  const status = overrides.status ?? "processing";
+  const job = {
+    targetUid,
+    requesterUid: "administrator",
+    requestedAt: Timestamp.fromMillis(now - 10_000),
+    status,
+    processorVersion: 1,
+    targetUsername: `${targetUid}_name`,
+    phase: overrides.phase ?? "profile-barrier",
+    attempts: 1
+  };
+  if (status === "failed") job.errorCode = overrides.errorCode ?? "AUTH_ERROR";
+  if (status === "processing") Object.assign(job, {
+    leaseOwner: "old-worker",
+    leaseToken: "old-token",
+    leaseExpiresAt: Timestamp.fromMillis(overrides.leaseExpiresAt ?? now - 1)
+  });
+  return job;
+};
+
+const administratorEntries = () => [
+  ["users/administrator", { uid: "administrator", username: "i_love_you_h", banned: false }],
+  ["usernames/i_love_you_h", { uid: "administrator", username: "i_love_you_h" }]
+];
+
 const putMany = async (db, entries) => {
   for (let offset = 0; offset < entries.length; offset += 400) {
     const batch = db.batch();
@@ -65,7 +99,7 @@ const putMany = async (db, entries) => {
 
 // Stable document-name cursors must reach work behind more than one full page.
 {
-  const { db, makeAdapter } = scenario();
+  const { db, clock, deletedUsers, makeAdapter } = scenario();
   const frontJobs = Array.from({ length: 205 }, (_, index) => [
     `adminDeletionJobs/a-${String(index).padStart(3, "0")}`,
     { status: "processing" }
@@ -76,9 +110,24 @@ const putMany = async (db, entries) => {
   ]);
   await putMany(db, [
     ...frontJobs,
-    ["adminDeletionJobs/z-queued", { status: "queued" }],
+    ...administratorEntries(),
+    ["adminDeletionJobs/z-queued", queuedJob("z-queued", clock.now)],
+    ["users/z-queued", {
+      uid: "z-queued",
+      username: "z_queued",
+      banned: true,
+      adminDeletionStatus: "queued",
+      adminDeletionRequestedBy: "administrator",
+      adminDeletionRequestedAt: Timestamp.fromMillis(clock.now - 10_000)
+    }],
+    ["usernames/z_queued", { uid: "z-queued", username: "z_queued" }],
+    ["system/accountStats", { count: 2, limit: 500, updatedAt: Timestamp.fromMillis(clock.now - 1_000) }],
     ...frontMarkers,
-    ["adminDeletionJobs/z-marker", { status: "completed" }]
+    ["adminDeletionJobs/z-marker", {
+      status: "completed",
+      completedAt: Timestamp.fromMillis(clock.now - COMPLETION_RETENTION_MS - 1),
+      purgeAfter: Timestamp.fromMillis(clock.now - 1)
+    }]
   ]);
   const adapter = makeAdapter();
   const jobs = [];
@@ -89,6 +138,17 @@ const putMany = async (db, entries) => {
   assert.equal(jobs.at(-1).id, "z-queued");
   assert.equal(markers.length, 206);
   assert.equal(markers.at(-1).id, "z-marker");
+  const logs = [];
+  const result = await runDeletionProcessor({
+    adapter,
+    ownerId: "pagination-worker",
+    logger: { info: (code) => logs.push(code), error: (code) => logs.push(code) }
+  });
+  assert.deepEqual(result, { inspected: 206, processed: 1, failed: 0, skipped: 205, purged: 1 });
+  assert.equal((await db.doc("adminDeletionJobs/z-marker").get()).exists, false);
+  assert.equal(isExactCompletionMarker((await db.doc("adminDeletionJobs/z-queued").get()).data()), true);
+  assert.deepEqual(deletedUsers, ["z-queued"]);
+  assert.equal(logs.filter((code) => code === "MALFORMED_MARKER").length, 205);
 }
 
 // Profile removal is fail-closed unless accountStats can be decremented exactly once.
@@ -111,6 +171,22 @@ for (const stats of [
   );
   assert.equal((await db.doc("users/target").get()).exists, true);
   assert.equal((await db.doc("usernames/target_name").get()).exists, true);
+}
+
+{
+  const { db, clock, makeAdapter } = scenario();
+  await putMany(db, [
+    ["adminDeletionJobs/target", processingJob({ phase: "claimed", now: clock.now })],
+    ["users/target", validProfile(clock.now)],
+    ["usernames/target_name", { uid: "target", username: "target_name" }],
+    ["system/accountStats", { count: 2, limit: 500, updatedAt: Timestamp.fromMillis(clock.now - 1_000) }]
+  ]);
+  await assert.rejects(
+    makeAdapter().removeProfileBarrier("target", "worker-token"),
+    (error) => error.code === "invalid-job"
+  );
+  assert.equal((await db.doc("users/target").get()).exists, true);
+  assert.equal((await db.doc("system/accountStats").get()).data().count, 2);
 }
 
 {
@@ -153,6 +229,37 @@ for (const stats of [
 
 // The external Auth boundary is lease-owned, renewable, and safely reclaimable after expiry.
 {
+  let releaseAuth;
+  let markAuthStarted;
+  const authStarted = new Promise((resolve) => { markAuthStarted = resolve; });
+  const auth = {
+    async deleteUser() {
+      markAuthStarted();
+      await new Promise((resolve) => { releaseAuth = resolve; });
+    }
+  };
+  const { db, clock, makeAdapter } = scenario({ auth, authRenewIntervalMs: 5 });
+  await putMany(db, [
+    ["adminDeletionJobs/target", processingJob({ phase: "second-sweep", now: clock.now })],
+    ...administratorEntries()
+  ]);
+  const first = makeAdapter("stall-first");
+  const second = makeAdapter("stall-second");
+  await first.beginAuthDeletion("target", "worker-token");
+  const deletion = first.deleteAuth("target", "worker-token");
+  await authStarted;
+  for (let interval = 0; interval < 3; interval += 1) {
+    clock.now += Math.floor(LEASE_MS / 2);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(await second.claim("target", "second-worker"), null);
+  releaseAuth();
+  await deletion;
+  await first.finishAuthDeletion("target", "worker-token");
+  assert.equal((await db.doc("adminDeletionJobs/target").get()).data().phase, "auth-deleted");
+}
+
+{
   const { db, clock, deletedUsers, makeAdapter } = scenario();
   await putMany(db, [
     ["adminDeletionJobs/target", processingJob({ phase: "second-sweep", now: clock.now })],
@@ -170,15 +277,217 @@ for (const stats of [
   const claimed = await second.claim("target", "second-worker");
   assert.equal(claimed.phase, "auth-deleting");
   await assert.rejects(
+    first.deleteAuth("target", "worker-token"),
+    (error) => error.code === "lease-lost"
+  );
+  assert.deepEqual(deletedUsers, []);
+  await assert.rejects(
     first.finishAuthDeletion("target", "worker-token"),
     (error) => error.code === "lease-lost"
   );
   await second.beginAuthDeletion("target", claimed.token);
-  await second.deleteAuth("target");
+  await second.deleteAuth("target", claimed.token);
   await second.finishAuthDeletion("target", claimed.token);
   stored = (await db.doc("adminDeletionJobs/target").get()).data();
   assert.equal(stored.phase, "auth-deleted");
   assert.deepEqual(deletedUsers, ["target"]);
+}
+
+// The production query/cascade matrix and state machine complete a real queued deletion.
+{
+  const { db, clock, deletedUsers, makeAdapter } = scenario();
+  const entries = [
+    ...administratorEntries(),
+    ["adminDeletionJobs/target", queuedJob("target", clock.now)],
+    ["users/target", validProfile(clock.now)],
+    ["usernames/target_name", { uid: "target", username: "target_name" }],
+    ["usernames/legacy_target_name", { uid: "target", username: "legacy_target_name" }],
+    ["system/accountStats", { count: 2, limit: 500, updatedAt: Timestamp.fromMillis(clock.now - 1_000) }]
+  ];
+  const expectedDeletedPaths = new Set(["users/target", "usernames/target_name", "usernames/legacy_target_name"]);
+  let entryNumber = 0;
+  for (const descriptor of cleanupQueries("target", "target_name")) {
+    entryNumber += 1;
+    let path;
+    if (descriptor.path) {
+      path = `${descriptor.collection}/${descriptor.path}`;
+    } else if (descriptor.group) {
+      if (descriptor.collection === "comments") path = `posts/group-parent/comments/group-${entryNumber}`;
+      if (descriptor.collection === "replies") path = `posts/group-parent/comments/group-parent/replies/group-${entryNumber}`;
+      if (descriptor.collection === "reactions") path = `posts/group-parent/reactions/group-${entryNumber}`;
+    } else {
+      path = `${descriptor.collection}/cleanup-${String(entryNumber).padStart(3, "0")}`;
+    }
+    const value = descriptor.operator === "array-contains" ? [descriptor.value, "other"] : descriptor.value;
+    const data = descriptor.field ? { [descriptor.field]: value, fixture: "cleanup" } : { fixture: "cleanup" };
+    entries.push([path, data]);
+    expectedDeletedPaths.add(path);
+
+    if (descriptor.cascade === "post") {
+      const postId = path.split("/").at(-1);
+      const descendants = [
+        [`${path}/comments/child`, { uid: "other" }],
+        [`${path}/comments/child/replies/reply`, { uid: "other" }],
+        [`${path}/reactions/reaction`, { uid: "other" }],
+        [`communityVotes/cascade-${entryNumber}`, { uid: "other", postId }],
+        [`timelineVotes/cascade-${entryNumber}`, { uid: "other", postId }]
+      ];
+      entries.push(...descendants);
+      descendants.forEach(([descendantPath]) => expectedDeletedPaths.add(descendantPath));
+    }
+    if (descriptor.cascade === "circle") {
+      const circleId = path.split("/").at(-1);
+      const descendants = [
+        [`communityPosts/circle-child-${entryNumber}`, { authorId: "other", circleId }],
+        [`communityPosts/circle-child-${entryNumber}/comments/child`, { uid: "other" }],
+        [`circleMembers/circle-child-${entryNumber}`, { uid: "other", circleId }],
+        [`${path}/metadata/child`, { fixture: "nested" }]
+      ];
+      entries.push(...descendants);
+      descendants.forEach(([descendantPath]) => expectedDeletedPaths.add(descendantPath));
+    }
+    if (descriptor.cascade === "room") {
+      const roomId = path.split("/").at(-1);
+      const descendants = [
+        [`roomMessages/room-child-${entryNumber}`, { senderId: "other", roomId }],
+        [`roomMembers/room-child-${entryNumber}`, { uid: "other", roomId }],
+        [`${path}/metadata/child`, { fixture: "nested" }]
+      ];
+      entries.push(...descendants);
+      descendants.forEach(([descendantPath]) => expectedDeletedPaths.add(descendantPath));
+    }
+  }
+  await putMany(db, entries);
+
+  const adapter = makeAdapter("complete");
+  const originalRemoveProfileBarrier = adapter.removeProfileBarrier.bind(adapter);
+  adapter.removeProfileBarrier = async (...parameters) => {
+    await originalRemoveProfileBarrier(...parameters);
+    await putMany(db, [
+      ["follows/after-profile-barrier", { followerId: "target", followingId: "other" }],
+      ["usernames/recreated-after-barrier", { uid: "target", username: "recreated-after-barrier" }]
+    ]);
+    expectedDeletedPaths.add("follows/after-profile-barrier");
+    expectedDeletedPaths.add("usernames/recreated-after-barrier");
+  };
+  const originalSecondSweep = adapter.secondSweep.bind(adapter);
+  let inSecondSweep = false;
+  adapter.secondSweep = async (...parameters) => {
+    inSecondSweep = true;
+    try { return await originalSecondSweep(...parameters); } finally { inSecondSweep = false; }
+  };
+  const originalDeleteRefs = adapter.deleteRefs.bind(adapter);
+  let injectedBehindCursor = false;
+  adapter.deleteRefs = async (...parameters) => {
+    const refs = parameters[2];
+    await originalDeleteRefs(...parameters);
+    if (inSecondSweep && !injectedBehindCursor && refs.some((reference) => reference.path.startsWith("follows/"))) {
+      injectedBehindCursor = true;
+      await db.doc("follows/000-behind-cursor").set({ followerId: "target", followingId: "other" });
+      expectedDeletedPaths.add("follows/000-behind-cursor");
+    }
+  };
+  const logEntries = [];
+  const logger = { info: (code) => logEntries.push(code), error: (code) => logEntries.push(code) };
+  const result = await runDeletionProcessor({ adapter, ownerId: "complete-worker", logger });
+  assert.deepEqual(result, { inspected: 1, processed: 1, failed: 0, skipped: 0, purged: 0 });
+  assert.equal(injectedBehindCursor, true);
+  assert.deepEqual(deletedUsers, ["target"]);
+  assert.equal((await db.doc("system/accountStats").get()).data().count, 1);
+  for (const path of expectedDeletedPaths) assert.equal((await db.doc(path).get()).exists, false, `${path} survived cleanup`);
+  const remainingReservations = await db.collection("usernames").where("uid", "==", "target").get();
+  assert.equal(remainingReservations.empty, true);
+  const marker = (await db.doc("adminDeletionJobs/target").get()).data();
+  assert.equal(isExactCompletionMarker(marker), true);
+  assert.equal(marker.purgeAfter.toMillis() - marker.completedAt.toMillis(), COMPLETION_RETENTION_MS);
+  assert.deepEqual((await db.doc("system/deletionProcessor").get()).data().status, "completed");
+  assert.ok(logEntries.every((entry) => /^[A-Z0-9_]+$/.test(entry)));
+
+  const retainedLogs = [];
+  const retained = await runDeletionProcessor({
+    adapter,
+    ownerId: "second-run",
+    logger: { info: (code) => retainedLogs.push(code), error: (code) => retainedLogs.push(code) }
+  });
+  assert.equal(retained.purged, 0);
+  assert.equal(retainedLogs.includes("MALFORMED_MARKER"), false);
+}
+
+// Failed, stale-processing, active-processing, auth-deleted, and malformed jobs/markers coexist safely.
+{
+  const missingAuthCalls = [];
+  const auth = {
+    async deleteUser(uid) {
+      missingAuthCalls.push(uid);
+      if (uid === "failed-auth") throw Object.assign(new Error("missing"), { code: "auth/user-not-found" });
+    }
+  };
+  const { db, clock, makeAdapter } = scenario({ auth });
+  const completedAt = clock.now - COMPLETION_RETENTION_MS - 100;
+  await putMany(db, [
+    ...administratorEntries(),
+    ["adminDeletionJobs/failed-auth", internalJob("failed-auth", clock.now, { status: "failed", phase: "auth-deleting" })],
+    ["adminDeletionJobs/stale-barrier", internalJob("stale-barrier", clock.now, { phase: "profile-barrier" })],
+    ["adminDeletionJobs/stale-auth-deleted", internalJob("stale-auth-deleted", clock.now, { phase: "auth-deleted" })],
+    ["adminDeletionJobs/active-processing", internalJob("active-processing", clock.now, { phase: "profile-barrier", leaseExpiresAt: clock.now + LEASE_MS })],
+    ["adminDeletionJobs/malformed-job", { ...queuedJob("malformed-job", clock.now), extra: "blocked" }],
+    ["adminDeletionJobs/expired-marker", {
+      status: "completed",
+      completedAt: Timestamp.fromMillis(completedAt),
+      purgeAfter: Timestamp.fromMillis(completedAt + COMPLETION_RETENTION_MS)
+    }],
+    ["adminDeletionJobs/retained-marker", {
+      status: "completed",
+      completedAt: Timestamp.fromMillis(clock.now),
+      purgeAfter: Timestamp.fromMillis(clock.now + COMPLETION_RETENTION_MS)
+    }],
+    ["adminDeletionJobs/malformed-marker", {
+      status: "completed",
+      completedAt: Timestamp.fromMillis(completedAt),
+      purgeAfter: Timestamp.fromMillis(completedAt + COMPLETION_RETENTION_MS),
+      extra: "blocked"
+    }]
+  ]);
+  const entries = [];
+  const result = await runDeletionProcessor({
+    adapter: makeAdapter("matrix"),
+    ownerId: "matrix-worker",
+    logger: { info: (code) => entries.push(code), error: (code) => entries.push(code) }
+  });
+  assert.deepEqual(result, { inspected: 5, processed: 3, failed: 1, skipped: 1, purged: 1 });
+  assert.equal((await db.doc("adminDeletionJobs/expired-marker").get()).exists, false);
+  assert.equal((await db.doc("adminDeletionJobs/retained-marker").get()).exists, true);
+  assert.equal((await db.doc("adminDeletionJobs/malformed-marker").get()).exists, true);
+  assert.equal((await db.doc("adminDeletionJobs/active-processing").get()).data().status, "processing");
+  assert.equal((await db.doc("adminDeletionJobs/malformed-job").get()).data().extra, "blocked");
+  for (const uid of ["failed-auth", "stale-barrier", "stale-auth-deleted"]) {
+    assert.equal(isExactCompletionMarker((await db.doc(`adminDeletionJobs/${uid}`).get()).data()), true);
+  }
+  assert.deepEqual(missingAuthCalls.sort(), ["failed-auth", "stale-barrier"]);
+  assert.equal(entries.includes("MALFORMED_MARKER"), true);
+  assert.equal(entries.includes("INVALID_JOB"), true);
+  assert.ok(entries.every((entry) => /^[A-Z0-9_]+$/.test(entry)));
+}
+
+// Heartbeat failure is isolated from the real Firestore state machine and finalization.
+{
+  const { db, clock, makeAdapter } = scenario();
+  await putMany(db, [
+    ...administratorEntries(),
+    ["adminDeletionJobs/heartbeat-target", internalJob("heartbeat-target", clock.now, { phase: "auth-deleted" })]
+  ]);
+  const adapter = makeAdapter("heartbeat");
+  adapter.heartbeat = async () => { throw new Error("emulator heartbeat outage"); };
+  const entries = [];
+  const result = await runDeletionProcessor({
+    adapter,
+    ownerId: "heartbeat-worker",
+    logger: { info: (code) => entries.push(code), error: (code) => entries.push(code) }
+  });
+  assert.equal(result.processed, 1);
+  assert.equal(isExactCompletionMarker((await db.doc("adminDeletionJobs/heartbeat-target").get()).data()), true);
+  assert.equal(entries.filter((entry) => entry === "HEARTBEAT_ERROR").length, 2);
+  assert.ok(entries.every((entry) => /^[A-Z0-9_]+$/.test(entry)));
 }
 
 await Promise.all(apps.map((app) => deleteApp(app)));

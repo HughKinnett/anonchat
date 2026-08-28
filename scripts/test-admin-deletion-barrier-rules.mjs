@@ -85,10 +85,24 @@ try {
   circleOrphanRace.delete(doc(other, "circles", "other-circle"));
   circleOrphanRace.set(doc(other, "communityPosts", "orphan-circle-post"), { authorId: "other", username: "other", content: "orphan", category: "Question", circleId: "other-circle", options: [], createdAt: serverTimestamp() });
   await assertFails(circleOrphanRace.commit());
+  const circleMemberOrphanRace = writeBatch(other);
+  circleMemberOrphanRace.delete(doc(other, "circles", "other-circle"));
+  circleMemberOrphanRace.set(doc(other, "circleMembers", "other-circle_other"), { circleId: "other-circle", uid: "other", createdAt: serverTimestamp() });
+  await assertFails(circleMemberOrphanRace.commit());
+  assert.equal((await getDoc(doc(other, "circles", "other-circle"))).exists(), true);
+  assert.equal((await getDoc(doc(other, "circleMembers", "other-circle_other"))).exists(), false);
   const roomOrphanRace = writeBatch(other);
   roomOrphanRace.delete(doc(other, "rooms", "other-room"));
   roomOrphanRace.set(doc(other, "roomMessages", "orphan-room-message"), { roomId: "other-room", senderId: "other", tempName: "Other", text: "orphan", createdAt: serverTimestamp() });
   await assertFails(roomOrphanRace.commit());
+  const roomMemberOrphanRace = writeBatch(other);
+  roomMemberOrphanRace.delete(doc(other, "rooms", "other-room"));
+  roomMemberOrphanRace.set(doc(other, "roomMembers", "other-room_other"), { roomId: "other-room", uid: "other", joinedAt: serverTimestamp() });
+  await assertFails(roomMemberOrphanRace.commit());
+  assert.equal((await getDoc(doc(other, "rooms", "other-room"))).exists(), true);
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    assert.equal((await getDoc(doc(context.firestore(), "roomMembers", "other-room_other"))).exists(), false);
+  });
   await testEnv.clearFirestore(); await seed({ targetJob: queuedJob, targetProfile: queuedProfile });
   member = testEnv.authenticatedContext("member").firestore(); const target = testEnv.authenticatedContext("target").firestore(); const admin = testEnv.authenticatedContext("admin").firestore();
   for (const operation of contentWrites(member, true)) await assertFails(operation());
@@ -112,7 +126,13 @@ try {
   await assertFails(updateDoc(doc(target, "adminDeletionJobs", "target"), { status: "failed" })); await assertFails(deleteDoc(doc(target, "adminDeletionJobs", "target")));
   await assertSucceeds(updateDoc(doc(admin, "users", "target"), { banned: true })); await assertFails(updateDoc(doc(admin, "users", "target"), { banned: false }));
   await testEnv.clearFirestore(); await seed(); await assertSucceeds(signup(testEnv.authenticatedContext("available_signup").firestore(), "available_signup"));
-  for (const barrier of [{ value: { ...queuedJob, status: "processing", phase: "profile-barrier" } }, { value: completedMarker }]) {
+  for (const barrier of [
+    { value: { ...queuedJob, status: "processing", phase: "profile-barrier" } },
+    { value: { ...queuedJob, status: "processing", phase: "auth-deleting" } },
+    { value: { ...queuedJob, status: "failed", phase: "second-sweep", errorCode: "AUTH_ERROR" } },
+    { value: completedMarker },
+    { value: { status: "malformed" } }
+  ]) {
     await testEnv.clearFirestore(); await seed({ targetJob: barrier.value, targetProfile: null });
     await assertFails(signup(testEnv.authenticatedContext("target").firestore(), "target"));
   }

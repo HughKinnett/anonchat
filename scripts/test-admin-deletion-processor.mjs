@@ -116,6 +116,15 @@ const captureLogger = () => { const entries = []; return { entries, logger: { in
   assert.equal(result.purged, 1); assert.equal(adapter.jobs.has("expired"), false); assert.equal(adapter.jobs.has("malformed"), true);
 }
 {
+  const adapter = new MemoryAdapter([]);
+  adapter.jobs.set("retained", { status: "completed", completedAt: 9_000, purgeAfter: 7_209_000 });
+  const { entries, logger } = captureLogger();
+  const result = await runDeletionProcessor({ adapter, ownerId: "worker", logger });
+  assert.equal(result.purged, 0);
+  assert.equal(adapter.jobs.has("retained"), true);
+  assert.equal(entries.includes("MALFORMED_MARKER"), false);
+}
+{
   const active = Array.from({ length: 205 }, (_, index) => queuedJob(`a-active-${String(index).padStart(3, "0")}`, { status: "processing", leaseExpiresAt: 20_000 }));
   const malformed = Array.from({ length: 205 }, (_, index) => ({
     id: `a-malformed-${String(index).padStart(3, "0")}`,
