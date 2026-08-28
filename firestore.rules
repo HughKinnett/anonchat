@@ -9,8 +9,47 @@ service cloud.firestore {
     function isAdmin() {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower()
-          in ['i_love_you_h', 'ownercybercapone'];
+        && isProtectedAdministrator(
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username
+        );
+    }
+
+    function isProtectedAdministrator(username) {
+      return username is string
+        && username.lower().matches('^[[:space:]]*(i_love_you_h|ownercybercapone)[[:space:]]*$');
+    }
+
+    function hasNoDeletionQueueState(profile) {
+      return !profile.keys().hasAny([
+        'adminDeletionRequestedAt', 'adminDeletionRequestedBy', 'adminDeletionStatus'
+      ]);
+    }
+
+    function matchingDeletionQueueJob(job, targetUid) {
+      return job.keys().hasOnly(['targetUid', 'requesterUid', 'requestedAt', 'status'])
+        && job.targetUid == targetUid
+        && job.requesterUid == request.auth.uid
+        && job.requestedAt == request.time
+        && job.status == 'queued';
+    }
+
+    function validDeletionQueueProfile(userId) {
+      return isAdmin()
+        && !isProtectedAdministrator(resource.data.username)
+        && hasNoDeletionQueueState(resource.data)
+        && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'banned', 'adminDeletionRequestedAt', 'adminDeletionRequestedBy', 'adminDeletionStatus'
+        ])
+        && request.resource.data.banned == true
+        && request.resource.data.adminDeletionRequestedAt == request.time
+        && request.resource.data.adminDeletionRequestedBy == request.auth.uid
+        && request.resource.data.adminDeletionStatus == 'queued'
+        && existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId))
+        && matchingDeletionQueueJob(
+          getAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId)).data,
+          userId
+        );
     }
 
     function activeUser() {
@@ -149,7 +188,9 @@ service cloud.firestore {
           || (!exists(/databases/$(database)/documents/system/accountStats)
             && getAfter(/databases/$(database)/documents/system/accountStats).data.count == 6));
       allow update: if (isAdmin()
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastActiveAt']))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['banned'])
+          && request.resource.data.banned is bool)
+        || validDeletionQueueProfile(userId)
         || (activeUser()
           && request.auth.uid == userId
           && (
@@ -185,6 +226,34 @@ service cloud.firestore {
           && request.auth.uid == userId
           && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
           && !(resource.data.username.lower() in ['i_love_you_h', 'ownercybercapone']));
+    }
+
+    match /adminDeletionJobs/{targetUid} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && exists(/databases/$(database)/documents/users/$(targetUid))
+        && !isProtectedAdministrator(
+          get(/databases/$(database)/documents/users/$(targetUid)).data.username
+        )
+        && !exists(/databases/$(database)/documents/adminDeletionJobs/$(targetUid))
+        && matchingDeletionQueueJob(request.resource.data, targetUid)
+        && existsAfter(/databases/$(database)/documents/users/$(targetUid))
+        && hasNoDeletionQueueState(
+          get(/databases/$(database)/documents/users/$(targetUid)).data
+        )
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data
+          .diff(get(/databases/$(database)/documents/users/$(targetUid)).data)
+          .affectedKeys().hasOnly([
+            'banned', 'adminDeletionRequestedAt', 'adminDeletionRequestedBy', 'adminDeletionStatus'
+          ])
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.banned == true
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.adminDeletionRequestedAt
+          == request.time
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.adminDeletionRequestedBy
+          == request.auth.uid
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.adminDeletionStatus
+          == 'queued';
+      allow update, delete: if false;
     }
 
     match /accountDeletionRequests/{userId} {

@@ -1,11 +1,13 @@
 import { auth, db } from "./firebase-config.js";
 import { recordPageActivity } from "./activity-integration.mjs";
+import { adminDeletionQueuePayloads, canQueueAdminDeletion, isProtectedAdministrator } from "./admin-deletion-policy.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { collection, collectionGroup, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { collection, collectionGroup, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $=id=>document.getElementById(id);
 const state={users:[],posts:[],communityPosts:[],comments:[],reactions:[],follows:[],views:[],circles:[],members:[],rooms:[],roomMessages:[],votes:[]};
 const unsubs=[]; let userFilter="all";
+let adminUid="";
 const setStatus=(message,error=false)=>{$("admin-status").textContent=message;$("admin-status").style.color=error?"#fca5a5":"inherit";};
 const millis=v=>v?.toMillis?.()||0;
 const formatDate=v=>v?.toDate?v.toDate().toLocaleString():"Unknown date";
@@ -112,9 +114,11 @@ const renderUsers=()=>{
     const followers=state.follows.filter(x=>x.data().followingId===entry.id).length,userPosts=[...state.posts,...state.communityPosts].filter(x=>x.data().authorId===entry.id).length;
     stats.textContent=`${userPosts} posts · ${followers} followers · ${activity.get(entry.id)||0} activity points`;info.append(name,meta,stats);
     const actions=document.createElement("div");actions.className="admin-actions";const profile=document.createElement("a");profile.className="admin-action nav-button";profile.href=`profile.html?uid=${encodeURIComponent(entry.id)}`;profile.textContent="View";
-    const ban=document.createElement("button");ban.type="button";ban.className=`admin-action ${d.banned?"restore":"danger"}`;const protectedAdmin=["i_love_you_h","ownercybercapone"].includes(String(d.username||"").toLowerCase());ban.textContent=protectedAdmin?"Protected admin":d.banned?"Unban":"Ban";ban.disabled=protectedAdmin;
+    const ban=document.createElement("button");ban.type="button";ban.className=`admin-action ${d.banned?"restore":"danger"}`;const protectedAdmin=isProtectedAdministrator(d.username);ban.textContent=protectedAdmin?"Protected admin":d.banned?"Unban":"Ban";ban.disabled=protectedAdmin;
     ban.onclick=async()=>{ban.disabled=true;try{await updateDoc(doc(db,"users",entry.id),{banned:!d.banned});setStatus(d.banned?"User unbanned.":"User banned.");}catch{setStatus("Could not update that user.",true);ban.disabled=false;}};
-    actions.append(profile,ban);row.append(info,actions);return row;}));
+    const queueDeletion=document.createElement("button");queueDeletion.type="button";queueDeletion.className="admin-action danger";queueDeletion.textContent="Queue deletion";queueDeletion.disabled=protectedAdmin;
+    queueDeletion.onclick=async()=>{queueDeletion.disabled=true;try{const job=await getDoc(doc(db,"adminDeletionJobs",entry.id)),existingQueueState=["adminDeletionRequestedAt","adminDeletionRequestedBy","adminDeletionStatus"].some(key=>Object.hasOwn(d,key));if(!canQueueAdminDeletion({targetUid:entry.id,username:d.username,existingJob:job.exists(),existingQueueState})){setStatus("That account cannot be queued for deletion.",true);return;}if(!confirm("Queue this account for deletion? The account will be locked immediately."))return;const timestamp=serverTimestamp(),payloads=adminDeletionQueuePayloads({targetUid:entry.id,requesterUid:adminUid,timestamp}),batch=writeBatch(db);batch.update(doc(db,"users",entry.id),payloads.profile);batch.set(doc(db,"adminDeletionJobs",entry.id),payloads.job);await batch.commit();setStatus("Account locked and queued for deletion.");}catch{setStatus("Could not queue that account for deletion.",true);}finally{queueDeletion.disabled=protectedAdmin;}};
+    actions.append(profile,ban,queueDeletion);row.append(info,actions);return row;}));
 };
 document.querySelectorAll("[data-user-filter]").forEach(b=>b.onclick=()=>{userFilter=b.dataset.userFilter;document.querySelectorAll("[data-user-filter]").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));renderUsers();});
 
@@ -140,7 +144,7 @@ $("admin-sign-out").onclick=async()=>{await signOut(auth);location.replace("inde
 $("download-admin-data").onclick=()=>{const summary={generatedAt:new Date().toISOString(),profiles:state.users.length,banned:state.users.filter(x=>x.data().banned).length,timelinePosts:state.posts.length,communityPosts:state.communityPosts.length,comments:state.comments.length,reactions:state.reactions.length,follows:state.follows.length,circles:state.circles.length,rooms:state.rooms.length,pollVotes:state.votes.length,pageViews:state.views.map(x=>({date:x.id,views:x.data().views||0}))};const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(summary,null,2)],{type:"application/json"}));a.download="anonchat-admin-summary.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);};
 
 const listen=(ref,key)=>unsubs.push(onSnapshot(ref,s=>{state[key]=s.docs;renderAll();},()=>setStatus("Could not load "+key+".",true)));
-onAuthStateChanged(auth,async user=>{if(!user){location.replace("index.html");return;}const profile=await getDoc(doc(db,"users",user.uid));const profileData=profile.exists()?profile.data():null;const username=profileData?.username||"";const isAuthorizedAdmin=["i_love_you_h","ownercybercapone"].includes(username.toLowerCase());if(!isAuthorizedAdmin){location.replace("timeline.html");return;}
+onAuthStateChanged(auth,async user=>{if(!user){location.replace("index.html");return;}const profile=await getDoc(doc(db,"users",user.uid));const profileData=profile.exists()?profile.data():null;const username=profileData?.username||"";const isAuthorizedAdmin=isProtectedAdministrator(username);if(!isAuthorizedAdmin){location.replace("timeline.html");return;}adminUid=user.uid;
   void recordPageActivity({surface:"admin",profile:profileData,user,db,firestore:{doc,updateDoc,serverTimestamp},isAuthorizedAdmin});
   setText("admin-identity",`Signed in as @${username} · public activity analytics only`);
   listen(collection(db,"users"),"users");listen(query(collection(db,"posts"),orderBy("createdAt","desc")),"posts");listen(query(collection(db,"communityPosts"),orderBy("createdAt","desc")),"communityPosts");

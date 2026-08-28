@@ -6,6 +6,7 @@
     "test:rules": "firebase emulators:exec --only firestore \"node scripts/test-firestore-rules.mjs\"",
     "test:auth-activity": "node scripts/test-auth-activity.mjs",
     "test:activity-rules": "firebase emulators:exec --only firestore \"node scripts/test-activity-rules.mjs\"",
+    "test:admin-deletion": "firebase emulators:exec --only firestore \"node scripts/test-admin-deletion-rules.mjs\" && node scripts/test-admin-deletion-policy.mjs",
     "test:legacy-migration": "node scripts/test-legacy-migration-policy.mjs"
   },
   "devDependencies": {
