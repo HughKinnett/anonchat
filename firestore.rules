@@ -26,14 +26,31 @@ service cloud.firestore {
 
     function contentAvailableAfter(documentPath) {
       return existsAfter(/databases/$(database)/documents/$(documentPath))
-        && accountAvailableAfter(getAfter(/databases/$(database)/documents/$(documentPath)).data.authorId);
+        && linkedContentAvailableAfter(
+          getAfter(/databases/$(database)/documents/$(documentPath)).data
+        );
+    }
+
+    function linkedContentAvailableAfter(content) {
+      return content.keys().hasAny(['authorId', 'originalAuthorId', 'ownerId', 'senderId'])
+        && (!content.keys().hasAny(['authorId']) || accountAvailableAfter(content.authorId))
+        && (!content.keys().hasAny(['originalAuthorId'])
+          || accountAvailableAfter(content.originalAuthorId))
+        && (!content.keys().hasAny(['ownerId']) || accountAvailableAfter(content.ownerId))
+        && (!content.keys().hasAny(['senderId']) || accountAvailableAfter(content.senderId))
+        && (!content.keys().hasAny(['circleId']) || circleAvailableAfter(content.circleId))
+        && (!content.keys().hasAny(['roomId']) || roomAvailableAfter(content.roomId));
     }
 
     function postAvailableAfter(postId) {
       return (existsAfter(/databases/$(database)/documents/posts/$(postId))
-          && accountAvailableAfter(getAfter(/databases/$(database)/documents/posts/$(postId)).data.authorId))
+          && linkedContentAvailableAfter(
+            getAfter(/databases/$(database)/documents/posts/$(postId)).data
+          ))
         || (existsAfter(/databases/$(database)/documents/communityPosts/$(postId))
-          && accountAvailableAfter(getAfter(/databases/$(database)/documents/communityPosts/$(postId)).data.authorId));
+          && linkedContentAvailableAfter(
+            getAfter(/databases/$(database)/documents/communityPosts/$(postId)).data
+          ));
     }
 
     function circleAvailableAfter(circleId) {
@@ -230,6 +247,8 @@ service cloud.firestore {
         && request.resource.data.username is string
         && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
         && request.resource.data.username.lower() == normalizedUsername
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username
+          == request.resource.data.username
         && request.resource.data.createdAt == request.time;
       allow update: if false;
       allow delete: if activeUser()

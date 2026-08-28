@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {
   BATCH_LIMIT, COMPLETION_RETENTION_MS, PAGE_LIMIT, cleanupQueries, completionMarker,
   fixedErrorCode, isClaimableJob, isExactCompletionMarker, isExactQueuedJob,
-  isProtectedAdministrator, isTrustedRequester
+  isProtectedAdministrator, isTrustedRequester, isValidAccountStats
 } from "../admin-deletion-processor-policy.mjs";
 const instant = (milliseconds) => ({ toMillis: () => milliseconds });
 const requestedAt = instant(1_000);
@@ -32,7 +32,7 @@ for (const required of [
   "owned-posts", "reposts-of-target", "comments-by-target", "replies-by-target", "reactions-by-target",
   "votes-by-target", "timeline-votes-by-target", "follows-from-target", "follows-to-target", "direct-messages",
   "message-requests-from-target", "message-requests-to-target", "reveals-from-target", "reveals-to-target",
-  "owned-rooms", "room-memberships", "owned-circles", "circle-memberships", "preferences", "private-profile",
+  "owned-rooms", "room-memberships", "owned-circles", "circle-memberships", "usernames-by-target", "preferences", "private-profile",
   "reports-by-target", "reports-about-target", "blocks-by-target", "blocks-of-target", "push-subscriptions",
   "notification-events", "notification-deliveries", "self-deletion-request"
 ]) assert.ok(queries.some((entry) => entry.name === required), `missing ${required}`);
@@ -40,7 +40,15 @@ assert.ok(queries.some((entry) => entry.cascade === "post"));
 assert.ok(queries.some((entry) => entry.cascade === "circle"));
 assert.ok(queries.some((entry) => entry.cascade === "room"));
 assert.ok(queries.some((entry) => entry.field === "username" && entry.value === "target_name"));
+for (const name of ["posts-by-username", "original-posts-by-username", "community-posts-by-username"]) {
+  assert.equal(queries.find((entry) => entry.name === name).cascade, "post", `${name} must remove descendants`);
+}
 assert.equal(fixedErrorCode({ code: "auth/user-not-found" }), "AUTH_NOT_FOUND");
 assert.equal(fixedErrorCode({ code: "lease-lost", message: "secret-uid" }), "LEASE_LOST");
 assert.equal(fixedErrorCode(new Error("secret-uid")), "PROCESSOR_FAILURE");
+assert.equal(isValidAccountStats({ count: 5, limit: 500, updatedAt: instant(1_000) }), true);
+assert.equal(isValidAccountStats({ count: 0, limit: 500, updatedAt: instant(1_000) }), false);
+assert.equal(isValidAccountStats({ count: 5.5, limit: 500, updatedAt: instant(1_000) }), false);
+assert.equal(isValidAccountStats({ count: 5, limit: 499, updatedAt: instant(1_000) }), false);
+assert.equal(isValidAccountStats({ count: 5, limit: 500 }), false);
 console.log("Administrator deletion processor policy passed");

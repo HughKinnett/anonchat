@@ -9,6 +9,8 @@
     "test:admin-deletion": "firebase emulators:exec --only firestore \"node scripts/test-admin-deletion-rules.mjs && node scripts/test-admin-deletion-barrier-rules.mjs\" && node scripts/test-admin-deletion-policy.mjs",
     "test:admin-deletion-processor-policy": "node scripts/test-admin-deletion-processor-policy.mjs",
     "test:admin-deletion-processor": "node scripts/test-admin-deletion-firestore-adapter.mjs && node scripts/test-admin-deletion-processor.mjs",
+    "test:admin-deletion-firestore-integration": "firebase emulators:exec --only firestore \"node scripts/test-admin-deletion-firestore-integration.mjs\"",
+    "test:admin-deletion-indexes": "node scripts/test-admin-deletion-indexes.mjs",
     "admin-deletion:process": "node scripts/admin-deletion-processor.mjs",
     "test:legacy-migration": "node scripts/test-legacy-migration-policy.mjs"
   },

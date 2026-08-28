@@ -21,11 +21,14 @@ const seed = async ({ targetJob = null, targetProfile = profile("target") } = {}
     setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) }),
     setDoc(doc(firestore, "posts", "target-post"), { type: "original", authorId: "target", username: "target", content: "target post", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
     setDoc(doc(firestore, "posts", "other-post"), { type: "original", authorId: "other", username: "other", content: "other post", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
+    setDoc(doc(firestore, "posts", "other-repost-target"), { type: "repost", authorId: "other", username: "other", originalPostId: "target-post", originalAuthorId: "target", originalUsername: "target", content: "target post", imageData: "", createdAt: new Date(0) }),
     setDoc(doc(firestore, "communityPosts", "target-community"), { authorId: "target", username: "target", content: "target community", category: "Question", circleId: "target-circle", options: [], createdAt: new Date(0) }),
+    setDoc(doc(firestore, "communityPosts", "other-in-target-circle"), { authorId: "other", username: "other", content: "other in target circle", category: "Question", circleId: "target-circle", options: [], createdAt: new Date(0) }),
     setDoc(doc(firestore, "circles", "target-circle"), { name: "Target circle", description: "", ownerId: "target", createdAt: new Date(0) }),
     setDoc(doc(firestore, "circles", "other-circle"), { name: "Other circle", description: "", ownerId: "other", createdAt: new Date(0) }),
     setDoc(doc(firestore, "rooms", "target-room"), { name: "Target room", topic: "topic", ownerId: "target", createdAt: new Date(0) }),
     setDoc(doc(firestore, "rooms", "other-room"), { name: "Other room", topic: "topic", ownerId: "other", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "roomMessages", "other-in-target-room"), { roomId: "target-room", senderId: "other", tempName: "Other", text: "message", createdAt: new Date(0) }),
     setDoc(doc(firestore, "messageRequests", "member_target"), { fromId: "member", toId: "target", status: "accepted", createdAt: new Date(0) }),
     setDoc(doc(firestore, "messageRequests", "member_other"), { fromId: "member", toId: "other", status: "accepted", createdAt: new Date(0) })
   ];
@@ -55,14 +58,49 @@ const signup = (firestore, uid) => {
   batch.set(doc(firestore, "users", uid), { uid, username: uid, createdAt: serverTimestamp(), lastActiveAt: serverTimestamp() });
   batch.update(doc(firestore, "system", "accountStats"), { count: 6, limit: 500, updatedAt: serverTimestamp() }); return batch.commit();
 };
+const rename = (firestore, uid, from, to) => {
+  const batch = writeBatch(firestore);
+  batch.set(doc(firestore, "usernames", to), { uid, username: to, createdAt: serverTimestamp() });
+  batch.update(doc(firestore, "users", uid), { username: to });
+  batch.delete(doc(firestore, "usernames", from));
+  return batch.commit();
+};
 try {
   await seed(); let member = testEnv.authenticatedContext("member").firestore();
   for (const operation of contentWrites(member, false)) await assertSucceeds(operation());
   await assertSucceeds(deleteDoc(doc(member, "messageRequests", "member_other")));
   await assertSucceeds(setDoc(doc(member, "messageRequests", "member_other"), { fromId: "member", toId: "other", status: "pending", createdAt: serverTimestamp() }));
+  await assertSucceeds(rename(member, "member", "member", "member_new"));
+  await assertFails(setDoc(doc(member, "usernames", "extra_member"), { uid: "member", username: "extra_member", createdAt: serverTimestamp() }));
+
+  const other = testEnv.authenticatedContext("other").firestore();
+  const postOrphanRace = writeBatch(other);
+  postOrphanRace.delete(doc(other, "posts", "other-post"));
+  postOrphanRace.set(doc(other, "posts", "other-post", "comments", "orphan"), { uid: "other", username: "other", text: "orphan", createdAt: serverTimestamp() });
+  await assertFails(postOrphanRace.commit());
+  assert.equal((await getDoc(doc(other, "posts", "other-post"))).exists(), true);
+  assert.equal((await getDoc(doc(other, "posts", "other-post", "comments", "orphan"))).exists(), false);
+
+  const circleOrphanRace = writeBatch(other);
+  circleOrphanRace.delete(doc(other, "circles", "other-circle"));
+  circleOrphanRace.set(doc(other, "communityPosts", "orphan-circle-post"), { authorId: "other", username: "other", content: "orphan", category: "Question", circleId: "other-circle", options: [], createdAt: serverTimestamp() });
+  await assertFails(circleOrphanRace.commit());
+  const roomOrphanRace = writeBatch(other);
+  roomOrphanRace.delete(doc(other, "rooms", "other-room"));
+  roomOrphanRace.set(doc(other, "roomMessages", "orphan-room-message"), { roomId: "other-room", senderId: "other", tempName: "Other", text: "orphan", createdAt: serverTimestamp() });
+  await assertFails(roomOrphanRace.commit());
   await testEnv.clearFirestore(); await seed({ targetJob: queuedJob, targetProfile: queuedProfile });
   member = testEnv.authenticatedContext("member").firestore(); const target = testEnv.authenticatedContext("target").firestore(); const admin = testEnv.authenticatedContext("admin").firestore();
   for (const operation of contentWrites(member, true)) await assertFails(operation());
+  for (const parentPath of [
+    ["posts", "other-repost-target"],
+    ["communityPosts", "other-in-target-circle"],
+    ["roomMessages", "other-in-target-room"]
+  ]) {
+    await assertFails(setDoc(doc(member, ...parentPath, "comments", `blocked_${parentPath[1]}`), { uid: "member", username: "member", text: "blocked", createdAt: serverTimestamp() }));
+    await assertFails(setDoc(doc(member, ...parentPath, "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() }));
+  }
+  await assertFails(setDoc(doc(member, "communityVotes", "other-repost-target_member"), { postId: "other-repost-target", uid: "member", option: 0, createdAt: serverTimestamp() }));
   await assertSucceeds(deleteDoc(doc(member, "messageRequests", "member_target")));
   await assertFails(setDoc(doc(member, "messageRequests", "member_target"), { fromId: "member", toId: "target", status: "pending", createdAt: serverTimestamp() }));
   await assertFails(setDoc(doc(target, "posts", "target-new"), { type: "original", authorId: "target", username: "target", content: "new", imageData: "", category: "Post", options: [], createdAt: serverTimestamp() }));

@@ -34,6 +34,9 @@ export const completionMarker = (completedAt, timestampFactory = (value) => valu
 export const isExactCompletionMarker = (marker) => hasExactKeys(marker, ["status", "completedAt", "purgeAfter"])
   && marker.status === "completed" && Number.isFinite(timestampMillis(marker.completedAt))
   && timestampMillis(marker.purgeAfter) - timestampMillis(marker.completedAt) === COMPLETION_RETENTION_MS;
+export const isValidAccountStats = (stats) => hasExactKeys(stats, ["count", "limit", "updatedAt"])
+  && Number.isInteger(stats.count) && stats.count >= 1 && stats.limit === 500
+  && Number.isFinite(timestampMillis(stats.updatedAt));
 
 const direct = (name, collection, path) => ({ name, collection, path, limit: PAGE_LIMIT });
 const field = (name, collection, fieldName, value, extra = {}) => ({
@@ -42,10 +45,10 @@ const field = (name, collection, fieldName, value, extra = {}) => ({
 export const cleanupQueries = (targetUid, username = "") => Object.freeze([
   field("owned-posts", "posts", "authorId", targetUid, { cascade: "post" }),
   field("reposts-of-target", "posts", "originalAuthorId", targetUid, { cascade: "post" }),
-  field("posts-by-username", "posts", "username", username),
-  field("original-posts-by-username", "posts", "originalUsername", username),
+  field("posts-by-username", "posts", "username", username, { cascade: "post" }),
+  field("original-posts-by-username", "posts", "originalUsername", username, { cascade: "post" }),
   field("owned-community-posts", "communityPosts", "authorId", targetUid, { cascade: "post" }),
-  field("community-posts-by-username", "communityPosts", "username", username),
+  field("community-posts-by-username", "communityPosts", "username", username, { cascade: "post" }),
   field("comments-by-target", "comments", "uid", targetUid, { group: true }),
   field("comments-by-username", "comments", "username", username, { group: true }),
   field("replies-by-target", "replies", "uid", targetUid, { group: true }),
@@ -66,6 +69,7 @@ export const cleanupQueries = (targetUid, username = "") => Object.freeze([
   field("room-messages", "roomMessages", "senderId", targetUid),
   field("owned-circles", "circles", "ownerId", targetUid, { cascade: "circle" }),
   field("circle-memberships", "circleMembers", "uid", targetUid),
+  field("usernames-by-target", "usernames", "uid", targetUid),
   direct("preferences", "userPreferences", targetUid),
   direct("private-profile", "userPrivate", targetUid),
   field("reports-by-target", "reports", "reporterId", targetUid),
@@ -89,6 +93,7 @@ const ERROR_CODES = new Map([
   ["lease-lost", "LEASE_LOST"], ["untrusted-requester", "UNTRUSTED_REQUESTER"],
   ["invalid-job", "INVALID_JOB"], ["protected-target", "PROTECTED_TARGET"],
   ["profile-recreated", "PROFILE_RECREATED"], ["cleanup-limit", "CLEANUP_LIMIT"],
+  ["account-stats-invalid", "ACCOUNT_STATS_INVALID"],
   ["heartbeat-failed", "HEARTBEAT_ERROR"], ["malformed-marker", "MALFORMED_MARKER"]
 ]);
 export const fixedErrorCode = (error) => ERROR_CODES.get(error?.code) ?? "PROCESSOR_FAILURE";

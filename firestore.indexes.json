@@ -1,0 +1,30 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "comments",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [{ "fieldPath": "uid", "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "comments",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [{ "fieldPath": "username", "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "reactions",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [{ "fieldPath": "uid", "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "replies",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [{ "fieldPath": "uid", "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "replies",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [{ "fieldPath": "username", "order": "ASCENDING" }]
+    }
+  ],
+  "fieldOverrides": []
+}
