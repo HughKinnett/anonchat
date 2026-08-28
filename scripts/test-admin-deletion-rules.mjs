@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
 
 const testEnv = await initializeTestEnvironment({
   projectId: "anonchat-admin-deletion-rules-test",
@@ -128,6 +128,40 @@ try {
   await testEnv.clearFirestore(); await seed();
   await testEnv.withSecurityRulesDisabled(async (context) => updateDoc(doc(context.firestore(), "users", "admin"), { banned: true }));
   await assertFails(updateDoc(doc(admin, "users", "target"), { banned: true }));
+
+  await testEnv.clearFirestore(); await seed();
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await Promise.all([
+      setDoc(doc(firestore, "system", "deletionProcessor"), { updatedAt: new Date(0), status: "working" }),
+      setDoc(doc(firestore, "users", "forged-health-admin"), profile("forged-health-admin", "i_love_you_h")),
+      setDoc(doc(firestore, "users", "mismatched-health-admin"), profile("mismatched-health-admin", "ownerCyberCapone")),
+      setDoc(doc(firestore, "usernames", "ownercybercapone"), { uid: "another-user", username: "ownerCyberCapone", createdAt: new Date(0) })
+    ]);
+  });
+  const unauthenticated = testEnv.unauthenticatedContext().firestore();
+  const forgedHealthAdmin = testEnv.authenticatedContext("forged-health-admin").firestore();
+  const mismatchedHealthAdmin = testEnv.authenticatedContext("mismatched-health-admin").firestore();
+  await assertSucceeds(getDoc(doc(admin, "system", "deletionProcessor")));
+  await assertFails(getDoc(doc(member, "system", "deletionProcessor")));
+  await assertFails(getDoc(doc(forgedHealthAdmin, "system", "deletionProcessor")));
+  await assertFails(getDoc(doc(mismatchedHealthAdmin, "system", "deletionProcessor")));
+  await assertFails(getDoc(doc(unauthenticated, "system", "deletionProcessor")));
+  await assertFails(setDoc(doc(admin, "system", "deletionProcessor"), { updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(admin, "system", "deletionProcessor"), { status: "failed" }));
+  await assertFails(deleteDoc(doc(admin, "system", "deletionProcessor")));
+
+  await testEnv.clearFirestore();
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await Promise.all([
+      setDoc(doc(firestore, "system", "deletionProcessor"), { updatedAt: new Date(0), status: "working" }),
+      setDoc(doc(firestore, "users", "banned-health-admin"), { ...profile("banned-health-admin", "ownercybercapone"), banned: true }),
+      setDoc(doc(firestore, "usernames", "ownercybercapone"), { uid: "banned-health-admin", username: "ownercybercapone", createdAt: new Date(0) })
+    ]);
+  });
+  const bannedHealthAdmin = testEnv.authenticatedContext("banned-health-admin").firestore();
+  await assertFails(getDoc(doc(bannedHealthAdmin, "system", "deletionProcessor")));
 
   console.log("Firestore administrator deletion queue authorization passed");
 } finally {

@@ -1,153 +1,114 @@
 import { auth, db } from "./firebase-config.js";
 import { recordPageActivity } from "./activity-integration.mjs";
-import { adminDeletionQueuePayloads, canAdminSetBanned, canQueueAdminDeletion, hasAdminDeletionQueueState, isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
+import { adminDeletionQueuePayloads, canAdminSetBanned, canQueueAdminDeletion, isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
+import { canConfirmDeletion, deletionDialogJobTransition, filterUsers, processorHealth, sortInactiveUsers, statusForUser, timestampMillis } from "./admin-dashboard-policy.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { collection, collectionGroup, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const $=id=>document.getElementById(id);
-const state={users:[],posts:[],communityPosts:[],comments:[],reactions:[],follows:[],views:[],circles:[],members:[],rooms:[],roomMessages:[],votes:[]};
-const unsubs=[]; let userFilter="all";
-let adminUid="";
-const setStatus=(message,error=false)=>{$("admin-status").textContent=message;$("admin-status").style.color=error?"#fca5a5":"inherit";};
-const millis=v=>v?.toMillis?.()||0;
-const formatDate=v=>v?.toDate?v.toDate().toLocaleString():"Unknown date";
-const withinWindow=v=>{const days=Number($("metric-window").value);return !days||millis(v)>=Date.now()-days*86400000;};
-const pct=(part,total)=>total?Math.round(part/total*100):0;
-const postIdFor=entry=>entry.ref?.parent?.parent?.id;
-const usernameFor=uid=>state.users.find(u=>u.id===uid)?.data().username||"unknown";
+const $ = id => document.getElementById(id);
+const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], jobs: new Map(), processor: null };
+const unsubs = [];
+let adminUid = "", userFilter = "all", pageActive = true, listenersStarted = false, heartbeatTimer = null;
+let dialogState = { open: false, targetUid: "" }, dialogTarget = null, dialogTrigger = null;
 
-const setText=(id,value)=>{$(id).textContent=value;};
-const activityByUser=()=>{
-  const map=new Map(); const add=(uid,points=1)=>{if(uid)map.set(uid,(map.get(uid)||0)+points);};
-  state.posts.forEach(x=>add(x.data().authorId,3));state.communityPosts.forEach(x=>add(x.data().authorId,3));
-  state.comments.forEach(x=>add(x.data().uid,2));state.reactions.forEach(x=>add(x.data().uid));state.follows.forEach(x=>add(x.data().followerId));
-  state.roomMessages.forEach(x=>add(x.data().senderId));return map;
-};
+const setStatus = (message, error = false) => { $("admin-status").textContent = message; $("admin-status").style.color = error ? "#fca5a5" : ""; };
+const records = snapshot => snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }));
+const formatDate = value => { const ms = timestampMillis(value); return ms === null ? "Activity not recorded" : new Date(ms).toLocaleString(); };
+const create = (name, text, className) => { const node = document.createElement(name); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
+const empty = message => create("p", message, "admin-note");
+const userOptions = () => ({ now: Date.now(), deletionJobs: state.jobs });
+const jobMessage = user => state.jobs.get(user.id)?.status === "failed" ? "Deletion Pending — needs attention" : "Deletion Pending";
 
-const renderMetrics=()=>{
-  const users=state.users, active=users.filter(x=>!x.data().banned), banned=users.length-active.length;
-  const newUsers=users.filter(x=>withinWindow(x.data().createdAt)).length;
-  const newPosts=[...state.posts,...state.communityPosts].filter(x=>withinWindow(x.data().createdAt)).length;
-  const windowViews=state.views.filter(x=>{const d=new Date(x.id+"T23:59:59");const days=Number($("metric-window").value);return !days||d>=new Date(Date.now()-days*86400000);}).reduce((n,x)=>n+(x.data().views||0),0);
-  const totalPublicPosts=state.posts.length+state.communityPosts.length;
-  const engaged=activityByUser().size;
-  const expiring=state.communityPosts.filter(x=>millis(x.data().expiresAt)>Date.now()).length;
-  const values={
-    "metric-users":users.length,"metric-active-users":active.length,"metric-banned":banned,
-    "metric-views":state.views.reduce((n,x)=>n+(x.data().views||0),0),"metric-posts":state.posts.length,
-    "metric-community-posts":state.communityPosts.length,"metric-comments":state.comments.length,
-    "metric-reactions":state.reactions.length,"metric-follows":state.follows.length,"metric-circles":state.circles.length,
-    "metric-rooms":state.rooms.length,"metric-poll-votes":state.votes.length
-  };Object.entries(values).forEach(([id,v])=>setText(id,v));
-  setText("metric-new-users",newUsers+" new in window");setText("metric-engaged-users",engaged+" engaged");
-  setText("metric-ban-rate",pct(banned,users.length)+"% of profiles");setText("metric-window-views",windowViews+" in window");
-  setText("metric-new-posts",newPosts+" in window");setText("metric-expiring",expiring+" currently expiring");
-  setText("metric-comments-per-post",(state.comments.length/Math.max(1,state.posts.length)).toFixed(1)+" per timeline post");
-  setText("metric-reactions-per-post",(state.reactions.length/Math.max(1,state.posts.length)).toFixed(1)+" per timeline post");
-  setText("metric-follow-rate",(state.follows.length/Math.max(1,users.length)).toFixed(1)+" per profile");
-  setText("metric-memberships",state.members.length+" memberships");setText("metric-room-messages",state.roomMessages.length+" room messages");
-  setText("metric-engagement-rate",pct(engaged,active.length)+"% participation");
-  setText("account-count",users.length);const capacity=pct(users.length,500);$("capacity-bar").style.width=capacity+"%";setText("capacity-label",capacity+"% capacity");
-  setText("last-updated","Live data updated "+new Date().toLocaleTimeString());
-  renderGrowth();renderBreakdowns();renderHealth();renderTopLists();renderPulse();
-};
+function renderMetrics() {
+  const options = userOptions();
+  const inactive = filterUsers(state.users, { ...options, filter: "inactive" });
+  $("metric-users").textContent = state.users.length;
+  $("metric-inactive").textContent = inactive.length;
+  $("metric-banned").textContent = filterUsers(state.users, { ...options, filter: "banned" }).length;
+  $("metric-content").textContent = state.posts.length + state.communityPosts.length;
+  $("last-updated").textContent = `Live data updated ${new Date().toLocaleTimeString()}`;
+}
 
-const renderGrowth=()=>{
-  const days=[...Array(14)].map((_,i)=>{const d=new Date(Date.now()-(13-i)*86400000);return d.toISOString().slice(0,10);});
-  const values=days.map(day=>({day,views:state.views.find(x=>x.id===day)?.data().views||0,users:state.users.filter(x=>x.data().createdAt?.toDate?.().toISOString().slice(0,10)===day).length}));
-  const max=Math.max(1,...values.map(x=>Math.max(x.views,x.users)));
-  $("growth-chart").replaceChildren(...values.map(x=>{const col=document.createElement("div");col.className="chart-day";col.title=`${x.day}: ${x.views} views, ${x.users} new profiles`;
-    const bars=document.createElement("div");bars.className="chart-bars";const v=document.createElement("i"),u=document.createElement("i");v.className="views";u.className="users";v.style.height=Math.max(3,x.views/max*100)+"%";u.style.height=Math.max(3,x.users/max*100)+"%";bars.append(v,u);
-    const label=document.createElement("small");label.textContent=x.day.slice(5);col.append(bars,label);return col;}));
-};
+function renderUserRow(user) {
+  const status = statusForUser(user, userOptions());
+  const locked = state.jobs.has(user.id) || ["adminDeletionRequestedAt", "adminDeletionRequestedBy", "adminDeletionStatus"].some(key => key in user);
+  const protectedAdmin = isProtectedAdministrator(user.username);
+  const row = create("article", undefined, "admin-row");
+  const info = create("div");
+  const name = create("strong", `@${user.username || "Unknown user"}`);
+  const statusLine = create("small", status.kind === "deletion-pending" ? jobMessage(user) : status.label, `user-status status-${status.kind}`);
+  const activeLine = create("small", `Last active: ${formatDate(user.lastActiveAt)}`);
+  info.append(name, statusLine, activeLine);
+  const actions = create("div", undefined, "admin-actions");
+  const profile = create("a", "View Profile", "admin-action nav-button"); profile.href = `profile.html?uid=${encodeURIComponent(user.id)}`;
+  const ban = create("button", protectedAdmin ? "Protected administrator" : user.banned ? "Unban" : "Ban", `admin-action ${user.banned ? "restore" : "danger"}`); ban.type = "button";
+  ban.disabled = protectedAdmin || !canAdminSetBanned({ nextBanned: !user.banned, existingJob: locked, existingQueueState: locked });
+  ban.onclick = async () => { ban.disabled = true; try { await updateDoc(doc(db, "users", user.id), { banned: !user.banned }); setStatus(user.banned ? "Account unbanned." : "Account banned."); } catch { setStatus("Could not update that account.", true); renderUsers(); } };
+  const remove = create("button", "Delete Account", "admin-action danger"); remove.type = "button";
+  remove.disabled = protectedAdmin || !canQueueAdminDeletion({ targetUid: user.id, username: user.username, existingJob: locked, existingQueueState: locked });
+  remove.onclick = () => openDeletionDialog(user, remove);
+  actions.append(profile, ban, remove); row.append(info, actions); return row;
+}
 
-const barRows=(host,items,total)=>{host.replaceChildren(...items.map(([label,count])=>{const row=document.createElement("div");row.className="breakdown-row";const head=document.createElement("div"),name=document.createElement("span"),value=document.createElement("strong");name.textContent=label;value.textContent=count+" · "+pct(count,total)+"%";head.append(name,value);const track=document.createElement("div"),bar=document.createElement("i");track.className="breakdown-track";bar.style.width=pct(count,total)+"%";track.append(bar);row.append(head,track);return row;}));};
-const renderBreakdowns=()=>{
-  const categories=["Question","Confession","Advice","Rant","Good News","Poll"].map(k=>[k,state.communityPosts.filter(x=>x.data().category===k).length]);
-  barRows($("category-breakdown"),categories,state.communityPosts.length);
-  const reactionMap={heart:"❤️ Heart",middle_finger:"🖕 Middle finger",laugh:"😂 Laugh",sad:"😢 Sad"};
-  barRows($("reaction-breakdown"),Object.entries(reactionMap).map(([k,label])=>[label,state.reactions.filter(x=>x.data().type===k).length]),state.reactions.length);
-};
+function renderUsers() {
+  const options = { ...userOptions(), filter: userFilter, search: $("admin-user-search").value.trim() };
+  const users = filterUsers(state.users, options).sort((a, b) => String(a.username || "").localeCompare(String(b.username || "")));
+  $("admin-users").replaceChildren(...(users.length ? users.map(renderUserRow) : [empty("No accounts match this view.")]));
+  const inactive = sortInactiveUsers(state.users, userOptions());
+  $("inactive-users").replaceChildren(...(inactive.length ? inactive.map(renderUserRow) : [empty("No eligible inactive accounts right now.")]));
+}
 
-const healthRow=(label,value,tone="good")=>{const row=document.createElement("div");row.className="health-row "+tone;const a=document.createElement("span"),b=document.createElement("strong");a.textContent=label;b.textContent=value;row.append(a,b);return row;};
-const renderHealth=()=>{
-  const names=state.users.map(x=>(x.data().username||"").toLowerCase()).filter(Boolean),duplicates=names.filter((x,i)=>names.indexOf(x)!==i).length;
-  const missingUser=state.users.filter(x=>!x.data().username||!x.data().createdAt).length;
-  const userIds=new Set(state.users.map(x=>x.id));const orphaned=[...state.posts,...state.communityPosts].filter(x=>!userIds.has(x.data().authorId)).length;
-  const expired=state.communityPosts.filter(x=>millis(x.data().expiresAt)&&millis(x.data().expiresAt)<=Date.now()).length;
-  const emptyCircles=state.circles.filter(c=>!state.members.some(m=>m.data().circleId===c.id)).length;
-  $("data-health").replaceChildren(
-    healthRow("Incomplete legacy profiles",missingUser,missingUser?"warn":"good"),
-    healthRow("Duplicate usernames",duplicates,duplicates?"bad":"good"),
-    healthRow("Orphaned posts",orphaned,orphaned?"bad":"good"),
-    healthRow("Expired posts stored",expired,expired?"warn":"good"),
-    healthRow("Empty circles",emptyCircles,emptyCircles?"warn":"good")
-  );
-};
+function renderContent() {
+  const needle = $("admin-content-search").value.trim().toLowerCase(), type = $("admin-content-type").value;
+  const content = [
+    ...state.posts.map(entry => ({ ...entry, type: "timeline" })),
+    ...state.communityPosts.map(entry => ({ ...entry, type: "community" }))
+  ].filter(entry => (type === "all" || entry.type === type) && (!needle || String(entry.username || "").toLowerCase().includes(needle) || String(entry.content || "").toLowerCase().includes(needle)))
+    .sort((a, b) => timestampMillis(b.createdAt) - timestampMillis(a.createdAt)).slice(0, 200);
+  $("admin-posts").replaceChildren(...(content.length ? content.map(entry => {
+    const row = create("article", undefined, "admin-row"), info = create("div");
+    info.append(create("strong", `@${entry.username || "Unknown user"} · ${entry.type === "community" ? entry.category || "Community" : "Timeline"}`), create("small", String(entry.content || "Photo post").slice(0, 240)), create("small", formatDate(entry.createdAt)));
+    const actions = create("div", undefined, "admin-actions"), open = create("a", "View", "admin-action nav-button");
+    open.href = entry.type === "community" ? "community.html" : `timeline.html#post-${entry.id}`;
+    const remove = create("button", "Delete", "admin-action danger"); remove.type = "button";
+    remove.onclick = async () => { if (!window.confirm("Delete this public content? This cannot be undone.")) return; remove.disabled = true; try { await deleteDoc(doc(db, entry.type === "community" ? "communityPosts" : "posts", entry.id)); setStatus("Content deleted."); } catch { setStatus("Could not delete that content.", true); remove.disabled = false; } };
+    actions.append(open, remove); row.append(info, actions); return row;
+  }) : [empty("No public content matches this search.")]));
+}
 
-const renderTopLists=()=>{
-  const activity=activityByUser();const top=[...activity.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8);
-  $("top-users").replaceChildren(...top.map(([uid,score],i)=>rankRow(i+1,"@"+usernameFor(uid),score+" activity points",`profile.html?uid=${encodeURIComponent(uid)}`)));
-  const all=state.posts.map(x=>({entry:x,type:"timeline"}));const scores=all.map(x=>{const id=x.entry.id;return {...x,score:state.comments.filter(c=>postIdFor(c)===id).length+state.reactions.filter(r=>postIdFor(r)===id).length};}).sort((a,b)=>b.score-a.score).slice(0,8);
-  $("top-posts").replaceChildren(...scores.map((x,i)=>rankRow(i+1,"@"+(x.entry.data().username||"unknown"),x.score+" interactions · "+String(x.entry.data().content||"Photo").slice(0,55),"timeline.html#post-"+x.entry.id)));
-};
-const rankRow=(rank,label,detail,href)=>{const row=document.createElement(href?"a":"div");row.className="rank-row";if(href)row.href=href;const n=document.createElement("b"),text=document.createElement("span"),title=document.createElement("strong"),small=document.createElement("small");n.textContent=rank;title.textContent=label;small.textContent=detail;text.append(title,small);row.append(n,text);return row;};
+function renderAnalytics() {
+  const days = Array.from({ length: 14 }, (_, index) => new Date(Date.now() - (13 - index) * 86400000).toISOString().slice(0, 10));
+  const values = days.map(day => ({ day, views: state.views.find(entry => entry.id === day)?.views || 0, users: state.users.filter(user => new Date(timestampMillis(user.createdAt) || 0).toISOString().slice(0, 10) === day).length }));
+  const max = Math.max(1, ...values.flatMap(value => [value.views, value.users]));
+  $("growth-chart").replaceChildren(...values.map(value => { const column = create("div", undefined, "chart-day"), bars = create("div", undefined, "chart-bars"), views = create("i", undefined, "views"), users = create("i", undefined, "users"); views.style.height = `${Math.max(3, value.views / max * 100)}%`; users.style.height = `${Math.max(3, value.users / max * 100)}%`; bars.append(views, users); column.append(bars, create("small", value.day.slice(5))); return column; }));
+  const categories = [["Timeline posts", state.posts.length], ["Community posts", state.communityPosts.length], ["Comments", state.comments.length], ["Reactions", state.reactions.length]];
+  const total = categories.reduce((sum, [, count]) => sum + count, 0) || 1;
+  $("category-breakdown").replaceChildren(...categories.map(([label, count]) => { const row = create("div", undefined, "breakdown-row"), head = create("div"), track = create("div", undefined, "breakdown-track"), bar = create("i"); head.append(create("span", label), create("strong", String(count))); bar.style.width = `${Math.round(count / total * 100)}%`; track.append(bar); row.append(head, track); return row; }));
+  const missingActivity = state.users.filter(user => timestampMillis(user.lastActiveAt) === null).length;
+  const failedJobs = [...state.jobs.values()].filter(job => job.status === "failed").length;
+  $("data-health").replaceChildren(healthRow("Accounts without recorded activity", missingActivity, missingActivity ? "warn" : "good"), healthRow("Deletion jobs needing attention", failedJobs, failedJobs ? "bad" : "good"), healthRow("Public posts shown", state.posts.length + state.communityPosts.length, "good"));
+  const views = [...state.views].sort((a, b) => b.id.localeCompare(a.id));
+  $("admin-views").replaceChildren(...(views.length ? views.map(view => { const row = create("article", undefined, "admin-row"); row.append(create("strong", view.id), create("span", `${view.views || 0} views`)); return row; }) : [empty("No daily view records yet.")]));
+  renderProcessorHealth();
+}
 
-const renderPulse=()=>{
-  const originals=state.posts.filter(x=>x.data().type!=="repost").length,reposts=state.posts.length-originals,photos=state.posts.filter(x=>x.data().imageData).length;
-  const activeRooms=new Set(state.roomMessages.filter(x=>millis(x.data().expiresAt)>Date.now()).map(x=>x.data().roomId)).size;
-  const circleUse=pct(new Set(state.communityPosts.filter(x=>x.data().circleId).map(x=>x.data().circleId)).size,state.circles.length);
-  $("community-pulse").replaceChildren(
-    healthRow("Original posts",originals),healthRow("Reposts",reposts),healthRow("Photo posts",photos),
-    healthRow("Rooms active in 24h",activeRooms),healthRow("Circles used for posts",circleUse+"%"),healthRow("Average circle size",(state.members.length/Math.max(1,state.circles.length)).toFixed(1))
-  );
-};
+const healthRow = (label, value, tone) => { const row = create("div", undefined, `health-row ${tone}`); row.append(create("span", label), create("strong", String(value))); return row; };
+function renderProcessorHealth() { const health = processorHealth(state.processor); $("processor-health").textContent = health.kind === "working" ? "Working normally. Permanent deletion is being checked automatically." : health.kind === "delayed" ? "Delayed. The service has not checked in recently; it will keep retrying." : "Not running. Open the recovery page to restore the account deletion service."; $("processor-health").className = `status-${health.kind}`; }
+function renderAll() { renderMetrics(); renderUsers(); renderContent(); renderAnalytics(); }
 
-const renderUsers=()=>{
-  const term=$("admin-user-search").value.trim().toLowerCase(),activity=activityByUser();
-  const filtered=state.users.filter(entry=>{const d=entry.data(),legacy=!d.username||!d.createdAt;
-    const matchesFilter=userFilter==="all"||(userFilter==="active"&&!d.banned)||(userFilter==="banned"&&d.banned)||(userFilter==="legacy"&&legacy);
-    return matchesFilter&&(!term||d.username?.toLowerCase().includes(term)||entry.id.toLowerCase().includes(term));});
-  $("admin-users").replaceChildren(...filtered.map(entry=>{const d=entry.data(),row=document.createElement("article");row.className="admin-row";
-    const info=document.createElement("div"),name=document.createElement("strong"),meta=document.createElement("small"),stats=document.createElement("small");
-    name.textContent=`@${d.username||"unknown"}${d.banned?" — BANNED":""}`;meta.textContent=`UID: ${entry.id} · Created: ${formatDate(d.createdAt)}`;
-    const followers=state.follows.filter(x=>x.data().followingId===entry.id).length,userPosts=[...state.posts,...state.communityPosts].filter(x=>x.data().authorId===entry.id).length;
-    stats.textContent=`${userPosts} posts · ${followers} followers · ${activity.get(entry.id)||0} activity points`;info.append(name,meta,stats);
-    const actions=document.createElement("div");actions.className="admin-actions";const profile=document.createElement("a");profile.className="admin-action nav-button";profile.href=`profile.html?uid=${encodeURIComponent(entry.id)}`;profile.textContent="View";
-    const ban=document.createElement("button");ban.type="button";ban.className=`admin-action ${d.banned?"restore":"danger"}`;const protectedAdmin=isProtectedAdministrator(d.username),existingQueueState=hasAdminDeletionQueueState(d);ban.textContent=protectedAdmin?"Protected admin":d.banned?"Unban":"Ban";ban.disabled=protectedAdmin||!canAdminSetBanned({nextBanned:!d.banned,existingJob:false,existingQueueState});
-    ban.onclick=async()=>{ban.disabled=true;try{await updateDoc(doc(db,"users",entry.id),{banned:!d.banned});setStatus(d.banned?"User unbanned.":"User banned.");}catch{setStatus("Could not update that user.",true);ban.disabled=false;}};
-    const queueDeletion=document.createElement("button");queueDeletion.type="button";queueDeletion.className="admin-action danger";queueDeletion.textContent="Queue deletion";queueDeletion.disabled=protectedAdmin||existingQueueState;
-    queueDeletion.onclick=async()=>{queueDeletion.disabled=true;try{const job=await getDoc(doc(db,"adminDeletionJobs",entry.id));if(!canQueueAdminDeletion({targetUid:entry.id,username:d.username,existingJob:job.exists(),existingQueueState})){setStatus("That account cannot be queued for deletion.",true);return;}if(!confirm("Queue this account for deletion? The account will be locked immediately."))return;const timestamp=serverTimestamp(),payloads=adminDeletionQueuePayloads({targetUid:entry.id,requesterUid:adminUid,timestamp}),batch=writeBatch(db);batch.update(doc(db,"users",entry.id),payloads.profile);batch.set(doc(db,"adminDeletionJobs",entry.id),payloads.job);await batch.commit();setStatus("Account locked and queued for deletion.");}catch{setStatus("Could not queue that account for deletion.",true);}finally{queueDeletion.disabled=protectedAdmin||existingQueueState;}};
-    actions.append(profile,ban,queueDeletion);row.append(info,actions);return row;}));
-};
-document.querySelectorAll("[data-user-filter]").forEach(b=>b.onclick=()=>{userFilter=b.dataset.userFilter;document.querySelectorAll("[data-user-filter]").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));renderUsers();});
+function updateDialogConfirmation() { $("delete-account-confirm").disabled = !canConfirmDeletion({ typedUsername: $("delete-account-confirmation").value, targetUsername: dialogTarget?.username, blocked: !dialogState.open || state.jobs.has(dialogTarget?.id) }); }
+function openDeletionDialog(user, trigger) { if (state.jobs.has(user.id)) { setStatus("That account is already locked for permanent deletion.", true); return; } dialogTarget = user; dialogTrigger = trigger; dialogState = { open: true, targetUid: user.id }; $("delete-account-target").textContent = `Account: @${user.username || "Unknown user"}`; $("delete-account-confirmation").value = ""; $("delete-account-dialog-status").textContent = ""; $("delete-account-dialog").showModal(); $("delete-account-confirmation").focus(); updateDialogConfirmation(); }
+function closeDeletionDialog(message) { dialogState = { ...dialogState, open: false }; if ($("delete-account-dialog").open) $("delete-account-dialog").close(); if (message) setStatus(message, true); }
+async function queueDeletion() { if (!dialogTarget || !canConfirmDeletion({ typedUsername: $("delete-account-confirmation").value, targetUsername: dialogTarget.username, blocked: state.jobs.has(dialogTarget.id) })) return; const button = $("delete-account-confirm"); button.disabled = true; try { const timestamp = serverTimestamp(), payloads = adminDeletionQueuePayloads({ targetUid: dialogTarget.id, requesterUid: adminUid, timestamp }), batch = writeBatch(db); batch.update(doc(db, "users", dialogTarget.id), payloads.profile); batch.set(doc(db, "adminDeletionJobs", dialogTarget.id), payloads.job); await batch.commit(); closeDeletionDialog(); setStatus("Account locked. Permanent deletion queued."); } catch { $("delete-account-dialog-status").textContent = "Could not queue permanent deletion. No changes were made."; updateDialogConfirmation(); } }
 
-const renderContent=()=>{
-  const term=$("admin-content-search").value.trim().toLowerCase(),type=$("admin-content-type").value;
-  const combined=[...state.posts.map(entry=>({entry,type:"timeline"})),...state.communityPosts.map(entry=>({entry,type:"community"}))]
-    .filter(x=>(type==="all"||x.type===type)&&(!term||x.entry.data().username?.toLowerCase().includes(term)||x.entry.data().content?.toLowerCase().includes(term)))
-    .sort((a,b)=>millis(b.entry.data().createdAt)-millis(a.entry.data().createdAt)).slice(0,200);
-  $("admin-posts").replaceChildren(...combined.map(({entry,type})=>{const d=entry.data(),row=document.createElement("article");row.className="admin-row";
-    const info=document.createElement("div"),title=document.createElement("strong"),excerpt=document.createElement("small"),meta=document.createElement("small");
-    title.textContent=`@${d.username||"unknown"} · ${type==="community"?(d.category||"Community"):"Timeline"}`;excerpt.textContent=String(d.content||"[Photo post]").slice(0,240);meta.textContent=`${formatDate(d.createdAt)} · ID: ${entry.id}`;info.append(title,excerpt,meta);
-    const actions=document.createElement("div");actions.className="admin-actions";const open=document.createElement("a");open.className="admin-action nav-button";open.href=type==="community"?"community.html":`timeline.html#post-${entry.id}`;open.textContent="Open";
-    const remove=document.createElement("button");remove.className="admin-action danger";remove.textContent="Delete";remove.onclick=async()=>{if(!confirm("Delete this content? This cannot be undone."))return;remove.disabled=true;try{await deleteDoc(doc(db,type==="community"?"communityPosts":"posts",entry.id));setStatus("Content deleted.");}catch{setStatus("Could not delete that content.",true);remove.disabled=false;}};
-    actions.append(open,remove);row.append(info,actions);return row;}));
-};
+function observe(ref, key, transform = records) { unsubs.push(onSnapshot(ref, snapshot => { state[key] = transform(snapshot); renderAll(); }, () => setStatus("Could not load live dashboard data.", true))); }
+function startLiveData() { if (!pageActive || !adminUid || listenersStarted) return; listenersStarted = true; observe(collection(db, "users"), "users"); observe(query(collection(db, "posts"), orderBy("createdAt", "desc")), "posts"); observe(query(collection(db, "communityPosts"), orderBy("createdAt", "desc")), "communityPosts"); observe(collection(db, "pageViews"), "views"); observe(collectionGroup(db, "comments"), "comments"); observe(collectionGroup(db, "reactions"), "reactions"); observe(collection(db, "adminDeletionJobs"), "jobs", snapshot => { const jobs = new Map(snapshot.docs.map(entry => [entry.id, entry.data()])); if (dialogState.open && dialogTarget) { const next = deletionDialogJobTransition(dialogState, jobs.has(dialogTarget.id) ? { id: dialogTarget.id, ...jobs.get(dialogTarget.id) } : null); if (!next.open) closeDeletionDialog(next.feedback); dialogState = next; } return jobs; }); observe(doc(db, "system", "deletionProcessor"), "processor", snapshot => snapshot.exists() ? snapshot.data() : null); heartbeatTimer = window.setInterval(renderProcessorHealth, 60 * 1000); }
+function stopLiveData() { while (unsubs.length) unsubs.pop()(); if (heartbeatTimer) window.clearInterval(heartbeatTimer); heartbeatTimer = null; listenersStarted = false; }
 
-const renderViews=()=>{$("admin-views").replaceChildren(...[...state.views].sort((a,b)=>b.id.localeCompare(a.id)).map(entry=>{const row=document.createElement("article");row.className="admin-row";const day=document.createElement("strong"),count=document.createElement("span");day.textContent=entry.id;count.textContent=(entry.data().views||0)+" views";row.append(day,count);return row;}));};
+$("admin-user-search").oninput = renderUsers; $("admin-content-search").oninput = renderContent; $("admin-content-type").onchange = renderContent;
+document.querySelectorAll("[data-user-filter]").forEach(button => { button.onclick = () => { userFilter = button.dataset.userFilter; document.querySelectorAll("[data-user-filter]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); renderUsers(); }; });
+$("refresh-admin").onclick = () => { renderAll(); setStatus("Dashboard recalculated from live data."); }; $("admin-sign-out").onclick = async () => { await signOut(auth); location.replace("index.html"); };
+$("delete-account-confirmation").oninput = updateDialogConfirmation; $("delete-account-confirm").onclick = queueDeletion; $("delete-account-dialog").addEventListener("close", () => { if (dialogTrigger?.isConnected) dialogTrigger.focus(); dialogTrigger = null; });
+window.addEventListener("pagehide", () => { pageActive = false; stopLiveData(); }); window.addEventListener("pageshow", () => { pageActive = true; startLiveData(); });
 
-const renderAll=()=>{renderMetrics();renderUsers();renderContent();renderViews();};
-$("metric-window").onchange=renderMetrics;$("admin-user-search").oninput=renderUsers;$("admin-content-search").oninput=renderContent;$("admin-content-type").onchange=renderContent;
-$("refresh-admin").onclick=()=>{renderAll();setStatus("Dashboard recalculated from live data.");};
-$("admin-sign-out").onclick=async()=>{await signOut(auth);location.replace("index.html");};
-$("download-admin-data").onclick=()=>{const summary={generatedAt:new Date().toISOString(),profiles:state.users.length,banned:state.users.filter(x=>x.data().banned).length,timelinePosts:state.posts.length,communityPosts:state.communityPosts.length,comments:state.comments.length,reactions:state.reactions.length,follows:state.follows.length,circles:state.circles.length,rooms:state.rooms.length,pollVotes:state.votes.length,pageViews:state.views.map(x=>({date:x.id,views:x.data().views||0}))};const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(summary,null,2)],{type:"application/json"}));a.download="anonchat-admin-summary.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);};
-
-const listen=(ref,key)=>unsubs.push(onSnapshot(ref,s=>{state[key]=s.docs;renderAll();},()=>setStatus("Could not load "+key+".",true)));
-onAuthStateChanged(auth,async user=>{if(!user){location.replace("index.html");return;}const profile=await getDoc(doc(db,"users",user.uid));const profileData=profile.exists()?profile.data():null;const username=profileData?.username||"",reservation=isProtectedAdministrator(username)?await getDoc(doc(db,"usernames",normalizeUsername(username))):null;const isAuthorizedAdmin=!profileData?.banned&&reservation?.exists()&&reservation.data().uid===user.uid&&reservation.data().username===username;if(!isAuthorizedAdmin){location.replace("timeline.html");return;}adminUid=user.uid;
-  void recordPageActivity({surface:"admin",profile:profileData,user,db,firestore:{doc,updateDoc,serverTimestamp},isAuthorizedAdmin});
-  setText("admin-identity",`Signed in as @${username} · public activity analytics only`);
-  listen(collection(db,"users"),"users");listen(query(collection(db,"posts"),orderBy("createdAt","desc")),"posts");listen(query(collection(db,"communityPosts"),orderBy("createdAt","desc")),"communityPosts");
-  listen(collectionGroup(db,"comments"),"comments");listen(collectionGroup(db,"reactions"),"reactions");listen(collection(db,"follows"),"follows");listen(collection(db,"pageViews"),"views");
-  listen(collection(db,"circles"),"circles");listen(collection(db,"circleMembers"),"members");listen(collection(db,"rooms"),"rooms");listen(collection(db,"roomMessages"),"roomMessages");listen(collection(db,"communityVotes"),"votes");
-});
+onAuthStateChanged(auth, async user => { if (!user) { location.replace("index.html"); return; } const profile = await getDoc(doc(db, "users", user.uid)); const profileData = profile.exists() ? profile.data() : null, username = profileData?.username || ""; const reservation = isProtectedAdministrator(username) ? await getDoc(doc(db, "usernames", normalizeUsername(username))) : null; const authorized = !profileData?.banned && reservation?.exists() && reservation.data().uid === user.uid && reservation.data().username === username; if (!authorized) { location.replace("timeline.html"); return; } adminUid = user.uid; $("admin-identity").textContent = `Signed in as @${username}`; void recordPageActivity({ surface: "admin", profile: profileData, user, db, firestore: { doc, updateDoc, serverTimestamp }, isAuthorizedAdmin: authorized }); startLiveData(); });
