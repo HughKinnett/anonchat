@@ -1,6 +1,7 @@
 import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { isCompleteLegacyProfile, migrateLegacyProfile } from "../legacy-migration-policy.mjs";
 
 initializeApp({
   credential: applicationDefault(),
@@ -54,17 +55,16 @@ const migrateUser = async (user) => {
     }
 
     const complete = profileSnapshot.exists
-      && profile.uid === user.uid
-      && profile.username === username
-      && validUsername(profile.username);
+      && validUsername(profile.username)
+      && isCompleteLegacyProfile(profile, user.uid, username);
 
     if (!complete) {
-      transaction.set(profileRef, {
+      transaction.set(profileRef, migrateLegacyProfile({
+        profile,
         uid: user.uid,
         username,
-        createdAt: profile.createdAt || FieldValue.serverTimestamp(),
-        lastActiveAt: profile.lastActiveAt || FieldValue.serverTimestamp()
-      });
+        serverTimestamp: () => FieldValue.serverTimestamp()
+      }));
     }
 
     return {

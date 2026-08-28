@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { chooseDurablePersistence } from "../auth-persistence-policy.mjs";
 import {
   ACTIVITY_WRITE_INTERVAL_MS,
@@ -7,6 +8,7 @@ import {
 } from "../activity-policy.mjs";
 import { recordDailyActivity } from "../activity.js";
 import { runAccessActivityGate } from "../access-activity-gate.mjs";
+import { recordPageActivity, signedInActivitySurfaces } from "../activity-integration.mjs";
 
 const auth = { uid: "user-a" };
 const local = { name: "local" };
@@ -93,5 +95,50 @@ assert.deepEqual(
   { allowed: true, activityWritten: false },
   "a rejected activity write does not block accepted access"
 );
+
+assert.deepEqual(
+  Object.keys(signedInActivitySurfaces).sort(),
+  ["admin", "community", "connections", "delete-account", "profile", "timeline"],
+  "the shared activity manifest covers every signed-in surface"
+);
+assert.equal(signedInActivitySurfaces.admin.requireAdmin, true, "the admin surface requires authorization");
+
+let pageActivityWrite;
+assert.deepEqual(
+  await recordPageActivity({
+    surface: "timeline",
+    profile: {},
+    user: { uid: "user-a" },
+    db: { name: "db" },
+    firestore: {
+      doc: (...parts) => parts,
+      updateDoc: async (reference, data) => { pageActivityWrite = { reference, data }; },
+      serverTimestamp: () => "server-time"
+    }
+  }),
+  { allowed: true, activityWritten: true },
+  "the shared production contract records accepted page activity"
+);
+assert.deepEqual(pageActivityWrite, {
+  reference: [{ name: "db" }, "users", "user-a"],
+  data: { lastActiveAt: "server-time" }
+}, "the shared production writer changes only lastActiveAt");
+
+const loginSource = await readFile(new URL("../loginfirebase.js", import.meta.url), "utf8");
+assert.match(loginSource, /chooseDurablePersistence/, "login uses the durable persistence policy");
+assert.doesNotMatch(loginSource, /inMemoryPersistence/, "login has no memory-only persistence fallback");
+
+for (const [surface, filename] of Object.entries({
+  timeline: "timeline.js",
+  profile: "profile.js",
+  community: "community.js",
+  connections: "connections.js",
+  "delete-account": "delete-account.js",
+  admin: "admin.js"
+})) {
+  const source = await readFile(new URL(`../${filename}`, import.meta.url), "utf8");
+  assert.match(source, /recordPageActivity/, `${filename} imports the shared page activity contract`);
+  assert.match(source, new RegExp(`surface\\s*:\\s*["']${surface}["']`), `${filename} identifies its manifest surface`);
+}
 
 console.log("durable auth and activity policies passed");

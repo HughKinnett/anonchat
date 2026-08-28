@@ -32,7 +32,7 @@ The **Install app** button opens the browser's native installation prompt on sup
 ## Data model
 
 - `usernames/{normalizedUsername}`: reserves each anonymous handle
-- `users/{uid}`: `uid`, `username`, `createdAt`
+- `users/{uid}`: `uid`, `username`, `createdAt`, `lastActiveAt` (trusted server timestamps; activity is updated at most once per 24 hours)
 - `follows/{followerId_followingId}`: one validated follow relationship per user pair
 - `posts/{postId}`: an original post or a validated repost
 - `posts/{postId}/reactions/{reactionId}`: an append-only ❤️ or 🖕 event for every press

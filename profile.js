@@ -1,7 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
-import { createFirebaseActivityWriter, recordDailyActivity } from "./activity.js";
-import { runAccessActivityGate } from "./access-activity-gate.mjs";
+import { recordPageActivity } from "./activity-integration.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -382,12 +381,12 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     currentProfileUsername = currentProfileSnapshot.data().username;
   }
-  void runAccessActivityGate({
+  void recordPageActivity({
+    surface: "profile",
     profile: currentProfileSnapshot.data(),
-    recordActivity: () => recordDailyActivity({
-      lastActiveAt: currentProfileSnapshot.data().lastActiveAt,
-      writeLastActiveAt: createFirebaseActivityWriter({ db, doc, updateDoc, serverTimestamp })(user)
-    })
+    user,
+    db,
+    firestore: { doc, updateDoc, serverTimestamp }
   });
 
   const targetProfileRef = doc(db, "users", targetUserId);

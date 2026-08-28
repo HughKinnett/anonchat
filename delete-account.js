@@ -1,6 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { createFirebaseActivityWriter, recordDailyActivity } from "./activity.js";
-import { runAccessActivityGate } from "./access-activity-gate.mjs";
+import { recordPageActivity } from "./activity-integration.mjs";
 import { deleteUser, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, runTransaction,
@@ -64,12 +63,12 @@ onAuthStateChanged(auth,async user=>{
   currentUser=user;const snap=await getDoc(doc(db,"users",user.uid));
   if(!snap.exists()){await signOut(auth);location.replace("index.html");return;}
   profile=snap.data();
-  void runAccessActivityGate({
+  void recordPageActivity({
+    surface: "delete-account",
     profile,
-    recordActivity: () => recordDailyActivity({
-      lastActiveAt: profile.lastActiveAt,
-      writeLastActiveAt: createFirebaseActivityWriter({ db, doc, updateDoc, serverTimestamp })(user)
-    })
+    user,
+    db,
+    firestore: { doc, updateDoc, serverTimestamp }
   });
   if(["i_love_you_h","ownercybercapone"].includes(String(profile.username||"").toLowerCase())){
     form.hidden=true;setStatus("Protected administrator accounts cannot be deleted from this page.");return;

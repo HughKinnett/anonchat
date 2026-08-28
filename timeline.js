@@ -1,7 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
-import { createFirebaseActivityWriter, recordDailyActivity } from "./activity.js";
-import { runAccessActivityGate } from "./access-activity-gate.mjs";
+import { recordPageActivity } from "./activity-integration.mjs";
 import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -1083,12 +1082,12 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     profileUsername = profile.data().username;
   }
-  void runAccessActivityGate({
+  void recordPageActivity({
+    surface: "timeline",
     profile: profile.data(),
-    recordActivity: () => recordDailyActivity({
-      lastActiveAt: profile.data().lastActiveAt,
-      writeLastActiveAt: createFirebaseActivityWriter({ db, doc, updateDoc, serverTimestamp })(user)
-    })
+    user,
+    db,
+    firestore: { doc, updateDoc, serverTimestamp }
   });
   renderSpotifySong(profile.data().spotifyTrackUrl || "");
   document.getElementById("display-name").textContent = profileUsername || "AnonChat user";

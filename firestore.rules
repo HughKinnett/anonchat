@@ -148,12 +148,16 @@ service cloud.firestore {
             == get(/databases/$(database)/documents/system/accountStats).data.count + 1)
           || (!exists(/databases/$(database)/documents/system/accountStats)
             && getAfter(/databases/$(database)/documents/system/accountStats).data.count == 6));
-      allow update: if isAdmin()
+      allow update: if (isAdmin()
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastActiveAt']))
         || (activeUser()
           && request.auth.uid == userId
           && (
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastActiveAt'])
-              && request.resource.data.lastActiveAt == request.time)
+              && request.resource.data.lastActiveAt == request.time
+              && (!resource.data.keys().hasAny(['lastActiveAt'])
+                || (resource.data.lastActiveAt is timestamp
+                  && request.time - resource.data.lastActiveAt >= duration.value(24, 'h'))))
             ||
             (request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['profileImage', 'coverImage'])

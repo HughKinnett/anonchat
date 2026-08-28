@@ -1,7 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { resolveConnectionsTarget } from "./connections-target.mjs";
-import { createFirebaseActivityWriter, recordDailyActivity } from "./activity.js";
-import { runAccessActivityGate } from "./access-activity-gate.mjs";
+import { recordPageActivity } from "./activity-integration.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection,
@@ -125,12 +124,12 @@ onAuthStateChanged(auth, async (user) => {
   }
   currentUser = user;
   const profile = await getDoc(doc(db, "users", user.uid));
-  void runAccessActivityGate({
+  void recordPageActivity({
+    surface: "connections",
     profile: profile.exists() ? profile.data() : null,
-    recordActivity: () => recordDailyActivity({
-      lastActiveAt: profile.data()?.lastActiveAt,
-      writeLastActiveAt: createFirebaseActivityWriter({ db, doc, updateDoc, serverTimestamp })(user)
-    })
+    user,
+    db,
+    firestore: { doc, updateDoc, serverTimestamp }
   });
   document.getElementById("back-to-profile").href =
     `profile.html?uid=${encodeURIComponent(targetUserId)}`;
