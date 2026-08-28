@@ -19,6 +19,51 @@ const packageJson = JSON.parse(await readFile(new URL("package.json", repository
 assertValid(validateDeletionWorkflow(deletionWorkflow), "trusted deletion workflow");
 assertValid(validateRulesWorkflow(rulesWorkflow), "Firestore rules CI workflow");
 assertValid(validatePackageScripts(packageJson), "workflow package scripts");
+assert.deepEqual(rulesWorkflow.on.pull_request.paths, [
+  "firestore.rules",
+  "firestore.indexes.json",
+  "firebase.json",
+  "package.json",
+  "package-lock.json",
+  ".github/workflows/firestore-rules-ci.yml",
+  ".github/workflows/process-admin-deletions.yml",
+  "scripts/**"
+], "Firestore CI must run when the trusted deletion workflow changes");
+
+const assertRejected = (validator, workflow, label) => assert.notDeepEqual(validator(workflow), [], `${label} must be rejected`);
+const clone = (workflow) => structuredClone(workflow);
+
+const deletionExtraJob = clone(deletionWorkflow);
+deletionExtraJob.jobs.exfiltrate = { "runs-on": "ubuntu-latest", steps: [{ run: "echo credential" }] };
+assertRejected(validateDeletionWorkflow, deletionExtraJob, "extra deletion job");
+
+const deletionExtraUses = clone(deletionWorkflow);
+deletionExtraUses.jobs.process.steps.push({ uses: "actions/upload-artifact@v4" });
+assertRejected(validateDeletionWorkflow, deletionExtraUses, "extra deletion action");
+
+const deletionExtraRun = clone(deletionWorkflow);
+deletionExtraRun.jobs.process.steps.push({ run: "echo credential" });
+assertRejected(validateDeletionWorkflow, deletionExtraRun, "extra deletion command");
+
+const deletionWriteOverride = clone(deletionWorkflow);
+deletionWriteOverride.jobs.process.permissions = { contents: "write" };
+assertRejected(validateDeletionWorkflow, deletionWriteOverride, "deletion job permission escalation");
+
+const rulesExtraJob = clone(rulesWorkflow);
+rulesExtraJob.jobs.exfiltrate = { "runs-on": "ubuntu-latest", steps: [{ run: "echo credential" }] };
+assertRejected(validateRulesWorkflow, rulesExtraJob, "extra rules job");
+
+const rulesExtraUses = clone(rulesWorkflow);
+rulesExtraUses.jobs.test.steps.push({ uses: "actions/upload-artifact@v4" });
+assertRejected(validateRulesWorkflow, rulesExtraUses, "extra rules action");
+
+const rulesExtraRun = clone(rulesWorkflow);
+rulesExtraRun.jobs.test.steps.push({ run: "echo credential" });
+assertRejected(validateRulesWorkflow, rulesExtraRun, "extra rules command");
+
+const rulesWriteOverride = clone(rulesWorkflow);
+rulesWriteOverride.jobs.test.permissions = { contents: "write" };
+assertRejected(validateRulesWorkflow, rulesWriteOverride, "rules job permission escalation");
 
 const wrongDeletionFixture = parseWorkflow(`
 # cron: "*/5 * * * *"

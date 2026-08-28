@@ -13,6 +13,7 @@ const rulesPaths = [
   "package.json",
   "package-lock.json",
   ".github/workflows/firestore-rules-ci.yml",
+  ".github/workflows/process-admin-deletions.yml",
   "scripts/**"
 ];
 const firestoreCiCommand = "npm run test:rules && npm run test:activity-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:auth-activity && npm test";
@@ -27,6 +28,7 @@ export const parseWorkflow = (source, label = "workflow") => {
 
 const sameArray = (actual, expected) => Array.isArray(actual) && actual.length === expected.length && actual.every((entry, index) => entry === expected[index]);
 const sameKeys = (object, expected) => object && typeof object === "object" && sameArray(Object.keys(object).sort(), [...expected].sort());
+const hasReadOnlyPermissions = (permissions) => sameKeys(permissions, ["contents"]) && permissions.contents === "read";
 const exactly = (errors, actual, expected, label) => {
   if (actual !== expected) errors.push(`${label} must be ${JSON.stringify(expected)}`);
 };
@@ -49,18 +51,34 @@ const jobSteps = (job, errors, label) => {
   }
   return job.steps;
 };
+const stepSignature = (step) => {
+  if (typeof step?.uses === "string" && !Object.hasOwn(step, "run")) return `uses:${step.uses}`;
+  if (typeof step?.run === "string" && !Object.hasOwn(step, "uses")) return `run:${step.run}`;
+  return "invalid";
+};
+const exactlyOrderedSteps = (errors, steps, expected, label) => {
+  if (!sameArray(steps.map(stepSignature), expected)) errors.push(`${label} must use the approved steps in order only`);
+};
+const effectiveReadOnlyPermissions = (errors, workflow, job, label) => {
+  const effective = job.permissions ?? workflow.permissions;
+  if (!hasReadOnlyPermissions(effective)) errors.push(`${label} effective permissions must be contents: read only`);
+  if (job.permissions && !hasReadOnlyPermissions(job.permissions)) errors.push(`${label} job permissions may not escalate or add scopes`);
+};
 
 export const validateDeletionWorkflow = (workflow) => {
   const errors = [];
   const triggers = workflowTriggers(workflow);
   if (!sameKeys(triggers, ["schedule", "workflow_dispatch"])) errors.push("deletion workflow triggers must be schedule and workflow_dispatch only");
   if (!sameArray(triggers?.schedule?.map((entry) => entry?.cron), [deletionCron])) errors.push(`deletion workflow schedule must be ${deletionCron}`);
-  if (!workflow.permissions || Object.keys(workflow.permissions).length !== 1 || workflow.permissions.contents !== "read") errors.push("deletion workflow permissions must be contents: read only");
+  if (!hasReadOnlyPermissions(workflow.permissions)) errors.push("deletion workflow permissions must be contents: read only");
   if (workflow.concurrency?.group !== "anonchat-account-deletions" || workflow.concurrency?.["cancel-in-progress"] !== false) errors.push("deletion workflow concurrency must preserve every queued run");
 
   const job = workflowJob(workflow, "process", errors);
+  if (!sameKeys(workflow.jobs, ["process"])) errors.push("deletion workflow must contain the process job only");
+  effectiveReadOnlyPermissions(errors, workflow, job, "deletion workflow");
   exactly(errors, job["runs-on"], "ubuntu-latest", "deletion workflow runner");
   const steps = jobSteps(job, errors, "jobs.process");
+  exactlyOrderedSteps(errors, steps, ["uses:actions/checkout@v4", "uses:actions/setup-node@v4", "run:npm ci", "uses:google-github-actions/auth@v3", "run:npm run admin-deletion:process"], "deletion workflow steps");
   const node = singleStep(errors, steps, "uses", "actions/setup-node@v4", "Node setup");
   exactly(errors, String(node?.with?.["node-version"]), "20", "Node version");
   const install = singleStep(errors, steps, "run", "npm ci", "npm ci");
@@ -80,9 +98,13 @@ export const validateRulesWorkflow = (workflow) => {
   const triggers = workflowTriggers(workflow);
   if (!sameKeys(triggers, ["pull_request", "workflow_dispatch"])) errors.push("rules workflow triggers must be pull_request and workflow_dispatch only");
   if (!sameArray(triggers?.pull_request?.paths, rulesPaths)) errors.push("rules workflow pull request paths must cover the protected inputs exactly");
+  if (!hasReadOnlyPermissions(workflow.permissions)) errors.push("rules workflow permissions must be contents: read only");
   const job = workflowJob(workflow, "test", errors);
+  if (!sameKeys(workflow.jobs, ["test"])) errors.push("rules workflow must contain the test job only");
+  effectiveReadOnlyPermissions(errors, workflow, job, "rules workflow");
   exactly(errors, job["runs-on"], "ubuntu-latest", "rules workflow runner");
   const steps = jobSteps(job, errors, "jobs.test");
+  exactlyOrderedSteps(errors, steps, ["uses:actions/checkout@v4", "uses:actions/setup-node@v4", "uses:actions/setup-java@v4", "run:npm ci", "run:npm run test:workflow-policy", "run:npm run test:firestore-ci"], "rules workflow steps");
   const node = singleStep(errors, steps, "uses", "actions/setup-node@v4", "rules Node setup");
   exactly(errors, String(node?.with?.["node-version"]), "20", "rules Node version");
   const java = singleStep(errors, steps, "uses", "actions/setup-java@v4", "Java setup");

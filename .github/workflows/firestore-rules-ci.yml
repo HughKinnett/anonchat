@@ -9,8 +9,12 @@ on:
       - package.json
       - package-lock.json
       - .github/workflows/firestore-rules-ci.yml
+      - .github/workflows/process-admin-deletions.yml
       - scripts/**
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
