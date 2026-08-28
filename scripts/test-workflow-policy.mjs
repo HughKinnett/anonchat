@@ -12,6 +12,8 @@ import {
 const repositoryRoot = new URL("../", import.meta.url);
 const readWorkflow = async (path) => parseWorkflow(await readFile(new URL(path, repositoryRoot), "utf8"), path);
 const assertValid = (errors, label) => assert.deepEqual(errors, [], `${label}: ${errors.join("; ")}`);
+const assertRejected = (validator, workflow, label) => assert.notDeepEqual(validator(workflow), [], `${label} must be rejected`);
+const clone = (workflow) => structuredClone(workflow);
 
 const deletionWorkflow = await readWorkflow(DELETION_WORKFLOW_PATH);
 const rulesWorkflow = await readWorkflow(RULES_WORKFLOW_PATH);
@@ -28,6 +30,7 @@ assert.deepEqual(rulesWorkflow.on.pull_request.paths, [
   ".github/workflows/firestore-rules-ci.yml",
   ".github/workflows/process-admin-deletions.yml",
   ".github/workflows/process-notifications.yml",
+  "workflow-policy.mjs",
   "notification-*.mjs",
   "push-config.mjs",
   "sw.js",
@@ -36,8 +39,21 @@ assert.deepEqual(rulesWorkflow.on.pull_request.paths, [
   "scripts/**"
 ], "Firestore CI must run when trusted processors and notification clients change");
 
-const assertRejected = (validator, workflow, label) => assert.notDeepEqual(validator(workflow), [], `${label} must be rejected`);
-const clone = (workflow) => structuredClone(workflow);
+const missingWorkflowPolicyPath = clone(rulesWorkflow);
+missingWorkflowPolicyPath.on.pull_request.paths = missingWorkflowPolicyPath.on.pull_request.paths.filter((path) => path !== "workflow-policy.mjs");
+assertRejected(validateRulesWorkflow, missingWorkflowPolicyPath, "missing workflow-policy.mjs PR coverage");
+
+const changedWorkflowPolicyPath = clone(rulesWorkflow);
+changedWorkflowPolicyPath.on.pull_request.paths[changedWorkflowPolicyPath.on.pull_request.paths.indexOf("workflow-policy.mjs")] = "workflow-*.mjs";
+assertRejected(validateRulesWorkflow, changedWorkflowPolicyPath, "changed workflow-policy.mjs PR coverage");
+
+const missingServiceWorkerSuite = structuredClone(packageJson);
+missingServiceWorkerSuite.scripts["test:notification"] = missingServiceWorkerSuite.scripts["test:notification"].replace(" && node scripts/test-push-service-worker.mjs", "");
+assert.notDeepEqual(validatePackageScripts(missingServiceWorkerSuite), [], "removing the service-worker test from notification CI must be rejected");
+
+const changedServiceWorkerSuite = structuredClone(packageJson);
+changedServiceWorkerSuite.scripts["test:notification"] = changedServiceWorkerSuite.scripts["test:notification"].replace("test-push-service-worker.mjs", "test-push-client.mjs");
+assert.notDeepEqual(validatePackageScripts(changedServiceWorkerSuite), [], "changing the service-worker test in notification CI must be rejected");
 
 const deletionExtraJob = clone(deletionWorkflow);
 deletionExtraJob.jobs.exfiltrate = { "runs-on": "ubuntu-latest", steps: [{ run: "echo credential" }] };

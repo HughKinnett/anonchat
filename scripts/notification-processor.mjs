@@ -8,6 +8,7 @@ import { runNotificationProcessor } from "../notification-processor.mjs";
 import { VAPID_PUBLIC_KEY } from "../push-config.mjs";
 
 const VAPID_SUBJECT = "https://anonchatlogin.web.app";
+const WEB_PUSH_TIMEOUT_MS = 30_000;
 
 export const processorConfiguration = (environment = process.env) => {
   const projectId = String(environment.GCLOUD_PROJECT ?? environment.GOOGLE_CLOUD_PROJECT ?? "").trim();
@@ -36,7 +37,7 @@ export const configureWebPush = ({ subject, publicKey, privateKey, client = webP
     await client.sendNotification({
       endpoint: subscription.endpoint,
       keys: { p256dh: subscription.p256dh, auth: subscription.auth }
-    }, JSON.stringify(payload));
+    }, JSON.stringify(payload), { timeout: WEB_PUSH_TIMEOUT_MS });
   };
 };
 

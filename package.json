@@ -22,7 +22,7 @@
     "test:notification-cli": "node scripts/test-notification-cli.mjs",
     "test:notification-ui": "node scripts/test-notification-ui.mjs",
     "test:notification-indexes": "node scripts/test-notification-indexes.mjs",
-    "test:notification": "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes",
+    "test:notification": "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes && node scripts/test-push-service-worker.mjs",
     "test:notification-rules": "firebase emulators:exec --only firestore \"node scripts/test-notification-rules.mjs\"",
     "test:notification-firestore-integration": "firebase emulators:exec --only firestore \"node scripts/test-notification-firestore-integration.mjs\"",
     "notification:process": "node scripts/notification-processor.mjs",

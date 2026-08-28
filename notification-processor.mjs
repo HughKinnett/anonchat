@@ -1,10 +1,12 @@
 import {
   ACCOUNT_LIMIT,
+  MAX_SUBSCRIPTIONS_PER_RECIPIENT,
   NOTIFICATION_RETENTION_MS,
   NOTIFICATION_TYPES,
   compareSourceCursors,
   createDeliveryId,
   createEventId,
+  createSubscriptionVersionFingerprint,
   fixedNotificationErrorCode,
   notificationPayload,
   notificationRoute,
@@ -12,6 +14,8 @@ import {
   sourceCursor,
   validateTrustedSource
 } from "./notification-policy.mjs";
+
+const codedError = (code) => Object.assign(new Error(code), { code });
 
 const safeLog = (logger, level, code) => {
   const method = typeof logger?.[level] === "function" ? logger[level] : logger?.log;
@@ -96,50 +100,74 @@ export const deliverNotificationEvents = async ({ adapter, ownerId, sendPush, lo
           result.skipped += 1;
           continue;
         }
-        const subscriptions = await adapter.listSubscriptions(claim.data.recipientUid);
+        const listCurrentSubscriptions = async () => {
+          const current = await adapter.listSubscriptions(claim.data.recipientUid);
+          if (current.length > MAX_SUBSCRIPTIONS_PER_RECIPIENT) throw codedError("subscription-limit");
+          return current;
+        };
+        const deliveryIdentity = async (subscription) => {
+          const subscriptionFingerprint = await createSubscriptionVersionFingerprint(subscription);
+          return {
+            subscriptionFingerprint,
+            deliveryId: await createDeliveryId(claim.id, subscription.id, subscriptionFingerprint)
+          };
+        };
+        const subscriptions = await listCurrentSubscriptions();
         let transientFailure = false;
         for (const subscription of subscriptions) {
           await adapter.renewEvent(claim.id, claim.token);
-          const deliveryId = await createDeliveryId(claim.id, subscription.id);
+          const { subscriptionFingerprint, deliveryId } = await deliveryIdentity(subscription);
           const settled = await adapter.getDelivery(deliveryId);
           if (["delivered", "expired"].includes(settled?.status)) continue;
+          let pushError;
           try {
             await sendPush(subscription, notificationPayload(claim.data.type, claim.id));
+          } catch (error) {
+            pushError = error;
+          }
+          await adapter.renewEvent(claim.id, claim.token);
+          if (!pushError) {
             const timestamp = adapter.timestamp(adapter.now());
             await adapter.markDelivery(deliveryId, {
               eventId: claim.id,
               recipientUid: claim.data.recipientUid,
               subscriptionId: subscription.id,
+              subscriptionFingerprint,
               status: "delivered",
               createdAt: timestamp,
               updatedAt: timestamp
             });
-          } catch (error) {
-            if ([404, 410].includes(error?.statusCode)) {
-              const removed = await adapter.deleteExpiredSubscription(subscription);
+          } else {
+            if ([404, 410].includes(pushError?.statusCode)) {
+              const timestamp = adapter.timestamp(adapter.now());
+              const removed = await adapter.expireSubscriptionVersion(subscription, deliveryId, {
+                eventId: claim.id,
+                recipientUid: claim.data.recipientUid,
+                subscriptionId: subscription.id,
+                subscriptionFingerprint,
+                status: "expired",
+                createdAt: timestamp,
+                updatedAt: timestamp
+              });
               if (!removed) {
                 transientFailure = true;
                 safeLog(logger, "info", "SUBSCRIPTION_CHANGED");
                 continue;
               }
-              const timestamp = adapter.timestamp(adapter.now());
-              await adapter.markDelivery(deliveryId, {
-                eventId: claim.id,
-                recipientUid: claim.data.recipientUid,
-                subscriptionId: subscription.id,
-                status: "expired",
-                createdAt: timestamp,
-                updatedAt: timestamp
-              });
               result.expired += 1;
               safeLog(logger, "info", "SUBSCRIPTION_EXPIRED");
             } else {
               transientFailure = true;
-              safeLog(logger, "error", fixedNotificationErrorCode(error));
+              safeLog(logger, "error", fixedNotificationErrorCode(pushError));
             }
           }
         }
         await adapter.renewEvent(claim.id, claim.token);
+        for (const subscription of await listCurrentSubscriptions()) {
+          const { deliveryId } = await deliveryIdentity(subscription);
+          const settled = await adapter.getDelivery(deliveryId);
+          if (!["delivered", "expired"].includes(settled?.status)) transientFailure = true;
+        }
         if (transientFailure) {
           await adapter.failEvent(claim.id, claim.token, "DELIVERY_TRANSIENT");
           result.retried += 1;

@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import {
+  MAX_SUBSCRIPTIONS_PER_RECIPIENT,
   NOTIFICATION_RETENTION_MS,
   NOTIFICATION_TYPES,
+  canonicalTimestamp,
   compareSourceCursors,
   createDeliveryId,
   createEventId,
+  createSubscriptionVersionFingerprint,
   fixedNotificationErrorCode,
   isValidQueueEvent,
   notificationPayload,
@@ -12,10 +15,17 @@ import {
   sourceCursor,
   validateTrustedSource
 } from "../notification-policy.mjs";
+import { Timestamp } from "firebase-admin/firestore";
 
 const createdAt = { toMillis: () => 1_700_000_000_123 };
 const later = { toMillis: () => 1_700_000_000_124 };
+const preciseEarly = new Timestamp(1_700_000_000, 123_000_001);
+const preciseLater = new Timestamp(1_700_000_000, 123_000_999);
 assert.deepEqual([...NOTIFICATION_TYPES], ["reaction", "comment", "message-request", "room-message", "reveal-request"]);
+assert.equal(MAX_SUBSCRIPTIONS_PER_RECIPIENT, 100);
+assert.deepEqual(canonicalTimestamp(preciseEarly), { seconds: 1_700_000_000, nanoseconds: 123_000_001 });
+assert.deepEqual(canonicalTimestamp(new Date(1_700_000_000_123)), { seconds: 1_700_000_000, nanoseconds: 123_000_000 });
+assert.deepEqual(canonicalTimestamp(1_700_000_000_123), { seconds: 1_700_000_000, nanoseconds: 123_000_000 });
 
 const expectedPayloads = {
   reaction: ["New reaction", "Someone reacted to your post.", "/timeline.html"],
@@ -40,6 +50,8 @@ assert.equal(compareSourceCursors({ createdAt, path: "z" }, { createdAt, path: "
 assert.equal(compareSourceCursors({ createdAt, path: "a" }, { createdAt, path: "z" }), -1);
 assert.equal(compareSourceCursors({ createdAt, path: "z" }, { createdAt, path: "ä" }), -1, "path ordering is deterministic and not locale dependent");
 assert.equal(compareSourceCursors({ createdAt: later, path: "a" }, { createdAt, path: "z" }), 1);
+assert.equal(compareSourceCursors({ createdAt: preciseLater, path: "a" }, { createdAt: preciseEarly, path: "z" }), 1,
+  "nanoseconds precede full-path ordering even inside one millisecond");
 assert.throws(() => sourceCursor({ path: "missing/time", data: {} }), /INVALID_SOURCE_TIMESTAMP/);
 
 const eventInput = {
@@ -54,9 +66,39 @@ assert.equal(await createEventId(eventInput), firstEventId);
 assert.notEqual(await createEventId({ ...eventInput, sourcePath: "posts/post-a/comments/comment-b" }), firstEventId);
 assert.notEqual(await createEventId({ ...eventInput, sourceCreatedAt: later }), firstEventId);
 assert.notEqual(await createEventId({ ...eventInput, recipientUid: "recipient-b" }), firstEventId);
-const deliveryId = await createDeliveryId(firstEventId, "subscription-a");
+const preciseEventId = await createEventId({ ...eventInput, sourceCreatedAt: preciseEarly });
+assert.notEqual(await createEventId({ ...eventInput, sourceCreatedAt: preciseLater }), preciseEventId,
+  "same-path source versions inside one millisecond cannot collide");
+
+const subscriptionVersion = {
+  uid: "recipient-a",
+  endpoint: "https://push.example/a",
+  expirationTime: null,
+  p256dh: "p256dh-a",
+  auth: "auth-a",
+  createdAt: preciseEarly,
+  updatedAt: preciseEarly
+};
+const subscriptionFingerprint = await createSubscriptionVersionFingerprint(subscriptionVersion);
+assert.match(subscriptionFingerprint, /^[0-9a-f]{64}$/);
+for (const changed of [
+  { uid: "recipient-b" },
+  { endpoint: "https://push.example/b" },
+  { expirationTime: 123456 },
+  { p256dh: "p256dh-b" },
+  { auth: "auth-b" },
+  { createdAt: preciseLater },
+  { updatedAt: preciseLater }
+]) {
+  assert.notEqual(await createSubscriptionVersionFingerprint({ ...subscriptionVersion, ...changed }), subscriptionFingerprint,
+    `subscription version change ${Object.keys(changed)[0]} changes its fingerprint`);
+}
+const deliveryId = await createDeliveryId(firstEventId, "subscription-a", subscriptionFingerprint);
 assert.match(deliveryId, /^[0-9a-f]{64}$/);
-assert.notEqual(await createDeliveryId(firstEventId, "subscription-b"), deliveryId);
+assert.notEqual(await createDeliveryId(firstEventId, "subscription-b", subscriptionFingerprint), deliveryId);
+const refreshedFingerprint = await createSubscriptionVersionFingerprint({ ...subscriptionVersion, updatedAt: preciseLater });
+assert.notEqual(await createDeliveryId(firstEventId, "subscription-a", refreshedFingerprint), deliveryId,
+  "old and refreshed versions use distinct delivery markers");
 
 assert.equal(validateTrustedSource("reaction", { uid: "actor", createdAt }, 1_700_000_000_000), true);
 assert.equal(validateTrustedSource("comment", { uid: "actor", createdAt }, 1_700_000_000_000), true);
@@ -96,6 +138,7 @@ for (const forbidden of ["text", "body", "email", "username", "endpoint", "p256d
 assert.equal(NOTIFICATION_RETENTION_MS, 30 * 24 * 60 * 60 * 1000);
 assert.equal(fixedNotificationErrorCode({ statusCode: 410 }), "SUBSCRIPTION_EXPIRED");
 assert.equal(fixedNotificationErrorCode(Object.assign(new Error(), { code: "lease-lost" })), "LEASE_LOST");
+assert.equal(fixedNotificationErrorCode(Object.assign(new Error(), { code: "INVALID_SUBSCRIPTION" })), "INVALID_SUBSCRIPTION");
 assert.equal(fixedNotificationErrorCode(new Error("private uid and message body")), "DELIVERY_TRANSIENT");
 
 console.log("Notification policy passed");

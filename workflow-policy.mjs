@@ -15,6 +15,7 @@ const rulesPaths = [
   ".github/workflows/firestore-rules-ci.yml",
   ".github/workflows/process-admin-deletions.yml",
   ".github/workflows/process-notifications.yml",
+  "workflow-policy.mjs",
   "notification-*.mjs",
   "push-config.mjs",
   "sw.js",
@@ -23,6 +24,7 @@ const rulesPaths = [
   "scripts/**"
 ];
 const firestoreCiCommand = "npm run test:rules && npm run test:activity-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:auth-activity && npm test";
+const notificationTestCommand = "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes && node scripts/test-push-service-worker.mjs";
 
 export const parseWorkflow = (source, label = "workflow") => {
   const document = parseDocument(source, { version: "1.2" });
@@ -163,8 +165,9 @@ export const validatePackageScripts = (packageJson) => {
   if (packageJson.devDependencies?.yaml !== "2.9.0") errors.push("yaml must be pinned to 2.9.0");
   if (packageJson.devDependencies?.["firebase-tools"] !== "13.35.1") errors.push("firebase-tools must remain pinned to 13.35.1");
   exactly(errors, packageJson.scripts?.["test:workflow-policy"], "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs", "workflow policy package script");
+  exactly(errors, packageJson.scripts?.["test:notification"], notificationTestCommand, "notification test package script");
   exactly(errors, packageJson.scripts?.["test:firestore-ci"], firestoreCiCommand, "Firestore CI package script");
   return errors;
 };
 
-export const workflowPolicy = { deletionCron, rulesPaths, firestoreCiCommand, secretReference, credentialPathReference };
+export const workflowPolicy = { deletionCron, rulesPaths, firestoreCiCommand, notificationTestCommand, secretReference, credentialPathReference };

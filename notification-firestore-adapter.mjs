@@ -1,7 +1,9 @@
 import {
   ACCOUNT_LIMIT,
+  MAX_SUBSCRIPTIONS_PER_RECIPIENT,
   NOTIFICATION_LEASE_MS,
   NOTIFICATION_PAGE_LIMIT,
+  canonicalSubscriptionVersion,
   compareSourceCursors,
   isValidQueueEvent,
   timestampMillis
@@ -16,10 +18,10 @@ const SOURCE_COLLECTIONS = Object.freeze({
   "reveal-request": { collection: "reveals" }
 });
 const codedError = (code) => Object.assign(new Error(code), { code });
-const sameSubscription = (left, right) => left?.uid === right?.uid
-  && left?.endpoint === right?.endpoint
-  && left?.p256dh === right?.p256dh
-  && left?.auth === right?.auth;
+const sameSubscriptionVersion = (left, right) => {
+  try { return canonicalSubscriptionVersion(left) === canonicalSubscriptionVersion(right); }
+  catch { return false; }
+};
 
 export class FirestoreNotificationAdapter {
   constructor({ db, Timestamp, FieldPath, FieldValue, clock = () => Date.now(), tokenFactory }) {
@@ -208,7 +210,11 @@ export class FirestoreNotificationAdapter {
   }
 
   async listSubscriptions(recipientUid) {
-    const snapshot = await this.db.collection("pushSubscriptions").where("uid", "==", recipientUid).get();
+    const snapshot = await this.db.collection("pushSubscriptions")
+      .where("uid", "==", recipientUid)
+      .limit(MAX_SUBSCRIPTIONS_PER_RECIPIENT + 1)
+      .get();
+    if (snapshot.docs.length > MAX_SUBSCRIPTIONS_PER_RECIPIENT) throw codedError("subscription-limit");
     return snapshot.docs.map((document) => ({ id: document.id, ...document.data() }));
   }
 
@@ -227,12 +233,15 @@ export class FirestoreNotificationAdapter {
     });
   }
 
-  async deleteExpiredSubscription(subscription) {
+  async expireSubscriptionVersion(subscription, deliveryId, delivery) {
     return this.db.runTransaction(async (transaction) => {
-      const reference = this.db.collection("pushSubscriptions").doc(subscription.id);
-      const snapshot = await transaction.get(reference);
-      if (!snapshot.exists || !sameSubscription(snapshot.data(), subscription)) return false;
-      transaction.delete(reference);
+      const subscriptionReference = this.db.collection("pushSubscriptions").doc(subscription.id);
+      const deliveryReference = this.db.collection("notificationDeliveries").doc(deliveryId);
+      const subscriptionSnapshot = await transaction.get(subscriptionReference);
+      if (!subscriptionSnapshot.exists || !sameSubscriptionVersion(subscriptionSnapshot.data(), subscription)) return false;
+      const deliverySnapshot = await transaction.get(deliveryReference);
+      transaction.delete(subscriptionReference);
+      if (!deliverySnapshot.exists) transaction.create(deliveryReference, delivery);
       return true;
     });
   }

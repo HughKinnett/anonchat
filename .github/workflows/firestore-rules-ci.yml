@@ -11,6 +11,7 @@ on:
       - .github/workflows/firestore-rules-ci.yml
       - .github/workflows/process-admin-deletions.yml
       - .github/workflows/process-notifications.yml
+      - workflow-policy.mjs
       - notification-*.mjs
       - push-config.mjs
       - sw.js

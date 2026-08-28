@@ -14,17 +14,23 @@ vapid.generateKeys();
 const testPublicKey = vapid.getPublicKey().toString("base64url");
 const testPrivateKey = vapid.getPrivateKey().toString("base64url");
 let configuredVapid = false;
+let sendArguments;
 const send = configureWebPush({
   subject: "https://anonchatlogin.web.app",
   publicKey: testPublicKey,
   privateKey: testPrivateKey,
   client: {
     setVapidDetails: () => { configuredVapid = true; },
-    sendNotification: async () => {}
+    sendNotification: async (...args) => { sendArguments = args; }
   }
 });
 assert.equal(configuredVapid, true);
 await send({ endpoint: "https://push.example/test", p256dh: "key", auth: "auth" }, { type: "reaction" });
+assert.deepEqual(sendArguments, [
+  { endpoint: "https://push.example/test", keys: { p256dh: "key", auth: "auth" } },
+  JSON.stringify({ type: "reaction" }),
+  { timeout: 30_000 }
+], "every production Web Push request has the exact 30-second socket timeout supported by web-push 3.6.7");
 const otherVapid = createECDH("prime256v1");
 otherVapid.generateKeys();
 assert.throws(() => configureWebPush({
