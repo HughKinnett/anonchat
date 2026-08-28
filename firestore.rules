@@ -156,6 +156,39 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true;
     }
 
+    function activePushUser() {
+      return activeUser()
+        && !exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
+    }
+
+    function activePushUserAfter() {
+      return activeUserAfter()
+        && !existsAfter(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
+    }
+
+    function validPushSubscriptionId(subscriptionId) {
+      return subscriptionId.matches('^[0-9a-f]{64}$');
+    }
+
+    function validPushSubscription() {
+      return request.resource.data.keys().hasOnly([
+          'uid', 'endpoint', 'expirationTime', 'p256dh', 'auth', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.endpoint is string
+        && request.resource.data.endpoint.matches('^https://.*$')
+        && request.resource.data.endpoint.size() <= 2048
+        && (request.resource.data.expirationTime == null
+          || (request.resource.data.expirationTime is int
+            && request.resource.data.expirationTime >= 0))
+        && request.resource.data.p256dh is string
+        && request.resource.data.p256dh.matches('^[A-Za-z0-9_-]+$')
+        && request.resource.data.p256dh.size() <= 128
+        && request.resource.data.auth is string
+        && request.resource.data.auth.matches('^[A-Za-z0-9_-]+$')
+        && request.resource.data.auth.size() <= 64;
+    }
+
     function currentUsername() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username;
     }
@@ -280,6 +313,29 @@ service cloud.firestore {
           (getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower()
             != normalizedUsername)
         );
+    }
+
+    match /pushSubscriptions/{subscriptionId} {
+      allow get, list: if activePushUser()
+        && resource.data.uid == request.auth.uid;
+      allow create: if activePushUserAfter()
+        && validPushSubscriptionId(subscriptionId)
+        && validPushSubscription()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if activePushUserAfter()
+        && validPushSubscriptionId(subscriptionId)
+        && resource.data.uid == request.auth.uid
+        && validPushSubscription()
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.endpoint == resource.data.endpoint
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'expirationTime', 'p256dh', 'auth', 'updatedAt'
+        ])
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if activePushUser()
+        && resource.data.uid == request.auth.uid;
     }
 
     match /users/{userId} {

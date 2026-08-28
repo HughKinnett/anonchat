@@ -1,6 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
+import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
+import { createPushAlertsClient, PUSH_ALERT_MESSAGES } from "./push-client.mjs";
 import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -57,6 +59,7 @@ const postImageInput = document.getElementById("post-image-upload");
 const postImagePreviewWrap = document.getElementById("post-image-preview-wrap");
 const postImagePreview = document.getElementById("post-image-preview");
 const alertsButton = document.getElementById("enable-alerts");
+const phoneAlertStatus = document.getElementById("phone-alert-status");
 const editUsernameButton = document.getElementById("edit-username");
 let browserAlertIds = null;
 const spotifyCard = document.querySelector(".spotify-profile-card");
@@ -135,32 +138,50 @@ spotifyRemove?.addEventListener("click", async () => {
   }
 });
 
-const updateAlertsButton = () => {
-  if (!alertsButton) return;
-  if (!("Notification" in window)) {
-    alertsButton.textContent = "Alerts unavailable";
-    alertsButton.disabled = true;
-    return;
-  }
-  alertsButton.textContent = Notification.permission === "granted" ? "Alerts on" : "Enable alerts";
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+  || window.navigator.standalone === true;
+const serviceWorkerSupported = "serviceWorker" in navigator;
+const pushSupported = "PushManager" in window;
+
+const persistPushSubscription = async ({ id, data }) => {
+  await runTransaction(db, async (transaction) => {
+    const reference = doc(db, "pushSubscriptions", id);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) {
+      transaction.set(reference, data);
+      return;
+    }
+    transaction.update(reference, {
+      expirationTime: data.expirationTime,
+      p256dh: data.p256dh,
+      auth: data.auth,
+      updatedAt: data.updatedAt
+    });
+  });
 };
 
-alertsButton?.addEventListener("click", async () => {
-  if (!("Notification" in window)) return;
-  const permission = await Notification.requestPermission();
-  updateAlertsButton();
-  if (permission === "granted" && currentUser) {
-    browserAlertIds = new Set(currentNotificationIds);
-    localStorage.setItem(
-      `anonchat-browser-alerts-${currentUser.uid}`,
-      JSON.stringify([...browserAlertIds])
-    );
-    setStatus("Phone alerts are on while AnonChat is open or running in the background.");
-  } else if (permission !== "granted") {
-    setStatus("Allow notifications in your browser settings to receive alerts.", true);
+const pushAlertsClient = createPushAlertsClient({
+  notification: "Notification" in window ? window.Notification : null,
+  serviceWorkerSupported,
+  pushSupported,
+  serviceWorkerReady: serviceWorkerSupported ? navigator.serviceWorker.ready : null,
+  publicKey: VAPID_PUBLIC_KEY,
+  isIOS,
+  isStandalone,
+  subtle: window.crypto?.subtle,
+  timestamp: serverTimestamp,
+  persist: persistPushSubscription,
+  onState: (state) => {
+    phoneAlertStatus.textContent = PUSH_ALERT_MESSAGES[state] || "";
+    alertsButton.disabled = state === "enabling" || state === "unsupported";
+    alertsButton.textContent = state === "enabled" ? "Phone alerts on" : "Enable phone alerts";
   }
 });
-updateAlertsButton();
+
+alertsButton?.addEventListener("click", () => {
+  if (currentUser) void pushAlertsClient.enableFromGesture(currentUser);
+});
 
 editUsernameButton?.addEventListener("click", async () => {
   if (!currentUser || !profileUsername) return;
@@ -1060,7 +1081,6 @@ onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   const storedAlertIds = localStorage.getItem(`anonchat-browser-alerts-${user.uid}`);
   browserAlertIds = storedAlertIds ? new Set(JSON.parse(storedAlertIds)) : null;
-  updateAlertsButton();
   try {
     seenNotificationIds = new Set(JSON.parse(
       localStorage.getItem(`anonchat-seen-notifications-${user.uid}`) || "[]"
@@ -1082,6 +1102,7 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     profileUsername = profile.data().username;
   }
+  void pushAlertsClient.reconcileExisting(user);
   void recordPageActivity({
     surface: "timeline",
     profile: profile.data(),
