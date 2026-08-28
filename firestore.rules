@@ -166,6 +166,15 @@ service cloud.firestore {
         && !existsAfter(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
     }
 
+    function selfDeletingPushUser() {
+      return activeUser()
+        && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
+    }
+
+    function pushReadDeleteUser() {
+      return activePushUser() || selfDeletingPushUser();
+    }
+
     function validPushSubscriptionId(subscriptionId) {
       return subscriptionId.matches('^[0-9a-f]{64}$');
     }
@@ -316,7 +325,7 @@ service cloud.firestore {
     }
 
     match /pushSubscriptions/{subscriptionId} {
-      allow get, list: if activePushUser()
+      allow get, list: if pushReadDeleteUser()
         && resource.data.uid == request.auth.uid;
       allow create: if activePushUserAfter()
         && validPushSubscriptionId(subscriptionId)
@@ -334,7 +343,7 @@ service cloud.firestore {
           'expirationTime', 'p256dh', 'auth', 'updatedAt'
         ])
         && request.resource.data.updatedAt == request.time;
-      allow delete: if activePushUser()
+      allow delete: if pushReadDeleteUser()
         && resource.data.uid == request.auth.uid;
     }
 

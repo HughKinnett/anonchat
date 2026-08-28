@@ -9,14 +9,14 @@ import { preparePushForAccountDeletion } from "../account-deletion-push.mjs";
     listSubscriptionRefs: async (uid) => { events.push(`listed:${uid}`); return refs; },
     deleteSubscriptionRefs: async (received) => { assert.equal(received, refs); events.push("documents-deleted"); },
     unsubscribeCurrent: async () => events.push("browser-unsubscribed"),
-    createDeletionRequest: async () => events.push("deletion-request-created")
+    ensureDeletionRequest: async () => events.push("deletion-barrier-ensured")
   });
   assert.deepEqual(events, [
+    "deletion-barrier-ensured",
     "listed:user-a",
     "documents-deleted",
-    "browser-unsubscribed",
-    "deletion-request-created"
-  ], "every subscription and the browser endpoint are removed while the profile is active and before the deletion barrier");
+    "browser-unsubscribed"
+  ], "the deletion barrier is durable before any device subscription cleanup begins");
 }
 
 {
@@ -31,13 +31,13 @@ import { preparePushForAccountDeletion } from "../account-deletion-push.mjs";
       if (deletionAttempt === 1) throw new Error("batch rejected");
     },
     unsubscribeCurrent: async () => events.push("browser-unsubscribed"),
-    createDeletionRequest: async () => events.push("deletion-request-created")
+    ensureDeletionRequest: async () => events.push("deletion-barrier-ensured")
   });
 
   await assert.rejects(operation(), /batch rejected/);
-  assert.deepEqual(events, ["listed", "delete-attempt-1", "browser-unsubscribed"], "a failed document cleanup does not create the deletion barrier but still removes the browser subscription");
+  assert.deepEqual(events, ["deletion-barrier-ensured", "listed", "delete-attempt-1", "browser-unsubscribed"], "a failed document cleanup leaves the barrier in place and still removes the browser subscription");
   await assert.doesNotReject(operation());
-  assert.deepEqual(events.slice(-4), ["listed", "delete-attempt-2", "browser-unsubscribed", "deletion-request-created"], "the same deletion flow can be retried safely");
+  assert.deepEqual(events.slice(-4), ["deletion-barrier-ensured", "listed", "delete-attempt-2", "browser-unsubscribed"], "retry resumes cleanup behind the existing barrier");
 }
 
 {
@@ -47,9 +47,9 @@ import { preparePushForAccountDeletion } from "../account-deletion-push.mjs";
     listSubscriptionRefs: async () => [],
     deleteSubscriptionRefs: async () => events.push("documents-deleted"),
     unsubscribeCurrent: async () => { events.push("unsubscribe-failed"); throw new Error("unsubscribe failed"); },
-    createDeletionRequest: async () => events.push("deletion-request-created")
+    ensureDeletionRequest: async () => events.push("deletion-barrier-ensured")
   }), /unsubscribe failed/);
-  assert.deepEqual(events, ["documents-deleted", "unsubscribe-failed"], "a failed browser unsubscribe leaves the account active for retry");
+  assert.deepEqual(events, ["deletion-barrier-ensured", "documents-deleted", "unsubscribe-failed"], "a failed browser unsubscribe leaves the deletion barrier in place for retry");
 }
 
 console.log("Self-deletion push cleanup passed");

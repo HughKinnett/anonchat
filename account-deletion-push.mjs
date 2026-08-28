@@ -1,10 +1,12 @@
 export async function preparePushForAccountDeletion({
   uid,
+  ensureDeletionRequest,
   listSubscriptionRefs,
   deleteSubscriptionRefs,
-  unsubscribeCurrent,
-  createDeletionRequest
+  unsubscribeCurrent
 }) {
+  await ensureDeletionRequest();
+
   let documentFailure;
   try {
     const refs = await listSubscriptionRefs(uid);
@@ -22,5 +24,4 @@ export async function preparePushForAccountDeletion({
 
   if (documentFailure) throw documentFailure;
   if (unsubscribeFailure) throw unsubscribeFailure;
-  await createDeletionRequest();
 }

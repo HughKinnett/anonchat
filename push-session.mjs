@@ -16,3 +16,11 @@ export async function signOutWithPushCleanup({
     }
   }
 }
+
+export async function cleanupAfterAuthLoss({ cleanupPush, redirect }) {
+  try {
+    try { await cleanupPush({ removeDocument: false }); } catch { /* Redirect must continue. */ }
+  } finally {
+    redirect();
+  }
+}

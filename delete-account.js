@@ -6,7 +6,7 @@ import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
 import { deleteUser, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, runTransaction,
-  serverTimestamp, setDoc, updateDoc, where, writeBatch
+  serverTimestamp, updateDoc, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const form=document.getElementById("delete-account-form"),status=document.getElementById("delete-status"),button=document.getElementById("delete-account-button");
@@ -104,17 +104,19 @@ form.addEventListener("submit",async event=>{
     if(email.toLowerCase()!==String(currentUser.email||"").toLowerCase())throw new Error("email-mismatch");
     await reauthenticateWithCredential(currentUser,EmailAuthProvider.credential(email,password));
     const requestRef=doc(db,"accountDeletionRequests",currentUser.uid);
-    if(!(await getDoc(requestRef)).exists()){
-      await preparePushForAccountDeletion({
-        uid:currentUser.uid,
-        listSubscriptionRefs:async uid=>(await queryDocs(query(collection(db,"pushSubscriptions"),where("uid","==",uid)))).map(snapshot=>snapshot.ref),
-        deleteSubscriptionRefs:deleteInChunks,
-        unsubscribeCurrent:async()=>{
-          if(!(await deletionPushClient.cleanupForSignOut(currentUser,{removeDocument:false})))throw new Error("push-unsubscribe-failed");
-        },
-        createDeletionRequest:()=>setDoc(requestRef,{uid:currentUser.uid,username:profile.username,createdAt:serverTimestamp()})
-      });
-    }
+    await preparePushForAccountDeletion({
+      uid:currentUser.uid,
+      ensureDeletionRequest:()=>runTransaction(db,async transaction=>{
+        if(!(await transaction.get(requestRef)).exists()){
+          transaction.set(requestRef,{uid:currentUser.uid,username:profile.username,createdAt:serverTimestamp()});
+        }
+      }),
+      listSubscriptionRefs:async uid=>(await queryDocs(query(collection(db,"pushSubscriptions"),where("uid","==",uid)))).map(snapshot=>snapshot.ref),
+      deleteSubscriptionRefs:deleteInChunks,
+      unsubscribeCurrent:async()=>{
+        if(!(await deletionPushClient.cleanupForSignOut(currentUser,{removeDocument:false})))throw new Error("push-unsubscribe-failed");
+      }
+    });
     setStatus("Removing your posts and account activity…");
     const refs=await gatherOwnedData(currentUser.uid);
     refs.push(doc(db,"userPreferences",currentUser.uid),doc(db,"userPrivate",currentUser.uid));
@@ -132,7 +134,7 @@ form.addEventListener("submit",async event=>{
     localStorage.clear();sessionStorage.clear();location.replace("index.html?accountDeleted=1");
   }catch(error){
     console.error(error);
-    let message="Account deletion could not be completed. Your account remains active; please try again.";
+    let message="Account deletion could not be completed. Your account may remain in deletion mode; please retry to continue cleanup.";
     if(error.message==="email-mismatch")message="Enter the email address currently attached to this account.";
     if(["auth/invalid-credential","auth/wrong-password"].includes(error.code))message="The password was not recognized. Use Forgot password first, then try deletion again.";
     if(error.code==="auth/too-many-requests")message="Too many attempts. Wait a few minutes before trying again.";

@@ -4,7 +4,7 @@ import { recordPageActivity } from "./activity-integration.mjs";
 import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
 import { createPushAlertsClient } from "./push-client.mjs";
 import { applyPushAlertState } from "./push-alert-ui.mjs";
-import { signOutWithPushCleanup } from "./push-session.mjs";
+import { cleanupAfterAuthLoss, signOutWithPushCleanup } from "./push-session.mjs";
 import { markNotificationsSeen, readSeenNotificationIds } from "./notification-storage.mjs";
 import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
@@ -634,7 +634,7 @@ notificationButton.addEventListener("click", () => {
   notificationButton.setAttribute("aria-expanded", String(opening));
   if (opening && currentUser) {
     markNotificationsSeen({
-      storage: localStorage,
+      getStorage: () => window.localStorage,
       uid: currentUser.uid,
       seenIds: seenNotificationIds,
       currentIds: currentNotificationIds
@@ -1039,18 +1039,26 @@ profilePostsButton.addEventListener("click", () => setFeedView(true));
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    window.location.replace("index.html");
+    await cleanupAfterAuthLoss({
+      cleanupPush: (options) => pushAlertsClient.cleanupForSignOut(null, options),
+      redirect: () => window.location.replace("index.html")
+    });
     return;
   }
 
   currentUser = user;
-  seenNotificationIds = readSeenNotificationIds({ storage: localStorage, uid: user.uid });
+  seenNotificationIds = readSeenNotificationIds({ getStorage: () => window.localStorage, uid: user.uid });
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
   if (profile.exists() && profile.data().banned === true) {
     setStatus("This account has been banned.", true);
-    await signOut(auth);
-    window.location.replace("index.html");
+    await signOutWithPushCleanup({
+      user,
+      stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+      cleanupPush: (authenticatedUser) => pushAlertsClient.cleanupForSignOut(authenticatedUser),
+      signOut: () => signOut(auth),
+      redirect: () => window.location.replace("index.html")
+    });
     return;
   }
   if (!profile.exists() || !validProfile(profile.data(), user.uid)) {

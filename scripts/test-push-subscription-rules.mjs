@@ -15,7 +15,8 @@ const IDS = {
   banned: "d".repeat(64),
   deleting: "e".repeat(64),
   selfDeleting: "f".repeat(64),
-  selfDeleteFlow: "0".repeat(64)
+  selfDeleteFlow: "0".repeat(64),
+  selfDeleteRace: "1".repeat(64)
 };
 const data = (uid, suffix = uid) => ({
   uid,
@@ -81,24 +82,45 @@ try {
   await assertFails(deleteDoc(doc(banned, "pushSubscriptions", IDS.banned)));
   await assertFails(getDoc(doc(deleting, "pushSubscriptions", IDS.deleting)));
   await assertFails(deleteDoc(doc(deleting, "pushSubscriptions", IDS.deleting)));
-  await assertFails(getDoc(doc(selfDeleting, "pushSubscriptions", IDS.selfDeleting)));
-  await assertFails(deleteDoc(doc(selfDeleting, "pushSubscriptions", IDS.selfDeleting)));
+  await assertSucceeds(getDoc(doc(selfDeleting, "pushSubscriptions", IDS.selfDeleting)));
+  await assertSucceeds(getDocs(query(
+    collection(selfDeleting, "pushSubscriptions"),
+    where("uid", "==", "self-deleting-user")
+  )));
+  await assertFails(getDocs(collection(selfDeleting, "pushSubscriptions")));
+  await assertFails(getDoc(doc(userB, "pushSubscriptions", IDS.selfDeleting)));
+  await assertFails(deleteDoc(doc(userB, "pushSubscriptions", IDS.selfDeleting)));
+  await assertFails(updateDoc(doc(selfDeleting, "pushSubscriptions", IDS.selfDeleting), {
+    auth: "replacement_auth",
+    updatedAt: serverTimestamp()
+  }));
+  await assertSucceeds(deleteDoc(doc(selfDeleting, "pushSubscriptions", IDS.selfDeleting)));
 
   await assertSucceeds(setDoc(doc(selfDeleteFlow, "pushSubscriptions", IDS.selfDeleteFlow), data("self-delete-flow")));
-  const selfDeleteSubscriptions = await assertSucceeds(getDocs(query(
-    collection(selfDeleteFlow, "pushSubscriptions"),
-    where("uid", "==", "self-delete-flow")
-  )));
-  await assertSucceeds(deleteDoc(selfDeleteSubscriptions.docs[0].ref));
   await assertSucceeds(setDoc(doc(selfDeleteFlow, "accountDeletionRequests", "self-delete-flow"), {
     uid: "self-delete-flow",
     username: "self_delete_flow",
     createdAt: serverTimestamp()
   }));
-  await assertFails(getDocs(query(
+  const sameUserOtherDevice = testEnv.authenticatedContext("self-delete-flow").firestore();
+  await assertFails(setDoc(doc(sameUserOtherDevice, "pushSubscriptions", IDS.selfDeleteRace), data("self-delete-flow", "race-create")));
+  await assertFails(updateDoc(doc(sameUserOtherDevice, "pushSubscriptions", IDS.selfDeleteFlow), {
+    auth: "race_update_auth",
+    updatedAt: serverTimestamp()
+  }));
+  const selfDeleteSubscriptions = await assertSucceeds(getDocs(query(
     collection(selfDeleteFlow, "pushSubscriptions"),
     where("uid", "==", "self-delete-flow")
   )));
+  assert.equal(selfDeleteSubscriptions.size, 1, "barrier-first cleanup can still discover every existing owner subscription");
+  await assertFails(getDoc(doc(userB, "pushSubscriptions", IDS.selfDeleteFlow)));
+  await assertSucceeds(deleteDoc(selfDeleteSubscriptions.docs[0].ref));
+  const retrySubscriptions = await assertSucceeds(getDocs(query(
+    collection(selfDeleteFlow, "pushSubscriptions"),
+    where("uid", "==", "self-delete-flow")
+  )));
+  assert.equal(retrySubscriptions.empty, true, "retry resumes cleanup behind the existing barrier");
+  await assertFails(setDoc(doc(sameUserOtherDevice, "pushSubscriptions", IDS.selfDeleteFlow), data("self-delete-flow", "post-cleanup-recreate")));
 
   await assertFails(setDoc(doc(userA, "pushSubscriptions", "NOT-A-SHA256-ID"), data("user-a", "bad-id")));
   await assertFails(setDoc(doc(userA, "pushSubscriptions", IDS.denied), { ...data("user-a", "extra"), username: "private-name" }));
