@@ -1,6 +1,6 @@
 # AnonChat
 
-A responsive pseudonymous social timeline using Firebase Authentication and Cloud Firestore.
+A pseudonymous social media app.
 
 ## Features
 
