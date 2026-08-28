@@ -9,14 +9,31 @@ service cloud.firestore {
     function isAdmin() {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && isProtectedAdministrator(
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true
+        && hasMatchingAdminReservation(
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data
         );
     }
 
     function isProtectedAdministrator(username) {
       return username is string
-        && username.lower().matches('^[[:space:]]*(i_love_you_h|ownercybercapone)[[:space:]]*$');
+        && username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*(i_love_you_h|ownercybercapone)[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$');
+    }
+
+    function hasMatchingAdminReservation(profile) {
+      return (
+          profile.username is string
+          && profile.username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*i_love_you_h[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$')
+          && exists(/databases/$(database)/documents/usernames/i_love_you_h)
+          && get(/databases/$(database)/documents/usernames/i_love_you_h).data.uid == request.auth.uid
+          && get(/databases/$(database)/documents/usernames/i_love_you_h).data.username == profile.username
+        ) || (
+          profile.username is string
+          && profile.username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*ownercybercapone[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$')
+          && exists(/databases/$(database)/documents/usernames/ownercybercapone)
+          && get(/databases/$(database)/documents/usernames/ownercybercapone).data.uid == request.auth.uid
+          && get(/databases/$(database)/documents/usernames/ownercybercapone).data.username == profile.username
+        );
     }
 
     function hasNoDeletionQueueState(profile) {
@@ -50,6 +67,15 @@ service cloud.firestore {
           getAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId)).data,
           userId
         );
+    }
+
+    function validStandaloneAdminBan(userId) {
+      return isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['banned'])
+        && request.resource.data.banned is bool
+        && (request.resource.data.banned == true
+          || (hasNoDeletionQueueState(resource.data)
+            && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId))));
     }
 
     function activeUser() {
@@ -153,7 +179,8 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn()
         && !exists(/databases/$(database)/documents/usernames/$(normalizedUsername))
-        && !(normalizedUsername in ['i_love_you_h', 'ownercybercapone'])
+        && !isProtectedAdministrator(normalizedUsername)
+        && !isProtectedAdministrator(request.resource.data.username)
         && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username is string
@@ -180,16 +207,20 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username is string
         && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+        && !isProtectedAdministrator(request.resource.data.username)
         && request.resource.data.createdAt == request.time
         && request.resource.data.lastActiveAt == request.time
+        && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid
+          == request.auth.uid
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.username
+          == request.resource.data.username
         && ((exists(/databases/$(database)/documents/system/accountStats)
           && getAfter(/databases/$(database)/documents/system/accountStats).data.count
             == get(/databases/$(database)/documents/system/accountStats).data.count + 1)
           || (!exists(/databases/$(database)/documents/system/accountStats)
             && getAfter(/databases/$(database)/documents/system/accountStats).data.count == 6));
-      allow update: if (isAdmin()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['banned'])
-          && request.resource.data.banned is bool)
+      allow update: if validStandaloneAdminBan(userId)
         || validDeletionQueueProfile(userId)
         || (activeUser()
           && request.auth.uid == userId
@@ -206,7 +237,7 @@ service cloud.firestore {
               && request.resource.data.get('coverImage', '').size() <= 360000)
             ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
-              && (!(resource.data.username.lower() in ['i_love_you_h', 'ownercybercapone'])
+              && (!isProtectedAdministrator(resource.data.username)
                 || request.resource.data.username.lower() == resource.data.username.lower())
               && request.resource.data.username is string
               && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
@@ -221,11 +252,10 @@ service cloud.firestore {
                 || request.resource.data.get('spotifyTrackUrl', '')
                   .matches('https://open[.]spotify[.]com/track/[A-Za-z0-9]{22}')))
           ));
-      allow delete: if isAdmin()
-        || (activeUser()
+      allow delete: if activeUser()
           && request.auth.uid == userId
           && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
-          && !(resource.data.username.lower() in ['i_love_you_h', 'ownercybercapone']));
+          && !isProtectedAdministrator(resource.data.username);
     }
 
     match /adminDeletionJobs/{targetUid} {
@@ -260,7 +290,7 @@ service cloud.firestore {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
       allow create: if activeUser()
         && request.auth.uid == userId
-        && !(currentUsername().lower() in ['i_love_you_h', 'ownercybercapone'])
+        && !isProtectedAdministrator(currentUsername())
         && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username == currentUsername()

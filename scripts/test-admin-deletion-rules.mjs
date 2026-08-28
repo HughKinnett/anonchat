@@ -26,10 +26,13 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
   const firestore = context.firestore();
   await Promise.all([
     setDoc(doc(firestore, "users", "admin"), profile("admin", "i_love_you_h")),
+    setDoc(doc(firestore, "usernames", "i_love_you_h"), { uid: "admin", username: "i_love_you_h", createdAt: new Date(0) }),
     setDoc(doc(firestore, "users", "member"), profile("member", "member")),
     setDoc(doc(firestore, "users", "target"), profile("target", "target")),
     setDoc(doc(firestore, "users", "protected-one"), profile("protected-one", "  I_LOVE_YOU_H  ")),
-    setDoc(doc(firestore, "users", "protected-two"), profile("protected-two", "ownerCyberCapone"))
+    setDoc(doc(firestore, "users", "protected-two"), profile("protected-two", "ownerCyberCapone")),
+    setDoc(doc(firestore, "users", "protected-nbsp"), profile("protected-nbsp", "\u00a0i_love_you_h\u00a0")),
+    setDoc(doc(firestore, "users", "protected-bom"), profile("protected-bom", "\uFEFFownercybercapone\uFEFF"))
   ]);
 });
 const queue = (firestore, options = {}) => {
@@ -53,6 +56,8 @@ try {
   await assertFails(queue(member));
   await assertFails(queue(admin, { targetUid: "protected-one" }));
   await assertFails(queue(admin, { targetUid: "protected-two" }));
+  await assertFails(queue(admin, { targetUid: "protected-nbsp" }));
+  await assertFails(queue(admin, { targetUid: "protected-bom" }));
   await assertFails(queue(admin, { job: jobFields("wrong-target") }));
   await assertFails(queue(admin, { requesterUid: "member" }));
   await assertFails(queue(admin, { status: "started" }));
@@ -88,10 +93,41 @@ try {
 
   await testEnv.clearFirestore(); await seed();
   await assertSucceeds(queue(admin));
+  await assertSucceeds(updateDoc(doc(admin, "users", "target"), { banned: true }));
+  await assertFails(updateDoc(doc(admin, "users", "target"), { banned: false }));
+  await assertFails(updateDoc(doc(admin, "users", "target"), { banned: true, profileImage: "x" }));
+  await assertFails(deleteDoc(doc(admin, "users", "target")));
   await assertFails(updateDoc(doc(admin, "adminDeletionJobs", "target"), { status: "started" }));
   await assertFails(deleteDoc(doc(admin, "adminDeletionJobs", "target")));
   await assertFails(updateDoc(doc(target, "adminDeletionJobs", "target"), { status: "started" }));
   await assertFails(deleteDoc(doc(target, "adminDeletionJobs", "target")));
+
+  await testEnv.clearFirestore();
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await Promise.all([
+      setDoc(doc(firestore, "users", "forged-admin"), profile("forged-admin", "i_love_you_h")),
+      setDoc(doc(firestore, "users", "target"), profile("target", "target"))
+    ]);
+  });
+  const forgedAdmin = testEnv.authenticatedContext("forged-admin").firestore();
+  await assertFails(updateDoc(doc(forgedAdmin, "users", "target"), { banned: true }));
+
+  await testEnv.clearFirestore();
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await Promise.all([
+      setDoc(doc(firestore, "users", "mismatched-admin"), profile("mismatched-admin", "i_love_you_h")),
+      setDoc(doc(firestore, "usernames", "i_love_you_h"), { uid: "someone-else", username: "i_love_you_h", createdAt: new Date(0) }),
+      setDoc(doc(firestore, "users", "target"), profile("target", "target"))
+    ]);
+  });
+  const mismatchedAdmin = testEnv.authenticatedContext("mismatched-admin").firestore();
+  await assertFails(updateDoc(doc(mismatchedAdmin, "users", "target"), { banned: true }));
+
+  await testEnv.clearFirestore(); await seed();
+  await testEnv.withSecurityRulesDisabled(async (context) => updateDoc(doc(context.firestore(), "users", "admin"), { banned: true }));
+  await assertFails(updateDoc(doc(admin, "users", "target"), { banned: true }));
 
   console.log("Firestore administrator deletion queue authorization passed");
 } finally {

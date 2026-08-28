@@ -17,6 +17,14 @@ export const canQueueAdminDeletion = ({ targetUid, username, existingJob, existi
   && existingJob === false
   && existingQueueState === false;
 
+export const hasAdminDeletionQueueState = (profile) =>
+  ["adminDeletionRequestedAt", "adminDeletionRequestedBy", "adminDeletionStatus"]
+    .some((field) => Object.hasOwn(profile ?? {}, field));
+
+export const canAdminSetBanned = ({ nextBanned, existingJob, existingQueueState }) =>
+  nextBanned === true
+  || (nextBanned === false && existingJob === false && existingQueueState === false);
+
 export const adminDeletionQueuePayloads = ({ targetUid, requesterUid, timestamp }) => {
   if (typeof targetUid !== "string" || targetUid.trim().length === 0) {
     throw new TypeError("A target UID is required");

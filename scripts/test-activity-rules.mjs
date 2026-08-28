@@ -41,6 +41,8 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
     setDoc(doc(firestore, "users", "banned-admin"), { ...profile("banned-admin", { banned: true }), username: "ownercybercapone" }),
     setDoc(doc(firestore, "users", "ordinary-client-date"), profile("ordinary-client-date")),
     setDoc(doc(firestore, "users", "admin-client-date"), { ...profile("admin-client-date"), username: "i_love_you_h" }),
+    setDoc(doc(firestore, "usernames", "i_love_you_h"), { uid: "admin-user", username: "i_love_you_h", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "usernames", "ownercybercapone"), { uid: "banned-admin", username: "ownercybercapone", createdAt: new Date(0) }),
     setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) })
   ]);
 });
@@ -76,6 +78,9 @@ try {
   const newUser = testEnv.authenticatedContext("new-user").firestore();
   const createProfile = async (data) => {
     const batch = writeBatch(newUser);
+    batch.set(doc(newUser, "usernames", data.username.toLowerCase()), {
+      uid: "new-user", username: data.username, createdAt: serverTimestamp()
+    });
     batch.set(doc(newUser, "users", "new-user"), data);
     batch.update(doc(newUser, "system", "accountStats"), { count: 6, limit: 500, updatedAt: serverTimestamp() });
     return batch.commit();
@@ -103,6 +108,40 @@ try {
     createdAt: new Date(),
     lastActiveAt: new Date()
   }));
+
+  await testEnv.clearFirestore();
+  await seed();
+  const malicious = testEnv.authenticatedContext("malicious").firestore();
+  const protectedProfile = {
+    uid: "malicious",
+    username: "i_love_you_h",
+    createdAt: serverTimestamp(),
+    lastActiveAt: serverTimestamp()
+  };
+  const protectedProfileWithoutReservation = writeBatch(malicious);
+  protectedProfileWithoutReservation.set(doc(malicious, "users", "malicious"), protectedProfile);
+  protectedProfileWithoutReservation.update(doc(malicious, "system", "accountStats"), {
+    count: 6, limit: 500, updatedAt: serverTimestamp()
+  });
+  await assertFails(protectedProfileWithoutReservation.commit());
+  await assertFails(setDoc(doc(malicious, "usernames", "i_love_you_h"), {
+    uid: "malicious", username: "i_love_you_h", createdAt: serverTimestamp()
+  }));
+
+  await testEnv.clearFirestore();
+  await seed();
+  await testEnv.withSecurityRulesDisabled(async (context) => setDoc(
+    doc(context.firestore(), "usernames", "new_user"),
+    { uid: "different-user", username: "new_user", createdAt: new Date(0) }
+  ));
+  const mismatchedSignup = writeBatch(newUser);
+  mismatchedSignup.set(doc(newUser, "users", "new-user"), {
+    uid: "new-user", username: "new_user", createdAt: serverTimestamp(), lastActiveAt: serverTimestamp()
+  });
+  mismatchedSignup.update(doc(newUser, "system", "accountStats"), {
+    count: 6, limit: 500, updatedAt: serverTimestamp()
+  });
+  await assertFails(mismatchedSignup.commit());
 
   console.log("Firestore activity authorization passed");
 } finally {
