@@ -5,7 +5,7 @@ import {
   setDoc
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const DEFAULT_HANDLES = ["ownercybercapone", "i_love_you_h"];
+const DEFAULT_HANDLES = ["cybercapone", "i_love_you_h"];
 
 export const ensureDefaultOwnerFollows = async (userId, db) => {
   const results = await Promise.allSettled(DEFAULT_HANDLES.map(async (handle) => {

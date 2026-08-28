@@ -198,7 +198,7 @@ export class FirestoreDeletionAdapter {
   async sweep(targetUid, token) {
     const jobSnapshot = await this.jobRef(targetUid).get();
     if (!jobSnapshot.exists) throw codedError("lease-lost"); this.assertLeaseData(jobSnapshot.data(), token);
-    for (const entry of cleanupQueries(targetUid, jobSnapshot.data().targetUsername)) {
+    for (const entry of cleanupQueries(targetUid)) {
       if (entry.path) { await this.deleteDirect(targetUid, token, entry); continue; }
       const cascade = async (refs) => {
         for (const ref of refs) {
@@ -218,12 +218,10 @@ export class FirestoreDeletionAdapter {
       const job = jobSnapshot.data(); this.assertLeaseData(job, token);
       if (job.phase !== "first-sweep") throw codedError("invalid-job");
       const profileSnapshot = await transaction.get(profileRef); const statsSnapshot = await transaction.get(statsRef);
-      const usernameRef = this.db.collection("usernames").doc(normalizeAdministrator(job.targetUsername));
-      const usernameSnapshot = await transaction.get(usernameRef);
       if (!profileSnapshot.exists) throw codedError("invalid-job");
       if (isProtectedAdministrator(profileSnapshot.data().username)) throw codedError("protected-target");
       if (!statsSnapshot.exists || !isValidAccountStats(statsSnapshot.data())) throw codedError("account-stats-invalid");
-      transaction.delete(profileRef); if (usernameSnapshot.exists && usernameSnapshot.data().uid === targetUid) transaction.delete(usernameRef);
+      transaction.delete(profileRef);
       transaction.update(statsRef, {
         count: statsSnapshot.data().count - 1,
         limit: 500, updatedAt: this.timestamp(this.now())
@@ -276,8 +274,11 @@ export class FirestoreDeletionAdapter {
       const jobSnapshot = await transaction.get(jobRef); if (!jobSnapshot.exists) throw codedError("lease-lost");
       this.assertLeaseData(jobSnapshot.data(), token); if (jobSnapshot.data().phase !== "auth-deleted") throw codedError("invalid-job");
       const profileSnapshot = await transaction.get(profileRef); if (profileSnapshot.exists) throw codedError("profile-recreated");
-      const reservations = await transaction.get(this.db.collection("usernames").where("uid", "==", targetUid).limit(1));
-      if (!reservations.empty) throw codedError("profile-recreated");
+      const reservations = await transaction.get(
+        this.db.collection("usernames").where("uid", "==", targetUid).limit(PAGE_LIMIT + 1)
+      );
+      if (reservations.size > PAGE_LIMIT) throw codedError("cleanup-limit");
+      reservations.docs.forEach((reservation) => transaction.delete(reservation.ref));
       transaction.set(jobRef, { status: "completed", completedAt, purgeAfter });
     });
   }

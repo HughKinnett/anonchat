@@ -1,6 +1,6 @@
 export const PROTECTED_ADMIN_USERNAMES = Object.freeze([
   "i_love_you_h",
-  "ownercybercapone"
+  "cybercapone"
 ]);
 
 export const normalizeUsername = (username) => typeof username === "string"
@@ -21,9 +21,10 @@ export const hasAdminDeletionQueueState = (profile) =>
   ["adminDeletionRequestedAt", "adminDeletionRequestedBy", "adminDeletionStatus"]
     .some((field) => Object.hasOwn(profile ?? {}, field));
 
-export const canAdminSetBanned = ({ nextBanned, existingJob, existingQueueState }) =>
-  nextBanned === true
-  || (nextBanned === false && existingJob === false && existingQueueState === false);
+export const canAdminSetBanned = ({ username, nextBanned, existingJob, existingQueueState }) =>
+  !isProtectedAdministrator(username)
+  && (nextBanned === true
+    || (nextBanned === false && existingJob === false && existingQueueState === false));
 
 export const adminDeletionQueuePayloads = ({ targetUid, requesterUid, timestamp }) => {
   if (typeof targetUid !== "string" || targetUid.trim().length === 0) {

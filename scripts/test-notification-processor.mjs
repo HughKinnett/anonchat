@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
-import { MAX_SUBSCRIPTIONS_PER_RECIPIENT, NOTIFICATION_LEASE_MS, notificationPayload } from "../notification-policy.mjs";
-import { deliverNotificationEvents, scanTrustedNotificationSources } from "../notification-processor.mjs";
+import {
+  MAX_NOTIFICATION_RUNTIME_MS,
+  MAX_SUBSCRIPTIONS_PER_RECIPIENT,
+  NOTIFICATION_LEASE_MS,
+  NOTIFICATION_TYPES,
+  notificationPayload
+} from "../notification-policy.mjs";
+import {
+  deliverNotificationEvents,
+  runNotificationProcessor,
+  scanTrustedNotificationSources
+} from "../notification-processor.mjs";
 
 const time = (milliseconds) => ({ toMillis: () => milliseconds });
 const document = (path, data, extra = {}) => ({ path, data, ...extra });
@@ -12,11 +22,14 @@ class ScanAdapter {
     this.events = new Map();
     this.cursors = new Map();
     this.pages = new Map();
+    this.nextSourceType = "reaction";
     this.available = new Set(["post-owner", "request-to", "room-a", "room-b", "reveal-to"]);
   }
   now() { return 2_000; }
   timestamp(value) { return time(value); }
   async bootstrapSourceCursors() { return this.bootstrap; }
+  async sourcePriority() { return this.nextSourceType; }
+  async prioritizeSourceType(type) { this.nextSourceType = type; }
   async scanSourcePage(type, cursor) {
     this.scans += 1;
     const all = this.pages.get(type) || [];
@@ -27,8 +40,20 @@ class ScanAdapter {
   async postAuthor(source) { return source.postAuthorUid; }
   async roomMembers(source) { return source.memberUids; }
   async recipientAvailable(uid) { return this.available.has(uid); }
-  async createEvent(id, data) { if (!this.events.has(id)) this.events.set(id, { ...data }); }
-  async advanceSourceCursor(type, cursor) { this.cursors.set(type, cursor); }
+  async createEvent(id, data) {
+    if (this.events.has(id)) return false;
+    this.events.set(id, { ...data });
+    return true;
+  }
+  async createEvents(entries) {
+    let created = 0;
+    for (const [id, data] of entries) created += await this.createEvent(id, data) ? 1 : 0;
+    return created;
+  }
+  async advanceSourceCursor(type, cursor, nextSourceType) {
+    this.cursors.set(type, cursor);
+    if (nextSourceType) this.nextSourceType = nextSourceType;
+  }
 }
 
 {
@@ -88,6 +113,7 @@ class DeliveryAdapter {
     this.recreateAfterExpiration = undefined;
     this.advanceBeforeList = 0;
     this.trace = [];
+    this.availabilitySequence = [];
   }
   now() { return this.clock; }
   timestamp(value) { return time(value); }
@@ -103,6 +129,10 @@ class DeliveryAdapter {
     Object.assign(event, { status: "processing", attempts: event.attempts + 1, leaseToken: token, leaseExpiresAt: time(this.clock + NOTIFICATION_LEASE_MS) });
     this.claimed.add(id);
     return { id, token, data: { ...event } };
+  }
+  async recipientAvailable() {
+    this.trace.push("availability");
+    return this.availabilitySequence.length ? this.availabilitySequence.shift() : true;
   }
   async listSubscriptions(uid) {
     this.clock += this.advanceBeforeList;
@@ -136,7 +166,17 @@ class DeliveryAdapter {
     return true;
   }
   async completeEvent(id, token) { assert.equal(this.events.get(id).leaseToken, token); Object.assign(this.events.get(id), { status: "delivered", updatedAt: time(this.clock) }); this.claimed.delete(id); }
-  async failEvent(id, token, errorCode) { assert.equal(this.events.get(id).leaseToken, token); Object.assign(this.events.get(id), { status: "failed", errorCode, updatedAt: time(this.clock) }); this.claimed.delete(id); }
+  async failEvent(id, token, errorCode) { assert.equal(this.events.get(id).leaseToken, token); Object.assign(this.events.get(id), { status: "failed", errorCode, updatedAt: time(this.clock) }); this.claimed.delete(id); return "failed"; }
+  async suppressEvent(id, token) { assert.equal(this.events.get(id).leaseToken, token); Object.assign(this.events.get(id), { status: "suppressed", errorCode: "RECIPIENT_UNAVAILABLE", updatedAt: time(this.clock) }); this.claimed.delete(id); }
+  async deferEvent(id, token) {
+    const event = this.events.get(id);
+    assert.equal(event.leaseToken, token);
+    Object.assign(event, { status: "pending", attempts: event.attempts - 1, updatedAt: time(this.clock) });
+    delete event.leaseToken;
+    delete event.leaseExpiresAt;
+    this.claimed.delete(id);
+  }
+  async purgeTerminalBefore() { return 2; }
   async purgeDeliveredBefore() { return 2; }
 }
 
@@ -316,7 +356,7 @@ for (const [label, mutate] of [
 {
   const event = queued(id("6"), "room-message", "lease-send-user");
   const adapter = new DeliveryAdapter([event], new Map([["lease-send-user", [subscription("lease-send-user", "lease-device")]]]));
-  adapter.advanceBeforeList = NOTIFICATION_LEASE_MS - 1;
+  adapter.advanceBeforeList = MAX_NOTIFICATION_RUNTIME_MS - 30_001;
   const result = await deliverNotificationEvents({
     adapter,
     ownerId: "live-worker",
@@ -330,8 +370,11 @@ for (const [label, mutate] of [
     logger: { info() {}, error() {} }
   });
   assert.equal(result.delivered, 1);
-  assert.deepEqual(adapter.trace.slice(0, 4), ["renew", "send-start", "send-end", "renew"],
-    "each send is immediately bracketed by lease renewals");
+  assert.deepEqual(
+    adapter.trace.slice(0, 6),
+    ["availability", "renew", "availability", "send-start", "send-end", "renew"],
+    "recipient availability is rechecked and each send is immediately bracketed by lease renewals"
+  );
 }
 
 {
@@ -350,6 +393,440 @@ for (const [label, mutate] of [
   assert.equal(adapter.deliveries.size, 0);
   assert.equal(logs.includes("DELIVERY_TRANSIENT"), true);
   assert.equal(logs.join(" ").includes("Socket timeout"), false);
+}
+
+for (const [state, availabilitySequence, eventDigit] of [
+  ["missing-after-claim", [false], "a"],
+  ["banned-before-send", [true, false], "b"],
+  ["admin-deleting-before-send", [true, false], "c"],
+  ["self-deleting-before-send", [true, false], "d"]
+]) {
+  const event = queued(id(eventDigit), "reaction", state);
+  const adapter = new DeliveryAdapter([event], new Map([[state, [subscription(state, `${state}-device`)]]]));
+  adapter.availabilitySequence = [...availabilitySequence];
+  let sends = 0;
+  const result = await deliverNotificationEvents({
+    adapter,
+    ownerId: `worker-${state}`,
+    sendPush: async () => { sends += 1; },
+    logger: { info() {}, error() {} }
+  });
+  assert.equal(sends, 0, `${state} is terminally suppressed before external delivery`);
+  assert.equal(adapter.events.get(event.id).status, "suppressed");
+  assert.equal(adapter.events.get(event.id).errorCode, "RECIPIENT_UNAVAILABLE");
+  assert.equal(result.suppressed, 1);
+}
+
+{
+  const event = queued(id("8"), "comment", "budget-user");
+  const devices = [
+    subscription("budget-user", "budget-one"),
+    subscription("budget-user", "budget-two"),
+    subscription("budget-user", "budget-three")
+  ];
+  const adapter = new DeliveryAdapter([event], new Map([["budget-user", devices]]));
+  const sent = [];
+  for (let run = 0; run < 3; run += 1) {
+    const result = await deliverNotificationEvents({
+      adapter,
+      ownerId: `budget-worker-${run}`,
+      sendPush: async (current) => sent.push(current.id),
+      logger: { info() {}, error() {} },
+      limits: { maxEvents: 10, maxSends: 1, maxRuntimeMs: 60_000 }
+    });
+    assert.ok(result.sent <= 1, "each invocation respects the external-send budget");
+  }
+  assert.deepEqual(sent, ["budget-one", "budget-two", "budget-three"],
+    "delivery markers resume a budget-deferred event without duplicate sends");
+  assert.equal(adapter.events.get(event.id).status, "delivered");
+}
+
+{
+  const events = [
+    queued(id("1"), "comment", "event-one"),
+    queued(id("2"), "comment", "event-two")
+  ];
+  const adapter = new DeliveryAdapter(events);
+  const first = await deliverNotificationEvents({
+    adapter,
+    ownerId: "event-worker-one",
+    sendPush: async () => {},
+    logger: { info() {}, error() {} },
+    limits: { maxEvents: 1, maxSends: 10, maxRuntimeMs: 60_000 }
+  });
+  assert.equal(first.inspected, 1, "the event budget bounds each invocation");
+  assert.equal(first.budgetReached, true);
+  assert.equal([...adapter.events.values()].filter((event) => event.status === "pending").length, 1);
+  await deliverNotificationEvents({
+    adapter,
+    ownerId: "event-worker-two",
+    sendPush: async () => {},
+    logger: { info() {}, error() {} },
+    limits: { maxEvents: 1, maxSends: 10, maxRuntimeMs: 60_000 }
+  });
+  assert.equal([...adapter.events.values()].every((event) => event.status === "delivered"), true,
+    "a later invocation resumes after the event budget");
+}
+
+{
+  const events = [
+    queued(id("9"), "reaction", "time-one"),
+    queued(id("0"), "reaction", "time-two")
+  ];
+  const adapter = new DeliveryAdapter(events, new Map([
+    ["time-one", [subscription("time-one", "time-one-device")]],
+    ["time-two", [subscription("time-two", "time-two-device")]]
+  ]));
+  const sent = [];
+  const first = await deliverNotificationEvents({
+    adapter,
+    ownerId: "time-worker-one",
+    sendPush: async (current) => {
+      sent.push(current.id);
+      adapter.clock += 100;
+    },
+    logger: { info() {}, error() {} },
+    limits: { maxEvents: 10, maxSends: 10, maxRuntimeMs: 100 }
+  });
+  assert.equal(first.budgetReached, true);
+  assert.equal(sent.length, 1, "the runtime budget stops later event work");
+  await deliverNotificationEvents({
+    adapter,
+    ownerId: "time-worker-two",
+    sendPush: async (current) => sent.push(current.id),
+    logger: { info() {}, error() {} },
+    limits: { maxEvents: 10, maxSends: 10, maxRuntimeMs: 100 }
+  });
+  assert.equal(sent.length, 2, "a later invocation resumes after the runtime budget");
+}
+
+class RunBudgetAdapter extends DeliveryAdapter {
+  constructor(sourceCount, { advanceAfterMaterialization = 0 } = {}) {
+    super([]);
+    this.advanceAfterMaterialization = advanceAfterMaterialization;
+    this.sourceCursors = new Map();
+    this.nextSourceType = "reaction";
+    this.sourceItems = Array.from({ length: sourceCount }, (_, index) => document(
+      `posts/source-${index}/reactions/reaction-${index}`,
+      { uid: `actor-${index}`, createdAt: time(index + 1) },
+      { postAuthorUid: `recipient-${index}` }
+    ));
+    this.heartbeats = [];
+  }
+  async bootstrapSourceCursors() { return false; }
+  async sourcePriority() { return this.nextSourceType; }
+  async prioritizeSourceType(type) { this.nextSourceType = type; }
+  async scanSourcePage(type, suppliedCursor, limit = 100) {
+    if (type !== "reaction") return { items: [], nextCursor: undefined };
+    const cursor = suppliedCursor ?? this.sourceCursors.get(type);
+    const start = cursor ? this.sourceItems.findIndex((item) => item.path === cursor.path) + 1 : 0;
+    const items = this.sourceItems.slice(start, start + limit);
+    return {
+      items,
+      nextCursor: items.at(-1)
+        ? { createdAt: items.at(-1).data.createdAt, path: items.at(-1).path }
+        : undefined
+    };
+  }
+  async postAuthor(source) { return source.postAuthorUid; }
+  async roomMembers() { return []; }
+  async createEvent(eventId, data) {
+    const created = !this.events.has(eventId);
+    if (created) this.events.set(eventId, { ...data });
+    this.clock += this.advanceAfterMaterialization;
+    return created;
+  }
+  async createEvents(entries) {
+    let created = 0;
+    for (const [eventId, data] of entries) {
+      if (this.events.has(eventId)) continue;
+      this.events.set(eventId, { ...data });
+      created += 1;
+    }
+    this.clock += this.advanceAfterMaterialization;
+    return created;
+  }
+  async advanceSourceCursor(type, cursor, nextSourceType) {
+    this.sourceCursors.set(type, cursor);
+    if (nextSourceType) this.nextSourceType = nextSourceType;
+  }
+  async heartbeat(status, errorCode) { this.heartbeats.push([status, errorCode]); }
+}
+
+const fairSource = (type, index, { memberCount = 1 } = {}) => {
+  const createdAt = time(index + 1);
+  if (type === "reaction") return document(
+    `posts/reaction-${index}/reactions/reaction-${index}`,
+    { uid: `reaction-actor-${index}`, createdAt },
+    { postAuthorUid: `reaction-recipient-${index}` }
+  );
+  if (type === "comment") return document(
+    `communityPosts/comment-${index}/comments/comment-${index}`,
+    { uid: `comment-actor-${index}`, createdAt },
+    { postAuthorUid: `comment-recipient-${index}` }
+  );
+  if (type === "message-request") return document(
+    `messageRequests/request-${index}`,
+    { fromId: `request-actor-${index}`, toId: `request-recipient-${index}`, status: "pending", createdAt }
+  );
+  if (type === "room-message") return document(
+    `roomMessages/message-${index}`,
+    { senderId: `room-sender-${index}`, roomId: `room-${index}`, createdAt, expiresAt: time(20_000) },
+    { memberUids: Array.from({ length: memberCount }, (_, memberIndex) => `room-${index}-member-${memberIndex}`) }
+  );
+  return document(
+    `reveals/reveal-${index}`,
+    { fromId: `reveal-actor-${index}`, toId: `reveal-recipient-${index}`, status: "pending", createdAt }
+  );
+};
+
+class FairSourceAdapter extends ScanAdapter {
+  constructor(pages, { nextSourceType = "reaction", interruptRecipient } = {}) {
+    super();
+    this.pages = pages;
+    this.clock = 10_000;
+    this.nextSourceType = nextSourceType;
+    this.interruptRecipient = interruptRecipient;
+  }
+  now() { return this.clock; }
+  async sourcePriority() { return this.nextSourceType; }
+  async prioritizeSourceType(type) { this.nextSourceType = type; }
+  async scanSourcePage(type, suppliedCursor, limit = 100) {
+    const all = this.pages.get(type) || [];
+    const cursor = suppliedCursor ?? this.cursors.get(type);
+    const start = cursor ? all.findIndex((item) => item.path === cursor.path) + 1 : 0;
+    const items = all.slice(start, start + limit);
+    return {
+      items,
+      nextCursor: items.at(-1)
+        ? { createdAt: items.at(-1).data.createdAt, path: items.at(-1).path }
+        : undefined
+    };
+  }
+  async recipientAvailable(uid) {
+    if (uid === this.interruptRecipient) {
+      this.clock += 100;
+      this.interruptRecipient = undefined;
+    }
+    return true;
+  }
+  async advanceSourceCursor(type, cursor, nextSourceType) {
+    this.cursors.set(type, cursor);
+    if (nextSourceType) this.nextSourceType = nextSourceType;
+  }
+}
+
+{
+  const fairnessPages = new Map([
+    ["reaction", Array.from({ length: 105 }, (_, index) => fairSource("reaction", index))],
+    ["comment", [fairSource("comment", 200)]],
+    ["message-request", [fairSource("message-request", 201)]],
+    ["room-message", [fairSource("room-message", 202)]],
+    ["reveal-request", [fairSource("reveal-request", 203)]]
+  ]);
+  const fairness = new FairSourceAdapter(fairnessPages);
+  const first = await scanTrustedNotificationSources({
+    adapter: fairness,
+    limits: { maxSources: 100, maxMaterializations: 500, maxRuntimeMs: 10_000 }
+  });
+  const firstRunTypes = [...new Set([...fairness.events.values()].map((event) => event.type))].sort();
+  const firstRunCursors = Object.fromEntries(NOTIFICATION_TYPES.map((type) => [type, fairness.cursors.has(type)]));
+  const second = await scanTrustedNotificationSources({
+    adapter: fairness,
+    limits: { maxSources: 100, maxMaterializations: 500, maxRuntimeMs: 10_000 }
+  });
+  const eventCountAfterSecondRun = fairness.events.size;
+  const third = await scanTrustedNotificationSources({
+    adapter: fairness,
+    limits: { maxSources: 100, maxMaterializations: 500, maxRuntimeMs: 10_000 }
+  });
+
+  const highFanoutPages = new Map([
+    ["reaction", [fairSource("reaction", 300)]],
+    ["comment", [fairSource("comment", 301)]],
+    ["room-message", [fairSource("room-message", 302, { memberCount: 499 })]],
+    ["reveal-request", [fairSource("reveal-request", 303)]]
+  ]);
+  const highFanout = new FairSourceAdapter(highFanoutPages);
+  const deferred = await scanTrustedNotificationSources({
+    adapter: highFanout,
+    limits: { maxSources: 100, maxMaterializations: 500, maxRuntimeMs: 10_000 }
+  });
+  const deferredPriority = highFanout.nextSourceType;
+  const roomDeferred = !highFanout.cursors.has("room-message") && deferredPriority === "room-message";
+  const resumed = await scanTrustedNotificationSources({
+    adapter: highFanout,
+    limits: { maxSources: 100, maxMaterializations: 500, maxRuntimeMs: 10_000 }
+  });
+  const resumedEventCount = highFanout.events.size;
+  const replay = await scanTrustedNotificationSources({
+    adapter: highFanout,
+    limits: { maxSources: 100, maxMaterializations: 500, maxRuntimeMs: 10_000 }
+  });
+
+  const interrupted = new FairSourceAdapter(new Map([
+    ["comment", [fairSource("comment", 400)]]
+  ]), { interruptRecipient: "comment-recipient-400" });
+  const interruptedFirst = await scanTrustedNotificationSources({
+    adapter: interrupted,
+    limits: { maxSources: 100, maxMaterializations: 500, maxRuntimeMs: 100 }
+  });
+  const interruptedPriority = interrupted.nextSourceType;
+  const cursorDeferred = !interrupted.cursors.has("comment");
+  const interruptedResume = await scanTrustedNotificationSources({
+    adapter: interrupted,
+    limits: { maxSources: 100, maxMaterializations: 500, maxRuntimeMs: 100 }
+  });
+
+  assert.deepEqual({
+    fairness: {
+      firstScanned: first.scanned,
+      firstRunTypes,
+      firstRunCursors,
+      totalMaterialized: first.materialized + second.materialized + third.materialized,
+      eventCountAfterSecondRun,
+      finalEventCount: fairness.events.size,
+      finalReactionCursor: fairness.cursors.get("reaction")?.path,
+      replayMaterialized: third.materialized
+    },
+    highFanout: {
+      firstScanned: deferred.scanned,
+      firstMaterialized: deferred.materialized,
+      deferredPriority,
+      roomDeferred,
+      resumedMaterialized: resumed.materialized,
+      resumedEventCount,
+      roomCursor: highFanout.cursors.get("room-message")?.path,
+      revealCursor: highFanout.cursors.get("reveal-request")?.path,
+      replayMaterialized: replay.materialized,
+      finalEventCount: highFanout.events.size
+    },
+    interruption: {
+      firstScanned: interruptedFirst.scanned,
+      firstMaterialized: interruptedFirst.materialized,
+      interruptedPriority,
+      cursorDeferred,
+      resumedMaterialized: interruptedResume.materialized,
+      finalEventCount: interrupted.events.size,
+      finalCursor: interrupted.cursors.get("comment")?.path
+    }
+  }, {
+    fairness: {
+      firstScanned: 100,
+      firstRunTypes: [...NOTIFICATION_TYPES].sort(),
+      firstRunCursors: {
+        reaction: true,
+        comment: true,
+        "message-request": true,
+        "room-message": true,
+        "reveal-request": true
+      },
+      totalMaterialized: 109,
+      eventCountAfterSecondRun: 109,
+      finalEventCount: 109,
+      finalReactionCursor: "posts/reaction-104/reactions/reaction-104",
+      replayMaterialized: 0
+    },
+    highFanout: {
+      firstScanned: 2,
+      firstMaterialized: 2,
+      deferredPriority: "room-message",
+      roomDeferred: true,
+      resumedMaterialized: 500,
+      resumedEventCount: 502,
+      roomCursor: "roomMessages/message-302",
+      revealCursor: "reveals/reveal-303",
+      replayMaterialized: 0,
+      finalEventCount: 502
+    },
+    interruption: {
+      firstScanned: 0,
+      firstMaterialized: 0,
+      interruptedPriority: "comment",
+      cursorDeferred: true,
+      resumedMaterialized: 1,
+      finalEventCount: 1,
+      finalCursor: "communityPosts/comment-400/comments/comment-400"
+    }
+  }, "persistent round-robin priority gives every ready type bounded progress and safely resumes deferred sources");
+}
+
+{
+  const adapter = new RunBudgetAdapter(3);
+  const first = await runNotificationProcessor({
+    adapter,
+    ownerId: "source-budget-one",
+    sendPush: async () => {},
+    logger: { info() {}, error() {} },
+    limits: { maxSources: 1, maxMaterializations: 10, maxEvents: 10, maxSends: 10, maxRuntimeMs: 1_000 }
+  });
+  assert.equal(first.scanned, 1, "the whole-run source scan budget stops a backlog after one safe cursor step");
+  assert.equal(first.materialized, 1);
+  assert.equal(first.budgetReached, true);
+  assert.equal(adapter.sourceCursors.get("reaction").path, "posts/source-0/reactions/reaction-0");
+
+  const second = await runNotificationProcessor({
+    adapter,
+    ownerId: "materialization-budget-two",
+    sendPush: async () => {},
+    logger: { info() {}, error() {} },
+    limits: { maxSources: 10, maxMaterializations: 1, maxEvents: 10, maxSends: 10, maxRuntimeMs: 1_000 }
+  });
+  assert.equal(second.scanned, 1, "the materialization budget leaves the next complete source for a later run");
+  assert.equal(second.materialized, 1);
+  assert.equal(second.budgetReached, true);
+  assert.equal(adapter.sourceCursors.get("reaction").path, "posts/source-1/reactions/reaction-1");
+
+  const third = await runNotificationProcessor({
+    adapter,
+    ownerId: "source-resume-three",
+    sendPush: async () => {},
+    logger: { info() {}, error() {} },
+    limits: { maxSources: 10, maxMaterializations: 10, maxEvents: 10, maxSends: 10, maxRuntimeMs: 1_000 }
+  });
+  assert.equal(third.scanned, 1);
+  assert.equal(adapter.sourceCursors.get("reaction").path, "posts/source-2/reactions/reaction-2");
+  assert.equal(adapter.events.size, 3, "resumed source pages create each deterministic event once");
+  assert.equal([...adapter.events.values()].every((event) => event.status === "delivered"), true);
+}
+
+{
+  const adapter = new RunBudgetAdapter(2, { advanceAfterMaterialization: 100 });
+  const limits = { maxSources: 10, maxMaterializations: 10, maxEvents: 10, maxSends: 10, maxRuntimeMs: 100 };
+  const first = await runNotificationProcessor({
+    adapter,
+    ownerId: "deadline-one",
+    sendPush: async () => {},
+    logger: { info() {}, error() {} },
+    limits
+  });
+  assert.equal(first.scanned, 1, "the deadline starts before source materialization");
+  assert.equal(first.inspected, 0, "delivery cannot receive a fresh timer after source work exhausts the shared deadline");
+  assert.equal(first.budgetReached, true);
+  assert.equal(adapter.sourceCursors.get("reaction").path, "posts/source-0/reactions/reaction-0");
+
+  const second = await runNotificationProcessor({
+    adapter,
+    ownerId: "deadline-two",
+    sendPush: async () => {},
+    logger: { info() {}, error() {} },
+    limits
+  });
+  assert.equal(second.scanned, 1);
+  assert.equal(second.inspected, 0);
+  assert.equal(adapter.sourceCursors.get("reaction").path, "posts/source-1/reactions/reaction-1");
+  assert.equal(adapter.events.size, 2, "deadline resumption neither loses nor duplicates materialized events");
+
+  adapter.advanceAfterMaterialization = 0;
+  const resumed = await runNotificationProcessor({
+    adapter,
+    ownerId: "deadline-resume",
+    sendPush: async () => {},
+    logger: { info() {}, error() {} },
+    limits
+  });
+  assert.equal(resumed.scanned, 0);
+  assert.equal(resumed.delivered, 2, "a later run resumes delivery after the source backlog is safely cursor-complete");
 }
 
 console.log("Notification processor behavior passed");

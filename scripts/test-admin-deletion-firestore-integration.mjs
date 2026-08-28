@@ -208,23 +208,21 @@ for (const stats of [
   assert.equal((await db.doc("system/accountStats").get()).data().count, 1);
 }
 
-// Any reservation for the target UID, including a trusted recreation race, blocks completion.
+// UID-owned reservations stay locked until finalization, then disappear atomically.
 {
   const { db, clock, makeAdapter } = scenario();
   await putMany(db, [
     ["adminDeletionJobs/target", processingJob({ phase: "auth-deleted", now: clock.now })],
     ["usernames/recreated_name", { uid: "target", username: "recreated_name" }]
   ]);
-  await assert.rejects(
-    makeAdapter().finalize(
-      "target",
-      "worker-token",
-      Timestamp.fromMillis(clock.now),
-      Timestamp.fromMillis(clock.now + 1_000)
-    ),
-    (error) => error.code === "profile-recreated"
+  await makeAdapter().finalize(
+    "target",
+    "worker-token",
+    Timestamp.fromMillis(clock.now),
+    Timestamp.fromMillis(clock.now + COMPLETION_RETENTION_MS)
   );
-  assert.equal((await db.doc("adminDeletionJobs/target").get()).data().status, "processing");
+  assert.equal((await db.doc("usernames/recreated_name").get()).exists, false);
+  assert.equal(isExactCompletionMarker((await db.doc("adminDeletionJobs/target").get()).data()), true);
 }
 
 // The external Auth boundary is lease-owned, renewable, and safely reclaimable after expiry.
@@ -302,9 +300,23 @@ for (const stats of [
     ["users/target", validProfile(clock.now)],
     ["usernames/target_name", { uid: "target", username: "target_name" }],
     ["usernames/legacy_target_name", { uid: "target", username: "legacy_target_name" }],
+    ["users/prior-holder", { uid: "prior-holder", username: "renamed_prior_holder", banned: false }],
+    ["usernames/renamed_prior_holder", { uid: "prior-holder", username: "renamed_prior_holder" }],
+    ["posts/prior-holder-post", { authorId: "prior-holder", username: "target_name", content: "prior owner" }],
+    ["posts/prior-holder-post/comments/prior-holder-comment", { uid: "prior-holder", username: "target_name" }],
+    ["posts/prior-holder-post/comments/prior-holder-comment/replies/prior-holder-reply", { uid: "prior-holder", username: "target_name" }],
+    ["communityPosts/prior-holder-community", { authorId: "prior-holder", username: "target_name", content: "prior owner" }],
     ["system/accountStats", { count: 2, limit: 500, updatedAt: Timestamp.fromMillis(clock.now - 1_000) }]
   ];
   const expectedDeletedPaths = new Set(["users/target", "usernames/target_name", "usernames/legacy_target_name"]);
+  const priorHolderPaths = [
+    "users/prior-holder",
+    "usernames/renamed_prior_holder",
+    "posts/prior-holder-post",
+    "posts/prior-holder-post/comments/prior-holder-comment",
+    "posts/prior-holder-post/comments/prior-holder-comment/replies/prior-holder-reply",
+    "communityPosts/prior-holder-community"
+  ];
   let entryNumber = 0;
   for (const descriptor of cleanupQueries("target", "target_name")) {
     entryNumber += 1;
@@ -362,7 +374,11 @@ for (const stats of [
   const adapter = makeAdapter("complete");
   const originalRemoveProfileBarrier = adapter.removeProfileBarrier.bind(adapter);
   adapter.removeProfileBarrier = async (...parameters) => {
+    assert.equal((await db.doc("usernames/target_name").get()).exists, true,
+      "the current holder reservation survives the first destructive sweep");
     await originalRemoveProfileBarrier(...parameters);
+    assert.equal((await db.doc("usernames/target_name").get()).exists, true,
+      "the reservation remains after the profile barrier");
     await putMany(db, [
       ["follows/after-profile-barrier", { followerId: "target", followingId: "other" }],
       ["usernames/recreated-after-barrier", { uid: "target", username: "recreated-after-barrier" }]
@@ -374,7 +390,12 @@ for (const stats of [
   let inSecondSweep = false;
   adapter.secondSweep = async (...parameters) => {
     inSecondSweep = true;
-    try { return await originalSecondSweep(...parameters); } finally { inSecondSweep = false; }
+    try {
+      const result = await originalSecondSweep(...parameters);
+      assert.equal((await db.doc("usernames/target_name").get()).exists, true,
+        "the reservation remains until the second destructive sweep completes");
+      return result;
+    } finally { inSecondSweep = false; }
   };
   const originalDeleteRefs = adapter.deleteRefs.bind(adapter);
   let injectedBehindCursor = false;
@@ -395,6 +416,8 @@ for (const stats of [
   assert.deepEqual(deletedUsers, ["target"]);
   assert.equal((await db.doc("system/accountStats").get()).data().count, 1);
   for (const path of expectedDeletedPaths) assert.equal((await db.doc(path).get()).exists, false, `${path} survived cleanup`);
+  for (const path of priorHolderPaths) assert.equal((await db.doc(path).get()).exists, true,
+    `${path} from the prior username holder was deleted`);
   const remainingReservations = await db.collection("usernames").where("uid", "==", "target").get();
   assert.equal(remainingReservations.empty, true);
   const marker = (await db.doc("adminDeletionJobs/target").get()).data();

@@ -10,6 +10,16 @@ export const NOTIFICATION_LEASE_MS = 5 * 60 * 1000;
 export const NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const ACCOUNT_LIMIT = 500;
 export const MAX_SUBSCRIPTIONS_PER_RECIPIENT = 100;
+export const MAX_NOTIFICATION_ATTEMPTS = 5;
+export const MAX_NOTIFICATION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export const NOTIFICATION_RETRY_BASE_MS = 5 * 60 * 1000;
+export const NOTIFICATION_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
+export const MAX_NOTIFICATION_EVENTS_PER_RUN = 100;
+export const MAX_NOTIFICATION_SENDS_PER_RUN = 500;
+export const MAX_NOTIFICATION_SOURCES_PER_RUN = 100;
+export const MAX_NOTIFICATION_MATERIALIZATIONS_PER_RUN = 500;
+export const MAX_NOTIFICATION_RUNTIME_MS = 4 * 60 * 1000;
+export const TERMINAL_NOTIFICATION_STATUSES = Object.freeze(["delivered", "suppressed", "exhausted"]);
 
 const TYPE_SET = new Set(NOTIFICATION_TYPES);
 const PAYLOADS = Object.freeze({
@@ -45,6 +55,18 @@ export const timestampMillis = (value) => {
     return Number.NaN;
   }
 };
+
+export const retryDelayMs = (attempts) => {
+  const exponent = Math.max(0, Math.min(31, Number.isInteger(attempts) ? attempts - 1 : 0));
+  return Math.min(NOTIFICATION_RETRY_MAX_MS, NOTIFICATION_RETRY_BASE_MS * (2 ** exponent));
+};
+
+export const shouldExhaustNotification = (event, nowMillis) =>
+  Number.isInteger(event?.attempts)
+  && (event.attempts >= MAX_NOTIFICATION_ATTEMPTS
+    || (Number.isFinite(timestampMillis(event.createdAt))
+      && Number.isFinite(nowMillis)
+      && nowMillis - timestampMillis(event.createdAt) >= MAX_NOTIFICATION_AGE_MS));
 
 const nonempty = (value) => typeof value === "string" && value.length > 0;
 const exactKeys = (value, keys) => value && typeof value === "object"
@@ -151,21 +173,28 @@ export const queuedEvent = ({ type, actorUid, recipientUid, route, sourceCreated
 
 export const isValidQueueEvent = (event) => {
   const baseKeys = ["type", "actorUid", "recipientUid", "route", "sourceCreatedAt", "status", "attempts", "createdAt", "updatedAt"];
-  const keys = event?.status === "processing"
-    ? [...baseKeys, "leaseOwner", "leaseToken", "leaseExpiresAt"]
+  const expectedKeySets = event?.status === "processing"
+    ? [[...baseKeys, "leaseOwner", "leaseToken", "leaseExpiresAt"]]
     : event?.status === "failed"
-      ? [...baseKeys, "errorCode"]
-      : baseKeys;
-  if (!exactKeys(event, keys) || !TYPE_SET.has(event.type) || PAYLOADS[event.type].url !== event.route
+      ? [[...baseKeys, "errorCode"], [...baseKeys, "errorCode", "retryAt"]]
+      : ["suppressed", "exhausted"].includes(event?.status)
+        ? [[...baseKeys, "errorCode"]]
+        : [baseKeys];
+  if (!expectedKeySets.some((keys) => exactKeys(event, keys))
+    || !TYPE_SET.has(event.type) || PAYLOADS[event.type].url !== event.route
     || !nonempty(event.actorUid) || !nonempty(event.recipientUid) || event.actorUid === event.recipientUid
     || !Number.isInteger(event.attempts) || event.attempts < 0
-    || !["pending", "processing", "failed", "delivered"].includes(event.status)
+    || !["pending", "processing", "failed", ...TERMINAL_NOTIFICATION_STATUSES].includes(event.status)
     || !Number.isFinite(timestampMillis(event.sourceCreatedAt))
     || !Number.isFinite(timestampMillis(event.createdAt))
     || !Number.isFinite(timestampMillis(event.updatedAt))) return false;
   if (event.status === "processing") return event.attempts >= 1 && nonempty(event.leaseOwner)
     && nonempty(event.leaseToken) && Number.isFinite(timestampMillis(event.leaseExpiresAt));
-  if (event.status === "failed") return event.attempts >= 1 && /^[A-Z0-9_]+$/.test(event.errorCode);
+  if (["failed", "suppressed", "exhausted"].includes(event.status)) {
+    return (event.status !== "failed" || event.attempts >= 1)
+      && /^[A-Z0-9_]+$/.test(event.errorCode)
+      && (!Object.hasOwn(event, "retryAt") || Number.isFinite(timestampMillis(event.retryAt)));
+  }
   return true;
 };
 

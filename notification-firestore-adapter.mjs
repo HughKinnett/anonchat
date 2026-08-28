@@ -1,11 +1,17 @@
 import {
   ACCOUNT_LIMIT,
+  MAX_NOTIFICATION_ATTEMPTS,
+  MAX_NOTIFICATION_SENDS_PER_RUN,
   MAX_SUBSCRIPTIONS_PER_RECIPIENT,
   NOTIFICATION_LEASE_MS,
   NOTIFICATION_PAGE_LIMIT,
+  NOTIFICATION_TYPES,
   canonicalSubscriptionVersion,
   compareSourceCursors,
   isValidQueueEvent,
+  retryDelayMs,
+  shouldExhaustNotification,
+  TERMINAL_NOTIFICATION_STATUSES,
   timestampMillis
 } from "./notification-policy.mjs";
 
@@ -63,6 +69,7 @@ export class FirestoreNotificationAdapter {
       const cursors = Object.fromEntries(types.map((type) => [type, { createdAt: bootstrapAt, path: "\uf8ff" }]));
       transaction.set(reference, {
         cursors,
+        nextSourceType: types[0],
         bootstrapAt: this.FieldValue.delete(),
         status: "bootstrapped",
         updatedAt: this.FieldValue.serverTimestamp()
@@ -76,14 +83,31 @@ export class FirestoreNotificationAdapter {
     return snapshot.exists ? snapshot.data().cursors?.[type] : undefined;
   }
 
-  async scanSourcePage(type, suppliedCursor) {
+  async sourcePriority() {
+    const snapshot = await this.stateRef().get();
+    const stored = snapshot.exists ? snapshot.data().nextSourceType : undefined;
+    return NOTIFICATION_TYPES.includes(stored) ? stored : NOTIFICATION_TYPES[0];
+  }
+
+  async prioritizeSourceType(type) {
+    if (!NOTIFICATION_TYPES.includes(type)) throw codedError("invalid-source-type");
+    await this.stateRef().update({
+      nextSourceType: type,
+      updatedAt: this.FieldValue.serverTimestamp()
+    });
+  }
+
+  async scanSourcePage(type, suppliedCursor, requestedLimit = NOTIFICATION_PAGE_LIMIT) {
     const descriptor = SOURCE_COLLECTIONS[type];
     if (!descriptor) throw codedError("invalid-source-type");
     const cursor = suppliedCursor ?? await this.storedCursor(type);
     const base = descriptor.group
       ? this.db.collectionGroup(descriptor.collection)
       : this.db.collection(descriptor.collection);
-    let query = base.orderBy("createdAt").orderBy(this.FieldPath.documentId()).limit(NOTIFICATION_PAGE_LIMIT);
+    const pageLimit = Number.isInteger(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, NOTIFICATION_PAGE_LIMIT)
+      : NOTIFICATION_PAGE_LIMIT;
+    let query = base.orderBy("createdAt").orderBy(this.FieldPath.documentId()).limit(pageLimit);
     if (cursor) {
       query = cursor.path === "\uf8ff"
         ? query.startAfter(cursor.createdAt)
@@ -95,14 +119,20 @@ export class FirestoreNotificationAdapter {
     return { items, nextCursor: last ? { createdAt: last.data.createdAt, path: last.path } : undefined };
   }
 
-  async advanceSourceCursor(type, cursor) {
+  async advanceSourceCursor(type, cursor, nextSourceType) {
+    if (!NOTIFICATION_TYPES.includes(type)
+      || nextSourceType !== undefined && !NOTIFICATION_TYPES.includes(nextSourceType)) {
+      throw codedError("invalid-source-type");
+    }
     await this.db.runTransaction(async (transaction) => {
       const reference = this.stateRef();
       const snapshot = await transaction.get(reference);
       if (!snapshot.exists) throw codedError("cursor-state-missing");
       const current = snapshot.data().cursors?.[type];
-      if (current && compareSourceCursors(cursor, current) <= 0) return;
-      transaction.update(reference, `cursors.${type}`, cursor);
+      const updates = {};
+      if (!current || compareSourceCursors(cursor, current) > 0) updates[`cursors.${type}`] = cursor;
+      if (nextSourceType !== undefined) updates.nextSourceType = nextSourceType;
+      if (Object.keys(updates).length) transaction.update(reference, updates);
     });
   }
 
@@ -134,30 +164,85 @@ export class FirestoreNotificationAdapter {
   }
 
   async createEvent(eventId, data) {
+    return (await this.createEvents([[eventId, data]])) === 1;
+  }
+
+  async createEvents(entries) {
+    if (!Array.isArray(entries) || entries.length > ACCOUNT_LIMIT - 1
+      || entries.some((entry) => !Array.isArray(entry) || entry.length !== 2
+        || typeof entry[0] !== "string" || !entry[0])) throw codedError("event-batch-invalid");
+    if (!entries.length) return 0;
+    const uniqueEntries = new Map(entries);
+    if (uniqueEntries.size !== entries.length) throw codedError("event-batch-invalid");
     return this.db.runTransaction(async (transaction) => {
-      const reference = this.eventRef(eventId);
-      const snapshot = await transaction.get(reference);
-      if (snapshot.exists) return false;
-      transaction.create(reference, data);
-      return true;
+      const prepared = [...uniqueEntries].map(([eventId, data]) => ({
+        reference: this.eventRef(eventId),
+        data
+      }));
+      const snapshots = await transaction.getAll(...prepared.map(({ reference }) => reference));
+      let created = 0;
+      snapshots.forEach((snapshot, index) => {
+        if (snapshot.exists) return;
+        transaction.create(prepared[index].reference, prepared[index].data);
+        created += 1;
+      });
+      return created;
     });
   }
 
-  async scanEventPage(cursor) {
-    let query = this.db.collection("notificationEvents")
-      .where("status", "in", ["pending", "failed", "processing"])
-      .orderBy(this.FieldPath.documentId())
-      .limit(NOTIFICATION_PAGE_LIMIT);
-    if (cursor) query = query.startAfter(cursor);
+  async scanEligibleStatus({ status, dueField, cursor }) {
+    let query = this.db.collection("notificationEvents").where("status", "==", status);
+    if (dueField) {
+      query = query
+        .where(dueField, "<=", this.timestamp(this.now()))
+        .orderBy(dueField)
+        .orderBy(this.FieldPath.documentId());
+      if (cursor) query = query.startAfter(cursor.at, cursor.id);
+    } else {
+      query = query.orderBy(this.FieldPath.documentId());
+      if (cursor) query = query.startAfter(cursor);
+    }
+    query = query.limit(NOTIFICATION_PAGE_LIMIT);
     const snapshot = await query.get();
-    return {
-      items: snapshot.docs.map((document) => ({ id: document.id, data: document.data() })),
-      nextCursor: snapshot.docs.at(-1)?.id
-    };
+    return snapshot.docs.map((document) => {
+      const data = document.data();
+      return {
+        id: document.id,
+        data,
+        cursor: dueField ? { at: data[dueField], id: document.id } : document.id
+      };
+    });
+  }
+
+  async scanEventPage(cursor = {}) {
+    const descriptors = [
+      { status: "pending" },
+      { status: "failed", dueField: "retryAt" },
+      { status: "processing", dueField: "leaseExpiresAt" }
+    ];
+    const streams = await Promise.all(descriptors.map(async (descriptor) => ({
+      ...descriptor,
+      items: await this.scanEligibleStatus({ ...descriptor, cursor: cursor?.[descriptor.status] })
+    })));
+    const nextCursor = { ...cursor };
+    const items = [];
+    while (items.length < NOTIFICATION_PAGE_LIMIT && streams.some((stream) => stream.items.length)) {
+      for (const stream of streams) {
+        const item = stream.items.shift();
+        if (!item) continue;
+        nextCursor[stream.status] = item.cursor;
+        items.push({ id: item.id, data: item.data });
+        if (items.length >= NOTIFICATION_PAGE_LIMIT) break;
+      }
+    }
+    return { items, nextCursor: items.length ? nextCursor : undefined };
   }
 
   claimable(event) {
-    return event?.status === "pending" || event?.status === "failed" || (
+    return event?.status === "pending" || (
+      event?.status === "failed"
+      && (!Number.isFinite(timestampMillis(event.retryAt)) || timestampMillis(event.retryAt) <= this.now())
+    ) || (
       event?.status === "processing"
       && Number.isFinite(timestampMillis(event.leaseExpiresAt))
       && timestampMillis(event.leaseExpiresAt) <= this.now()
@@ -173,9 +258,29 @@ export class FirestoreNotificationAdapter {
     return this.db.runTransaction(async (transaction) => {
       const reference = this.eventRef(eventId);
       const snapshot = await transaction.get(reference);
-      if (!snapshot.exists || !this.claimable(snapshot.data())) return null;
+      if (!snapshot.exists) return null;
       const event = snapshot.data();
-      if (!isValidQueueEvent(event)) throw codedError("invalid-event");
+      if (!isValidQueueEvent(event)) {
+        transaction.set(reference, {
+          status: "exhausted",
+          attempts: Number.isInteger(event?.attempts) && event.attempts >= 0 ? event.attempts : 0,
+          createdAt: Number.isFinite(timestampMillis(event?.createdAt)) ? event.createdAt : this.timestamp(this.now()),
+          updatedAt: this.timestamp(this.now()),
+          errorCode: "INVALID_EVENT"
+        });
+        return { id: eventId, terminal: "exhausted" };
+      }
+      if (event.status === "processing" && !this.claimable(event)) return null;
+      if (shouldExhaustNotification(event, this.now())) {
+        transaction.set(reference, this.settledEvent(
+          event,
+          "exhausted",
+          this.timestamp(this.now()),
+          "DELIVERY_EXHAUSTED"
+        ));
+        return { id: eventId, terminal: "exhausted" };
+      }
+      if (!this.claimable(event)) return null;
       const leaseToken = this.tokenFactory();
       const claimed = {
         type: event.type,
@@ -246,7 +351,7 @@ export class FirestoreNotificationAdapter {
     });
   }
 
-  settledEvent(event, status, updatedAt, errorCode) {
+  settledEvent(event, status, updatedAt, errorCode, retryAt) {
     const settled = {
       type: event.type,
       actorUid: event.actorUid,
@@ -259,6 +364,7 @@ export class FirestoreNotificationAdapter {
       updatedAt
     };
     if (errorCode) settled.errorCode = errorCode;
+    if (retryAt) settled.retryAt = retryAt;
     return settled;
   }
 
@@ -272,51 +378,123 @@ export class FirestoreNotificationAdapter {
     });
   }
 
-  async failEvent(eventId, token, errorCode) {
+  async suppressEvent(eventId, token) {
     await this.db.runTransaction(async (transaction) => {
       const reference = this.eventRef(eventId);
       const snapshot = await transaction.get(reference);
       if (!snapshot.exists) throw codedError("lease-lost");
       this.assertLease(snapshot.data(), token);
-      transaction.set(reference, this.settledEvent(snapshot.data(), "failed", this.timestamp(this.now()), errorCode));
+      transaction.set(reference, this.settledEvent(
+        snapshot.data(),
+        "suppressed",
+        this.timestamp(this.now()),
+        "RECIPIENT_UNAVAILABLE"
+      ));
     });
   }
 
-  async purgeEventDeliveries(eventId) {
+  async deferEvent(eventId, token) {
+    await this.db.runTransaction(async (transaction) => {
+      const reference = this.eventRef(eventId);
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists) throw codedError("lease-lost");
+      this.assertLease(snapshot.data(), token);
+      const event = snapshot.data();
+      transaction.set(reference, this.settledEvent({
+        ...event,
+        attempts: Math.max(0, event.attempts - 1)
+      }, "pending", this.timestamp(this.now())));
+    });
+  }
+
+  async failEvent(eventId, token, errorCode) {
+    return this.db.runTransaction(async (transaction) => {
+      const reference = this.eventRef(eventId);
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists) throw codedError("lease-lost");
+      this.assertLease(snapshot.data(), token);
+      const event = snapshot.data();
+      if (shouldExhaustNotification(event, this.now()) || event.attempts >= MAX_NOTIFICATION_ATTEMPTS) {
+        transaction.set(reference, this.settledEvent(
+          event,
+          "exhausted",
+          this.timestamp(this.now()),
+          "DELIVERY_EXHAUSTED"
+        ));
+        return "exhausted";
+      }
+      const updatedAt = this.timestamp(this.now());
+      transaction.set(reference, this.settledEvent(
+        event,
+        "failed",
+        updatedAt,
+        errorCode,
+        this.timestamp(this.now() + retryDelayMs(event.attempts))
+      ));
+      return "failed";
+    });
+  }
+
+  async purgeEventDeliveries(eventId, maxRecords = MAX_NOTIFICATION_SENDS_PER_RUN) {
     let deleted = 0;
-    while (true) {
+    while (deleted < maxRecords) {
+      const limit = Math.min(NOTIFICATION_PAGE_LIMIT, maxRecords - deleted);
       const snapshot = await this.db.collection("notificationDeliveries")
         .where("eventId", "==", eventId)
-        .limit(NOTIFICATION_PAGE_LIMIT)
+        .limit(limit)
         .get();
-      if (snapshot.empty) return deleted;
+      if (snapshot.empty) return { deleted, complete: true };
       const batch = this.db.batch();
       snapshot.docs.forEach((document) => batch.delete(document.ref));
       await batch.commit();
       deleted += snapshot.size;
+      if (snapshot.size < limit) return { deleted, complete: true };
     }
+    const remaining = await this.db.collection("notificationDeliveries")
+      .where("eventId", "==", eventId)
+      .limit(1)
+      .get();
+    return { deleted, complete: remaining.empty };
   }
 
-  async purgeDeliveredBefore(cutoff) {
+  async purgeTerminalBefore(
+    cutoff,
+    maxEvents = NOTIFICATION_PAGE_LIMIT,
+    maxDeliveries = MAX_NOTIFICATION_SENDS_PER_RUN
+  ) {
     let deleted = 0;
-    while (true) {
-      const snapshot = await this.db.collection("notificationEvents")
-        .where("status", "==", "delivered")
-        .where("updatedAt", "<=", cutoff)
-        .limit(NOTIFICATION_PAGE_LIMIT)
-        .get();
-      if (snapshot.empty) return deleted;
-      for (const document of snapshot.docs) {
-        deleted += await this.purgeEventDeliveries(document.id);
-        await this.db.runTransaction(async (transaction) => {
-          const current = await transaction.get(document.ref);
-          if (!current.exists || current.data().status !== "delivered"
-            || timestampMillis(current.data().updatedAt) > timestampMillis(cutoff)) return;
-          transaction.delete(document.ref);
-          deleted += 1;
-        });
+    let inspected = 0;
+    let deliveriesDeleted = 0;
+    for (const status of TERMINAL_NOTIFICATION_STATUSES) {
+      while (inspected < maxEvents) {
+        const snapshot = await this.db.collection("notificationEvents")
+          .where("status", "==", status)
+          .where("updatedAt", "<=", cutoff)
+          .limit(Math.min(NOTIFICATION_PAGE_LIMIT, maxEvents - inspected))
+          .get();
+        if (snapshot.empty) break;
+        for (const document of snapshot.docs) {
+          inspected += 1;
+          const deliveryPurge = await this.purgeEventDeliveries(
+            document.id,
+            Math.max(0, maxDeliveries - deliveriesDeleted)
+          );
+          deleted += deliveryPurge.deleted;
+          deliveriesDeleted += deliveryPurge.deleted;
+          if (!deliveryPurge.complete) continue;
+          const removed = await this.db.runTransaction(async (transaction) => {
+            const current = await transaction.get(document.ref);
+            if (!current.exists || current.data().status !== status
+              || timestampMillis(current.data().updatedAt) > timestampMillis(cutoff)) return false;
+            transaction.delete(document.ref);
+            return true;
+          });
+          if (removed) deleted += 1;
+        }
       }
+      if (inspected >= maxEvents) break;
     }
+    return deleted;
   }
 
   async heartbeat(status, errorCode) {

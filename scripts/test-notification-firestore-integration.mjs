@@ -3,13 +3,15 @@ import { deleteApp, initializeApp } from "firebase-admin/app";
 import { FieldPath, FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { FirestoreNotificationAdapter } from "../notification-firestore-adapter.mjs";
 import {
+  MAX_NOTIFICATION_ATTEMPTS,
   MAX_SUBSCRIPTIONS_PER_RECIPIENT,
   NOTIFICATION_LEASE_MS,
   NOTIFICATION_RETENTION_MS,
   NOTIFICATION_TYPES,
   createDeliveryId,
   createSubscriptionVersionFingerprint,
-  queuedEvent
+  queuedEvent,
+  retryDelayMs
 } from "../notification-policy.mjs";
 
 assert.ok(process.env.FIRESTORE_EMULATOR_HOST, "Firestore emulator is required");
@@ -29,6 +31,13 @@ const putMany = async (entries) => {
     await batch.commit();
   }
 };
+const deleteMany = async (paths) => {
+  for (let offset = 0; offset < paths.length; offset += 400) {
+    const batch = db.batch();
+    paths.slice(offset, offset + 400).forEach((path) => batch.delete(db.doc(path)));
+    await batch.commit();
+  }
+};
 
 const bootstrapStartedAt = Date.now();
 assert.equal(await adapter.bootstrapSourceCursors(NOTIFICATION_TYPES), true);
@@ -36,6 +45,7 @@ const bootstrapFinishedAt = Date.now();
 assert.equal(await adapter.bootstrapSourceCursors(NOTIFICATION_TYPES), false);
 const state = (await db.doc("system/notificationProcessor").get()).data();
 assert.deepEqual(Object.keys(state.cursors).sort(), [...NOTIFICATION_TYPES].sort());
+assert.equal(state.nextSourceType, "reaction", "bootstrap persists the first fair source priority");
 for (const cursor of Object.values(state.cursors)) {
   assert.ok(cursor.createdAt.toMillis() >= bootstrapStartedAt - 5_000 && cursor.createdAt.toMillis() <= bootstrapFinishedAt + 5_000, "bootstrap cursor uses Firestore server time, not the injected processor clock");
   assert.notEqual(cursor.createdAt.toMillis(), clock.now);
@@ -66,10 +76,21 @@ assert.deepEqual(reactionPage.items.map((item) => item.path), ["posts/source-pos
 const precisePage = await adapter.scanSourcePage("reveal-request");
 assert.deepEqual(precisePage.items.map((item) => item.path), ["reveals/z-earlier-path", "reveals/a-later-path"],
   "Firestore scanning orders nanoseconds before full path inside one millisecond");
-await adapter.advanceSourceCursor("reveal-request", { createdAt: preciseEarly, path: "reveals/z-earlier-path" });
-const persistedPreciseCursor = (await db.doc("system/notificationProcessor").get()).data().cursors["reveal-request"];
+await adapter.advanceSourceCursor(
+  "reveal-request",
+  { createdAt: preciseEarly, path: "reveals/z-earlier-path" },
+  "comment"
+);
+const stateAfterPreciseCursor = (await db.doc("system/notificationProcessor").get()).data();
+const persistedPreciseCursor = stateAfterPreciseCursor.cursors["reveal-request"];
 assert.equal(persistedPreciseCursor.createdAt.seconds, preciseEarly.seconds);
 assert.equal(persistedPreciseCursor.createdAt.nanoseconds, preciseEarly.nanoseconds);
+assert.equal(stateAfterPreciseCursor.nextSourceType, "comment",
+  "cursor advancement atomically rotates the persistent source priority");
+await adapter.prioritizeSourceType("room-message");
+assert.equal(await adapter.sourcePriority(), "room-message",
+  "an interrupted source type can persist next-run priority without advancing its cursor");
+await adapter.prioritizeSourceType("reaction");
 const laterNanosecondPage = await adapter.scanSourcePage("reveal-request");
 assert.deepEqual(laterNanosecondPage.items.map((item) => item.path), ["reveals/a-later-path"],
   "a later-nanosecond source progresses even when its full path sorts earlier");
@@ -88,6 +109,13 @@ assert.equal((await db.doc("system/notificationProcessor").get()).data().cursors
 
 await putMany([
   ["users/post-owner", { uid: "post-owner", banned: false }],
+  ["users/recipient", { uid: "recipient", banned: false }],
+  ["users/banned-recipient", { uid: "banned-recipient", banned: true }],
+  ["users/admin-deleting-recipient", { uid: "admin-deleting-recipient", banned: true }],
+  ["users/self-deleting-recipient", { uid: "self-deleting-recipient", banned: false }],
+  ["users/transition-recipient", { uid: "transition-recipient", banned: false }],
+  ["adminDeletionJobs/admin-deleting-recipient", { status: "queued" }],
+  ["accountDeletionRequests/self-deleting-recipient", { status: "queued" }],
   ["posts/post-a", { authorId: "post-owner" }],
   ["roomMembers/room-a_sender", { roomId: "room-a", uid: "sender" }],
   ["roomMembers/room-a_member-b", { roomId: "room-a", uid: "member-b" }],
@@ -99,6 +127,13 @@ assert.equal(await adapter.postAuthor({ path: "posts/post-a/comments/comment-a" 
 assert.deepEqual((await adapter.roomMembers({ data: { roomId: "room-a" } })).sort(), ["member-a", "member-b", "sender"]);
 assert.equal(await adapter.recipientAvailable("post-owner"), true);
 assert.equal(await adapter.recipientAvailable("missing-user"), false);
+assert.equal(await adapter.recipientAvailable("banned-recipient"), false);
+assert.equal(await adapter.recipientAvailable("admin-deleting-recipient"), false);
+assert.equal(await adapter.recipientAvailable("self-deleting-recipient"), false);
+assert.equal(await adapter.recipientAvailable("transition-recipient"), true);
+await db.doc("adminDeletionJobs/transition-recipient").set({ status: "queued" });
+assert.equal(await adapter.recipientAvailable("transition-recipient"), false,
+  "recipient availability is re-readable after an event was queued");
 assert.deepEqual((await adapter.listSubscriptions("recipient")).map((subscription) => subscription.id), ["sub-a"]);
 
 const queryShape = {};
@@ -135,6 +170,61 @@ await putMany(cappedSubscriptions.slice(MAX_SUBSCRIPTIONS_PER_RECIPIENT));
 await assert.rejects(() => adapter.listSubscriptions("cap-user"), (error) => error.code === "subscription-limit",
   "101 subscriptions fail closed instead of truncating or paging");
 
+const activeEvent = (overrides = {}) => ({
+  ...queuedEvent({
+    type: "reaction",
+    actorUid: "actor",
+    recipientUid: "recipient",
+    route: "/timeline.html",
+    sourceCreatedAt: Timestamp.fromMillis(clock.now - 1),
+    now: Timestamp.fromMillis(clock.now)
+  }),
+  ...overrides
+});
+const futureRetryPaths = Array.from({ length: 105 }, (_, index) =>
+  `notificationEvents/a-future-${String(index).padStart(3, "0")}`);
+const readyEventPaths = [
+  "notificationEvents/z-pending-ready",
+  "notificationEvents/z-failed-due",
+  "notificationEvents/z-processing-expired"
+];
+const liveLeasePath = "notificationEvents/a-processing-live";
+await putMany([
+  ...futureRetryPaths.map((path) => [path, activeEvent({
+    status: "failed",
+    attempts: 1,
+    errorCode: "DELIVERY_TRANSIENT",
+    retryAt: Timestamp.fromMillis(clock.now + 60_000)
+  })]),
+  [readyEventPaths[0], activeEvent()],
+  [readyEventPaths[1], activeEvent({
+    status: "failed",
+    attempts: 1,
+    errorCode: "DELIVERY_TRANSIENT",
+    retryAt: Timestamp.fromMillis(clock.now)
+  })],
+  [readyEventPaths[2], activeEvent({
+    status: "processing",
+    attempts: 1,
+    leaseOwner: "expired-worker",
+    leaseToken: "expired-token",
+    leaseExpiresAt: Timestamp.fromMillis(clock.now - 1)
+  })],
+  [liveLeasePath, activeEvent({
+    status: "processing",
+    attempts: 1,
+    leaseOwner: "live-worker",
+    leaseToken: "live-token",
+    leaseExpiresAt: Timestamp.fromMillis(clock.now + NOTIFICATION_LEASE_MS)
+  })]
+]);
+assert.deepEqual(
+  (await adapter.scanEventPage()).items.map((item) => `notificationEvents/${item.id}`).sort(),
+  [...readyEventPaths].sort(),
+  "the production active scan excludes more than one page of future retries and live leases without starving later ready work"
+);
+await deleteMany([...futureRetryPaths, ...readyEventPaths, liveLeasePath]);
+
 const eventId = "a".repeat(64);
 const nowTimestamp = Timestamp.fromMillis(clock.now);
 const event = queuedEvent({
@@ -161,8 +251,12 @@ const delivery = {
 assert.equal(await adapter.markDelivery(deliveryId, delivery), true);
 assert.equal(await adapter.markDelivery(deliveryId, { ...delivery, status: "expired" }), false);
 assert.equal((await adapter.getDelivery(deliveryId)).status, "delivered");
-await adapter.failEvent(eventId, recovered.token, "DELIVERY_TRANSIENT");
-assert.equal((await db.doc(`notificationEvents/${eventId}`).get()).data().errorCode, "DELIVERY_TRANSIENT");
+assert.equal(await adapter.failEvent(eventId, recovered.token, "DELIVERY_TRANSIENT"), "failed");
+const failedEvent = (await db.doc(`notificationEvents/${eventId}`).get()).data();
+assert.equal(failedEvent.errorCode, "DELIVERY_TRANSIENT");
+assert.equal(failedEvent.retryAt.toMillis() - failedEvent.updatedAt.toMillis(), retryDelayMs(failedEvent.attempts));
+assert.equal(await adapter.claimEvent(eventId, "too-early-worker"), null, "bounded backoff blocks an immediate retry");
+clock.now = failedEvent.retryAt.toMillis();
 const retry = await adapter.claimEvent(eventId, "worker-c");
 await adapter.completeEvent(eventId, retry.token);
   const deliveredEvent = (await db.doc(`notificationEvents/${eventId}`).get()).data();
@@ -170,6 +264,31 @@ await adapter.completeEvent(eventId, retry.token);
   assert.equal(Object.hasOwn(deliveredEvent, "leaseToken"), false);
   assert.equal(Object.hasOwn(deliveredEvent, "errorCode"), false);
   assert.equal((await adapter.scanEventPage()).items.some((item) => item.id === eventId), false, "delivered retention records do not consume the active queue scan");
+
+const exhaustedEventId = "e".repeat(64);
+await db.doc(`notificationEvents/${exhaustedEventId}`).set({
+  ...queuedEvent({
+    type: "comment",
+    actorUid: "actor",
+    recipientUid: "recipient",
+    route: "/timeline.html",
+    sourceCreatedAt: Timestamp.fromMillis(clock.now - 1),
+    now: Timestamp.fromMillis(clock.now)
+  }),
+  status: "failed",
+  attempts: MAX_NOTIFICATION_ATTEMPTS - 1,
+  errorCode: "DELIVERY_TRANSIENT",
+  retryAt: Timestamp.fromMillis(clock.now)
+});
+const finalAttempt = await adapter.claimEvent(exhaustedEventId, "final-attempt-worker");
+assert.equal(finalAttempt.data.attempts, MAX_NOTIFICATION_ATTEMPTS);
+assert.equal(await adapter.failEvent(exhaustedEventId, finalAttempt.token, "DELIVERY_TRANSIENT"), "exhausted");
+const exhaustedEvent = (await db.doc(`notificationEvents/${exhaustedEventId}`).get()).data();
+assert.equal(exhaustedEvent.status, "exhausted");
+assert.equal(exhaustedEvent.errorCode, "DELIVERY_EXHAUSTED");
+assert.equal(Object.hasOwn(exhaustedEvent, "retryAt"), false);
+assert.equal((await adapter.scanEventPage()).items.some((item) => item.id === exhaustedEventId), false,
+  "dead-letter events never re-enter active delivery scans");
 
 const expiredDelivery = (deliveryEventId, subscriptionId, fingerprint) => ({
   eventId: deliveryEventId,
@@ -251,9 +370,10 @@ assert.equal((await db.doc(`notificationDeliveries/${expiredDeliveryId}`).get())
 await adapter.heartbeat("completed");
 assert.equal((await db.doc("system/notificationProcessor").get()).data().status, "completed");
 clock.now += NOTIFICATION_RETENTION_MS + 1;
-const purged = await adapter.purgeDeliveredBefore(Timestamp.fromMillis(clock.now - NOTIFICATION_RETENTION_MS));
-assert.equal(purged, 3, "the delivered event and both version-specific delivery markers are purged together");
+const purged = await adapter.purgeTerminalBefore(Timestamp.fromMillis(clock.now - NOTIFICATION_RETENTION_MS));
+assert.equal(purged, 4, "delivered and dead-letter events plus version-specific markers are retained then purged");
 assert.equal((await db.doc(`notificationEvents/${eventId}`).get()).exists, false);
+assert.equal((await db.doc(`notificationEvents/${exhaustedEventId}`).get()).exists, false);
 assert.equal((await db.doc(`notificationDeliveries/${deliveryId}`).get()).exists, false);
 assert.equal((await db.doc(`notificationDeliveries/${expiredDeliveryId}`).get()).exists, false);
 

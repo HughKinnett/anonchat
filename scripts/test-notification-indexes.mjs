@@ -14,5 +14,13 @@ assert.ok(indexes.indexes.some((index) => index.collectionGroup === "notificatio
     { fieldPath: "status", order: "ASCENDING" },
     { fieldPath: "updatedAt", order: "ASCENDING" }
   ])), "delivered-event retention cleanup has its production index");
+for (const eligibilityField of ["retryAt", "leaseExpiresAt"]) {
+  assert.ok(indexes.indexes.some((index) => index.collectionGroup === "notificationEvents"
+    && index.queryScope === "COLLECTION"
+    && JSON.stringify(index.fields) === JSON.stringify([
+      { fieldPath: "status", order: "ASCENDING" },
+      { fieldPath: eligibilityField, order: "ASCENDING" }
+    ])), `${eligibilityField} supports an exact due-work notification scan`);
+}
 
 console.log("Notification Firestore indexes passed");

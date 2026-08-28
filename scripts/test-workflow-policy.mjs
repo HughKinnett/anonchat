@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  DELETION_WORKFLOW_URL,
   DELETION_WORKFLOW_PATH,
+  DEPLOY_WORKFLOW_PATH,
   RULES_WORKFLOW_PATH,
   parseWorkflow,
   validateDeletionWorkflow,
+  validateDeployWorkflow,
   validatePackageScripts,
   validateRulesWorkflow
 } from "../workflow-policy.mjs";
@@ -16,9 +19,12 @@ const assertRejected = (validator, workflow, label) => assert.notDeepEqual(valid
 const clone = (workflow) => structuredClone(workflow);
 
 const deletionWorkflow = await readWorkflow(DELETION_WORKFLOW_PATH);
+const deployWorkflow = await readWorkflow(DEPLOY_WORKFLOW_PATH);
 const rulesWorkflow = await readWorkflow(RULES_WORKFLOW_PATH);
 const packageJson = JSON.parse(await readFile(new URL("package.json", repositoryRoot), "utf8"));
+const adminHtml = await readFile(new URL("admin.html", repositoryRoot), "utf8");
 assertValid(validateDeletionWorkflow(deletionWorkflow), "trusted deletion workflow");
+assertValid(validateDeployWorkflow(deployWorkflow), "Firebase production deploy workflow");
 assertValid(validateRulesWorkflow(rulesWorkflow), "Firestore rules CI workflow");
 assertValid(validatePackageScripts(packageJson), "workflow package scripts");
 assert.deepEqual(rulesWorkflow.on.pull_request.paths, [
@@ -27,25 +33,40 @@ assert.deepEqual(rulesWorkflow.on.pull_request.paths, [
   "firebase.json",
   "package.json",
   "package-lock.json",
-  ".github/workflows/firestore-rules-ci.yml",
-  ".github/workflows/process-admin-deletions.yml",
-  ".github/workflows/process-notifications.yml",
-  "workflow-policy.mjs",
-  "notification-*.mjs",
-  "push-config.mjs",
-  "sw.js",
-  "timeline.js",
-  "community.js",
+  ".github/workflows/**",
+  "*.js",
+  "*.mjs",
+  "*.html",
+  "*.css",
+  "*.webmanifest",
   "scripts/**"
-], "Firestore CI must run when trusted processors and notification clients change");
+], "release CI must run for workflows and every root client/policy surface");
 
-const missingWorkflowPolicyPath = clone(rulesWorkflow);
-missingWorkflowPolicyPath.on.pull_request.paths = missingWorkflowPolicyPath.on.pull_request.paths.filter((path) => path !== "workflow-policy.mjs");
-assertRejected(validateRulesWorkflow, missingWorkflowPolicyPath, "missing workflow-policy.mjs PR coverage");
+for (const requiredPath of rulesWorkflow.on.pull_request.paths) {
+  const missingPath = clone(rulesWorkflow);
+  missingPath.on.pull_request.paths = missingPath.on.pull_request.paths.filter((path) => path !== requiredPath);
+  assertRejected(validateRulesWorkflow, missingPath, `missing required PR path ${requiredPath}`);
+}
 
 const changedWorkflowPolicyPath = clone(rulesWorkflow);
-changedWorkflowPolicyPath.on.pull_request.paths[changedWorkflowPolicyPath.on.pull_request.paths.indexOf("workflow-policy.mjs")] = "workflow-*.mjs";
-assertRejected(validateRulesWorkflow, changedWorkflowPolicyPath, "changed workflow-policy.mjs PR coverage");
+changedWorkflowPolicyPath.on.pull_request.paths[changedWorkflowPolicyPath.on.pull_request.paths.indexOf("*.mjs")] = "notification-*.mjs";
+assertRejected(validateRulesWorkflow, changedWorkflowPolicyPath, "narrowed root policy PR coverage");
+
+for (const requiredSuite of [
+  "test:push-rules",
+  "test:push",
+  "test:self-delete",
+  "test:legacy-migration",
+  "test:admin-dashboard",
+  "test:auth-activity"
+]) {
+  const missingSuite = structuredClone(packageJson);
+  missingSuite.scripts["test:firestore-ci"] = missingSuite.scripts["test:firestore-ci"]
+    .split(" && ")
+    .filter((command) => command !== `npm run ${requiredSuite}`)
+    .join(" && ");
+  assert.notDeepEqual(validatePackageScripts(missingSuite), [], `removing ${requiredSuite} from release CI must be rejected`);
+}
 
 const missingServiceWorkerSuite = structuredClone(packageJson);
 missingServiceWorkerSuite.scripts["test:notification"] = missingServiceWorkerSuite.scripts["test:notification"].replace(" && node scripts/test-push-service-worker.mjs", "");
@@ -126,6 +147,19 @@ assertRejected(validateRulesWorkflow, rulesTestTimeout, "time-limited Firestore 
 const deletionProcessorConditional = clone(deletionWorkflow);
 deletionProcessorConditional.jobs.process.steps[4].if = false;
 assertRejected(validateDeletionWorkflow, deletionProcessorConditional, "conditional deletion processor command");
+
+const deployWithoutIndexes = clone(deployWorkflow);
+deployWithoutIndexes.jobs.deploy.steps.at(-1).run =
+  deployWithoutIndexes.jobs.deploy.steps.at(-1).run.replace("firestore:indexes,", "");
+assertRejected(validateDeployWorkflow, deployWithoutIndexes, "deploy without Firestore indexes");
+
+const deployExtraCommand = clone(deployWorkflow);
+deployExtraCommand.jobs.deploy.steps.push({ run: "env" });
+assertRejected(validateDeployWorkflow, deployExtraCommand, "extra deploy command");
+
+const recoveryHref = adminHtml.match(/<a[^>]+href="([^"]+)"[^>]*>Open recovery page<\/a>/)?.[1];
+assert.equal(recoveryHref, DELETION_WORKFLOW_URL,
+  "the operator recovery control opens the exact trusted deletion workflow");
 
 const wrongDeletionFixture = parseWorkflow(`
 # cron: "*/5 * * * *"

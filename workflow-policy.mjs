@@ -1,29 +1,29 @@
 import { parseDocument } from "yaml";
 
 export const DELETION_WORKFLOW_PATH = ".github/workflows/process-admin-deletions.yml";
+export const DELETION_WORKFLOW_URL = "https://github.com/HughKinnett/anonchat/actions/workflows/process-admin-deletions.yml";
+export const DEPLOY_WORKFLOW_PATH = ".github/workflows/deploy-firebase.yml";
 export const RULES_WORKFLOW_PATH = ".github/workflows/firestore-rules-ci.yml";
 
 const deletionCron = "*/5 * * * *";
 const secretReference = "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}";
 const credentialPathReference = "${{ steps.auth.outputs.credentials_file_path }}";
+const deployCommand = "npx --yes firebase-tools@15.28.1 deploy --project anonchatlogin --only \"firestore:rules,firestore:indexes,hosting\" --non-interactive";
 const rulesPaths = [
   "firestore.rules",
   "firestore.indexes.json",
   "firebase.json",
   "package.json",
   "package-lock.json",
-  ".github/workflows/firestore-rules-ci.yml",
-  ".github/workflows/process-admin-deletions.yml",
-  ".github/workflows/process-notifications.yml",
-  "workflow-policy.mjs",
-  "notification-*.mjs",
-  "push-config.mjs",
-  "sw.js",
-  "timeline.js",
-  "community.js",
+  ".github/workflows/**",
+  "*.js",
+  "*.mjs",
+  "*.html",
+  "*.css",
+  "*.webmanifest",
   "scripts/**"
 ];
-const firestoreCiCommand = "npm run test:rules && npm run test:activity-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:auth-activity && npm test";
+const firestoreCiCommand = "npm run test:rules && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm test";
 const notificationTestCommand = "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes && node scripts/test-push-service-worker.mjs";
 
 export const parseWorkflow = (source, label = "workflow") => {
@@ -124,6 +124,57 @@ export const validateDeletionWorkflow = (workflow) => {
   return errors;
 };
 
+export const validateDeployWorkflow = (workflow) => {
+  const errors = [];
+  exactlyKeys(errors, workflow, ["name", "on", "permissions", "concurrency", "jobs"], "deploy workflow");
+  exactly(errors, workflow.name, "Deploy Firebase", "deploy workflow name");
+  const triggers = workflowTriggers(workflow);
+  if (!sameKeys(triggers, ["push", "workflow_dispatch"])) {
+    errors.push("deploy workflow triggers must be push and workflow_dispatch only");
+  }
+  exactly(errors, triggers?.workflow_dispatch, null, "deploy workflow dispatch trigger");
+  if (!sameKeys(triggers?.push, ["branches"]) || !sameArray(triggers?.push?.branches, ["main"])) {
+    errors.push("deploy workflow push trigger must target main only");
+  }
+  if (!hasReadOnlyPermissions(workflow.permissions)) errors.push("deploy workflow permissions must be contents: read only");
+  exactlyKeys(errors, workflow.concurrency, ["group", "cancel-in-progress"], "deploy workflow concurrency");
+  exactly(errors, workflow.concurrency?.group, "firebase-production", "deploy workflow concurrency group");
+  exactly(errors, workflow.concurrency?.["cancel-in-progress"], false, "deploy workflow cancellation policy");
+
+  const job = workflowJob(workflow, "deploy", errors);
+  if (!sameKeys(workflow.jobs, ["deploy"])) errors.push("deploy workflow must contain the deploy job only");
+  exactlyKeys(errors, job, ["name", "runs-on", "steps"], "deploy job");
+  exactly(errors, job.name, "Deploy Hosting, Firestore rules, and indexes", "deploy job name");
+  exactly(errors, job["runs-on"], "ubuntu-latest", "deploy workflow runner");
+  effectiveReadOnlyPermissions(errors, workflow, job, "deploy workflow");
+  const steps = jobSteps(job, errors, "jobs.deploy");
+  exactlyOrderedSteps(errors, steps, [
+    "uses:actions/checkout@v4",
+    "uses:actions/setup-node@v4",
+    "uses:google-github-actions/auth@v3",
+    `run:${deployCommand}`
+  ], "deploy workflow steps");
+  validateStep(errors, steps[0], {
+    name: "Check out repository",
+    uses: "actions/checkout@v4"
+  }, "deploy checkout step");
+  validateStep(errors, steps[1], {
+    name: "Set up Node.js",
+    uses: "actions/setup-node@v4",
+    with: { "node-version": "20" }
+  }, "deploy Node step");
+  validateStep(errors, steps[2], {
+    name: "Authenticate to Google Cloud",
+    uses: "google-github-actions/auth@v3",
+    with: { credentials_json: secretReference }
+  }, "deploy authentication step");
+  validateStep(errors, steps[3], {
+    name: "Deploy Firebase production",
+    run: deployCommand
+  }, "deploy command step");
+  return errors;
+};
+
 export const validateRulesWorkflow = (workflow) => {
   const errors = [];
   exactlyKeys(errors, workflow, ["name", "on", "permissions", "jobs"], "rules workflow");
@@ -170,4 +221,12 @@ export const validatePackageScripts = (packageJson) => {
   return errors;
 };
 
-export const workflowPolicy = { deletionCron, rulesPaths, firestoreCiCommand, notificationTestCommand, secretReference, credentialPathReference };
+export const workflowPolicy = {
+  deletionCron,
+  deployCommand,
+  rulesPaths,
+  firestoreCiCommand,
+  notificationTestCommand,
+  secretReference,
+  credentialPathReference
+};

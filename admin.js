@@ -64,7 +64,7 @@ function renderUserRow(user, scope) {
   profile.href = `profile.html?uid=${encodeURIComponent(user.id)}`; profile.dataset.focusKey = focusKey(scope, "profile", user.id);
   const ban = create("button", protectedAdmin ? "Protected administrator" : user.banned ? "Unban" : "Ban", `admin-action ${user.banned ? "restore" : "danger"}`);
   ban.type = "button"; ban.dataset.focusKey = focusKey(scope, "ban", user.id);
-  ban.disabled = protectedAdmin || !canAdminSetBanned({ nextBanned: !user.banned, existingJob: locked, existingQueueState: locked });
+  ban.disabled = protectedAdmin || !canAdminSetBanned({ username: user.username, nextBanned: !user.banned, existingJob: locked, existingQueueState: locked });
   ban.onclick = async () => { ban.disabled = true; try { await updateDoc(doc(db, "users", user.id), { banned: !user.banned }); setStatus(user.banned ? "Account unbanned." : "Account banned."); } catch { setStatus("Could not update that account.", true); renderUsers(); } };
   const remove = create("button", "Delete Account", "admin-action danger");
   remove.type = "button"; remove.dataset.focusKey = focusKey(scope, "delete", user.id);

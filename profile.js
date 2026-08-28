@@ -423,7 +423,7 @@ onAuthStateChanged(auth, async (user) => {
   if (targetProfile.coverImage) {
     document.getElementById("view-profile-cover").src = targetProfile.coverImage;
   }
-  const adminUsernames = ["i_love_you_h", "ownercybercapone"];
+  const adminUsernames = ["i_love_you_h", "cybercapone"];
   const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
   document.getElementById("profile-admin-link").hidden = !viewerIsAdmin;
   const viewDay = new Date().toISOString().slice(0, 10);

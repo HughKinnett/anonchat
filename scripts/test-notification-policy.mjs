@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import {
+  MAX_NOTIFICATION_AGE_MS,
+  MAX_NOTIFICATION_ATTEMPTS,
+  MAX_NOTIFICATION_EVENTS_PER_RUN,
+  MAX_NOTIFICATION_MATERIALIZATIONS_PER_RUN,
+  MAX_NOTIFICATION_RUNTIME_MS,
+  MAX_NOTIFICATION_SENDS_PER_RUN,
+  MAX_NOTIFICATION_SOURCES_PER_RUN,
   MAX_SUBSCRIPTIONS_PER_RECIPIENT,
+  NOTIFICATION_RETRY_BASE_MS,
+  NOTIFICATION_RETRY_MAX_MS,
   NOTIFICATION_RETENTION_MS,
   NOTIFICATION_TYPES,
   canonicalTimestamp,
@@ -12,6 +21,8 @@ import {
   isValidQueueEvent,
   notificationPayload,
   queuedEvent,
+  retryDelayMs,
+  shouldExhaustNotification,
   sourceCursor,
   validateTrustedSource
 } from "../notification-policy.mjs";
@@ -23,6 +34,16 @@ const preciseEarly = new Timestamp(1_700_000_000, 123_000_001);
 const preciseLater = new Timestamp(1_700_000_000, 123_000_999);
 assert.deepEqual([...NOTIFICATION_TYPES], ["reaction", "comment", "message-request", "room-message", "reveal-request"]);
 assert.equal(MAX_SUBSCRIPTIONS_PER_RECIPIENT, 100);
+assert.equal(MAX_NOTIFICATION_ATTEMPTS, 5);
+assert.equal(MAX_NOTIFICATION_AGE_MS, 7 * 24 * 60 * 60 * 1000);
+assert.equal(MAX_NOTIFICATION_EVENTS_PER_RUN, 100);
+assert.equal(MAX_NOTIFICATION_SENDS_PER_RUN, 500);
+assert.equal(MAX_NOTIFICATION_SOURCES_PER_RUN, 100);
+assert.equal(MAX_NOTIFICATION_MATERIALIZATIONS_PER_RUN, 500);
+assert.equal(MAX_NOTIFICATION_RUNTIME_MS, 4 * 60 * 1000);
+assert.equal(retryDelayMs(1), NOTIFICATION_RETRY_BASE_MS);
+assert.equal(retryDelayMs(2), NOTIFICATION_RETRY_BASE_MS * 2);
+assert.equal(retryDelayMs(1_000), NOTIFICATION_RETRY_MAX_MS, "retry delay is bounded");
 assert.deepEqual(canonicalTimestamp(preciseEarly), { seconds: 1_700_000_000, nanoseconds: 123_000_001 });
 assert.deepEqual(canonicalTimestamp(new Date(1_700_000_000_123)), { seconds: 1_700_000_000, nanoseconds: 123_000_000 });
 assert.deepEqual(canonicalTimestamp(1_700_000_000_123), { seconds: 1_700_000_000, nanoseconds: 123_000_000 });
@@ -123,7 +144,21 @@ assert.equal(isValidQueueEvent(event), true);
 assert.equal(isValidQueueEvent({ ...event, body: "private body" }), false);
 assert.equal(isValidQueueEvent({ ...event, status: "processing" }), false);
 assert.equal(isValidQueueEvent({ ...event, status: "failed", attempts: 1, errorCode: "DELIVERY_TRANSIENT" }), true);
+assert.equal(isValidQueueEvent({
+  ...event,
+  status: "failed",
+  attempts: 1,
+  errorCode: "DELIVERY_TRANSIENT",
+  retryAt: later
+}), true);
 assert.equal(isValidQueueEvent({ ...event, status: "failed", attempts: 1, errorCode: "private error text" }), false);
+assert.equal(isValidQueueEvent({ ...event, status: "suppressed", errorCode: "RECIPIENT_UNAVAILABLE" }), true);
+assert.equal(isValidQueueEvent({
+  ...event,
+  status: "exhausted",
+  attempts: MAX_NOTIFICATION_ATTEMPTS,
+  errorCode: "DELIVERY_EXHAUSTED"
+}), true);
 assert.equal(isValidQueueEvent({
   ...event,
   status: "processing",
@@ -136,6 +171,21 @@ for (const forbidden of ["text", "body", "email", "username", "endpoint", "p256d
   assert.equal(Object.hasOwn(event, forbidden), false, `${forbidden} is not copied into the queue`);
 }
 assert.equal(NOTIFICATION_RETENTION_MS, 30 * 24 * 60 * 60 * 1000);
+assert.equal(shouldExhaustNotification({
+  ...event,
+  attempts: MAX_NOTIFICATION_ATTEMPTS,
+  createdAt: createdAt
+}, createdAt.toMillis()), true, "the maximum attempted event is terminal");
+assert.equal(shouldExhaustNotification({
+  ...event,
+  attempts: 0,
+  createdAt: createdAt
+}, createdAt.toMillis() + MAX_NOTIFICATION_AGE_MS), true, "an over-age event is terminal");
+assert.equal(shouldExhaustNotification({
+  ...event,
+  attempts: MAX_NOTIFICATION_ATTEMPTS - 1,
+  createdAt: createdAt
+}, createdAt.toMillis() + MAX_NOTIFICATION_AGE_MS - 1), false);
 assert.equal(fixedNotificationErrorCode({ statusCode: 410 }), "SUBSCRIPTION_EXPIRED");
 assert.equal(fixedNotificationErrorCode(Object.assign(new Error(), { code: "lease-lost" })), "LEASE_LOST");
 assert.equal(fixedNotificationErrorCode(Object.assign(new Error(), { code: "INVALID_SUBSCRIPTION" })), "INVALID_SUBSCRIPTION");

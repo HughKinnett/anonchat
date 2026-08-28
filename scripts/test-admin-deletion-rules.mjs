@@ -27,12 +27,16 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
   await Promise.all([
     setDoc(doc(firestore, "users", "admin"), profile("admin", "i_love_you_h")),
     setDoc(doc(firestore, "usernames", "i_love_you_h"), { uid: "admin", username: "i_love_you_h", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "users", "admin-two"), profile("admin-two", "CyberCapone")),
+    setDoc(doc(firestore, "usernames", "cybercapone"), { uid: "admin-two", username: "CyberCapone", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "users", "former-handle"), profile("former-handle", "OwnerCyberCapone")),
+    setDoc(doc(firestore, "usernames", "ownercybercapone"), { uid: "former-handle", username: "OwnerCyberCapone", createdAt: new Date(0) }),
     setDoc(doc(firestore, "users", "member"), profile("member", "member")),
     setDoc(doc(firestore, "users", "target"), profile("target", "target")),
     setDoc(doc(firestore, "users", "protected-one"), profile("protected-one", "  I_LOVE_YOU_H  ")),
-    setDoc(doc(firestore, "users", "protected-two"), profile("protected-two", "ownerCyberCapone")),
+    setDoc(doc(firestore, "users", "protected-two"), profile("protected-two", "CyberCapone")),
     setDoc(doc(firestore, "users", "protected-nbsp"), profile("protected-nbsp", "\u00a0i_love_you_h\u00a0")),
-    setDoc(doc(firestore, "users", "protected-bom"), profile("protected-bom", "\uFEFFownercybercapone\uFEFF"))
+    setDoc(doc(firestore, "users", "protected-bom"), profile("protected-bom", "\uFEFFcybercapone\uFEFF"))
   ]);
 });
 const queue = (firestore, options = {}) => {
@@ -47,9 +51,14 @@ const queue = (firestore, options = {}) => {
 try {
   await seed();
   const admin = testEnv.authenticatedContext("admin").firestore();
+  const adminTwo = testEnv.authenticatedContext("admin-two").firestore();
+  const formerHandle = testEnv.authenticatedContext("former-handle").firestore();
   const member = testEnv.authenticatedContext("member").firestore();
   const target = testEnv.authenticatedContext("target").firestore();
 
+  await assertSucceeds(updateDoc(doc(adminTwo, "users", "target"), { banned: true }));
+  await assertSucceeds(updateDoc(doc(adminTwo, "users", "target"), { banned: false }));
+  await assertFails(updateDoc(doc(formerHandle, "users", "target"), { banned: true }));
   await assertSucceeds(queue(admin));
 
   await testEnv.clearFirestore(); await seed();
@@ -90,6 +99,15 @@ try {
   await assertFails(updateDoc(doc(admin, "users", "target"), { banned: "true" }));
   await assertFails(updateDoc(doc(admin, "users", "target"), { banned: true, profileImage: "x" }));
   await assertFails(updateDoc(doc(admin, "users", "target"), queueFields()));
+  await assertFails(updateDoc(doc(admin, "users", "protected-one"), { banned: true }));
+  await assertFails(updateDoc(doc(admin, "users", "protected-two"), { banned: true }));
+
+  await testEnv.withSecurityRulesDisabled(async (context) => Promise.all([
+    updateDoc(doc(context.firestore(), "users", "protected-one"), { banned: true }),
+    updateDoc(doc(context.firestore(), "users", "protected-two"), { banned: true })
+  ]));
+  await assertFails(updateDoc(doc(admin, "users", "protected-one"), { banned: false }));
+  await assertFails(updateDoc(doc(admin, "users", "protected-two"), { banned: false }));
 
   await testEnv.clearFirestore(); await seed();
   await assertSucceeds(queue(admin));
@@ -135,8 +153,8 @@ try {
     await Promise.all([
       setDoc(doc(firestore, "system", "deletionProcessor"), { updatedAt: new Date(0), status: "working" }),
       setDoc(doc(firestore, "users", "forged-health-admin"), profile("forged-health-admin", "i_love_you_h")),
-      setDoc(doc(firestore, "users", "mismatched-health-admin"), profile("mismatched-health-admin", "ownerCyberCapone")),
-      setDoc(doc(firestore, "usernames", "ownercybercapone"), { uid: "another-user", username: "ownerCyberCapone", createdAt: new Date(0) })
+      setDoc(doc(firestore, "users", "mismatched-health-admin"), profile("mismatched-health-admin", "CyberCapone")),
+      setDoc(doc(firestore, "usernames", "cybercapone"), { uid: "another-user", username: "CyberCapone", createdAt: new Date(0) })
     ]);
   });
   const unauthenticated = testEnv.unauthenticatedContext().firestore();
@@ -156,8 +174,8 @@ try {
     const firestore = context.firestore();
     await Promise.all([
       setDoc(doc(firestore, "system", "deletionProcessor"), { updatedAt: new Date(0), status: "working" }),
-      setDoc(doc(firestore, "users", "banned-health-admin"), { ...profile("banned-health-admin", "ownercybercapone"), banned: true }),
-      setDoc(doc(firestore, "usernames", "ownercybercapone"), { uid: "banned-health-admin", username: "ownercybercapone", createdAt: new Date(0) })
+      setDoc(doc(firestore, "users", "banned-health-admin"), { ...profile("banned-health-admin", "CyberCapone"), banned: true }),
+      setDoc(doc(firestore, "usernames", "cybercapone"), { uid: "banned-health-admin", username: "CyberCapone", createdAt: new Date(0) })
     ]);
   });
   const bannedHealthAdmin = testEnv.authenticatedContext("banned-health-admin").firestore();

@@ -89,7 +89,7 @@ onAuthStateChanged(auth,async user=>{
     db,
     firestore: { doc, updateDoc, serverTimestamp }
   });
-  if(["i_love_you_h","ownercybercapone"].includes(String(profile.username||"").toLowerCase())){
+  if(["i_love_you_h","cybercapone"].includes(String(profile.username||"").toLowerCase())){
     form.hidden=true;setStatus("Protected administrator accounts cannot be deleted from this page.");return;
   }
   document.getElementById("delete-email").value=user.email||"";

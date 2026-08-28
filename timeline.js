@@ -1023,7 +1023,7 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
-    !["i_love_you_h", "ownercybercapone"].includes(profileUsername.toLowerCase());
+    !["i_love_you_h", "cybercapone"].includes(profileUsername.toLowerCase());
   const statsRef = doc(db, "system", "accountStats");
   if (!(await getDoc(statsRef)).exists()) {
     await setDoc(statsRef, {

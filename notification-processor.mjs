@@ -1,5 +1,10 @@
 import {
   ACCOUNT_LIMIT,
+  MAX_NOTIFICATION_EVENTS_PER_RUN,
+  MAX_NOTIFICATION_MATERIALIZATIONS_PER_RUN,
+  MAX_NOTIFICATION_RUNTIME_MS,
+  MAX_NOTIFICATION_SENDS_PER_RUN,
+  MAX_NOTIFICATION_SOURCES_PER_RUN,
   MAX_SUBSCRIPTIONS_PER_RECIPIENT,
   NOTIFICATION_RETENTION_MS,
   NOTIFICATION_TYPES,
@@ -28,6 +33,33 @@ const actorFor = (type, data) => type === "room-message"
     ? data.fromId
     : data.uid;
 
+const boundedLimit = (value, maximum) => Number.isInteger(value) && value > 0
+  ? Math.min(value, maximum)
+  : maximum;
+const boundedRuntime = (value) => Number.isFinite(value) && value > 0
+  ? Math.min(value, MAX_NOTIFICATION_RUNTIME_MS)
+  : MAX_NOTIFICATION_RUNTIME_MS;
+const createInvocationBudget = (adapter, limits = {}) => {
+  const startedAt = adapter.now();
+  return {
+    deadlineAt: startedAt + boundedRuntime(limits.maxRuntimeMs),
+    maxSources: boundedLimit(limits.maxSources, MAX_NOTIFICATION_SOURCES_PER_RUN),
+    maxMaterializations: boundedLimit(
+      limits.maxMaterializations,
+      MAX_NOTIFICATION_MATERIALIZATIONS_PER_RUN
+    ),
+    maxEvents: boundedLimit(limits.maxEvents, MAX_NOTIFICATION_EVENTS_PER_RUN),
+    maxSends: boundedLimit(limits.maxSends, MAX_NOTIFICATION_SENDS_PER_RUN),
+    sources: 0,
+    materializations: 0,
+    events: 0,
+    sends: 0,
+    reached: false
+  };
+};
+const runtimeReached = (adapter, budget) => adapter.now() >= budget.deadlineAt;
+const markBudgetReached = (budget) => { budget.reached = true; };
+
 const recipientsFor = async (adapter, type, source) => {
   const actorUid = actorFor(type, source.data);
   if (["reaction", "comment"].includes(type)) {
@@ -40,64 +72,186 @@ const recipientsFor = async (adapter, type, source) => {
     .slice(0, ACCOUNT_LIMIT - 1);
 };
 
-export const scanTrustedNotificationSources = async ({ adapter }) => {
+export const scanTrustedNotificationSources = async ({ adapter, budget, limits = {} }) => {
+  const invocation = budget ?? createInvocationBudget(adapter, limits);
   const result = { bootstrapped: false, scanned: 0, materialized: 0 };
   if (await adapter.bootstrapSourceCursors(NOTIFICATION_TYPES)) {
     result.bootstrapped = true;
     return result;
   }
-  for (const type of NOTIFICATION_TYPES) {
-    let cursor;
-    while (true) {
-      const page = await adapter.scanSourcePage(type, cursor);
-      if (!page.items.length) break;
-      result.scanned += page.items.length;
-      for (const source of page.items) {
-        if (!validateTrustedSource(type, source.data, adapter.now())) continue;
-        const actorUid = actorFor(type, source.data);
-        for (const recipientUid of await recipientsFor(adapter, type, source)) {
-          if (recipientUid === actorUid || !(await adapter.recipientAvailable(recipientUid))) continue;
-          const eventId = await createEventId({
-            type,
-            sourcePath: source.path,
-            sourceCreatedAt: source.data.createdAt,
-            recipientUid
-          });
-          await adapter.createEvent(eventId, queuedEvent({
-            type,
-            actorUid,
-            recipientUid,
-            route: notificationRoute(type),
-            sourceCreatedAt: source.data.createdAt,
-            now: adapter.timestamp(adapter.now())
-          }));
-          result.materialized += 1;
+  const storedPriority = await adapter.sourcePriority();
+  const priorityIndex = NOTIFICATION_TYPES.indexOf(storedPriority);
+  const orderedTypes = priorityIndex >= 0
+    ? [...NOTIFICATION_TYPES.slice(priorityIndex), ...NOTIFICATION_TYPES.slice(0, priorityIndex)]
+    : [...NOTIFICATION_TYPES];
+  const pageLimit = Math.max(1, Math.floor(invocation.maxSources / NOTIFICATION_TYPES.length));
+  const sourceStates = orderedTypes.map((type) => ({ type, cursor: undefined, items: [], exhausted: false }));
+  const nextReadyType = (stateIndex) => {
+    for (let offset = 1; offset <= sourceStates.length; offset += 1) {
+      const candidate = sourceStates[(stateIndex + offset) % sourceStates.length];
+      if (!candidate.exhausted) return candidate.type;
+    }
+    return orderedTypes[(stateIndex + 1) % orderedTypes.length];
+  };
+  let stateIndex = 0;
+  sourceScan:
+  while (sourceStates.some((state) => !state.exhausted)) {
+    if (invocation.sources >= invocation.maxSources
+      || invocation.materializations >= invocation.maxMaterializations
+      || runtimeReached(adapter, invocation)) {
+      markBudgetReached(invocation);
+      break;
+    }
+    const currentStateIndex = stateIndex;
+    const state = sourceStates[currentStateIndex];
+    stateIndex = (stateIndex + 1) % sourceStates.length;
+    if (state.exhausted) continue;
+    if (!state.items.length) {
+      const page = await adapter.scanSourcePage(
+        state.type,
+        state.cursor,
+        Math.min(pageLimit, invocation.maxSources - invocation.sources)
+      );
+      if (!page.items.length) {
+        state.exhausted = true;
+        continue;
+      }
+      state.items = [...page.items];
+    }
+
+    const source = state.items.shift();
+    await adapter.prioritizeSourceType(state.type);
+    if (runtimeReached(adapter, invocation)) {
+      markBudgetReached(invocation);
+      break;
+    }
+    const next = sourceCursor(source);
+    if (state.cursor && compareSourceCursors(next, state.cursor) <= 0) {
+      throw Object.assign(new Error("cursor limit"), { code: "cursor-limit" });
+    }
+    const events = [];
+    if (validateTrustedSource(state.type, source.data, adapter.now())) {
+      const actorUid = actorFor(state.type, source.data);
+      const recipients = await recipientsFor(adapter, state.type, source);
+      const availableRecipients = [];
+      for (const recipientUid of recipients) {
+        if (runtimeReached(adapter, invocation)) {
+          markBudgetReached(invocation);
+          break sourceScan;
+        }
+        if (recipientUid !== actorUid && await adapter.recipientAvailable(recipientUid)) {
+          availableRecipients.push(recipientUid);
         }
       }
-      const next = page.nextCursor ?? sourceCursor(page.items.at(-1));
-      if (cursor && compareSourceCursors(next, cursor) <= 0) {
-        throw Object.assign(new Error("cursor limit"), { code: "cursor-limit" });
+      if (runtimeReached(adapter, invocation)) {
+        markBudgetReached(invocation);
+        break;
       }
-      await adapter.advanceSourceCursor(type, next);
-      cursor = next;
+      if (availableRecipients.length > invocation.maxMaterializations - invocation.materializations) {
+        markBudgetReached(invocation);
+        break;
+      }
+      for (const recipientUid of availableRecipients) {
+        if (runtimeReached(adapter, invocation)) {
+          markBudgetReached(invocation);
+          break sourceScan;
+        }
+        const eventId = await createEventId({
+          type: state.type,
+          sourcePath: source.path,
+          sourceCreatedAt: source.data.createdAt,
+          recipientUid
+        });
+        events.push([eventId, queuedEvent({
+          type: state.type,
+          actorUid,
+          recipientUid,
+          route: notificationRoute(state.type),
+          sourceCreatedAt: source.data.createdAt,
+          now: adapter.timestamp(adapter.now())
+        })]);
+      }
+    }
+    if (runtimeReached(adapter, invocation)) {
+      markBudgetReached(invocation);
+      break;
+    }
+    const created = events.length ? await adapter.createEvents(events) : 0;
+    invocation.materializations += events.length;
+    result.materialized += created;
+    invocation.sources += 1;
+    result.scanned += 1;
+    await adapter.advanceSourceCursor(state.type, next, nextReadyType(currentStateIndex));
+    state.cursor = next;
+    if (runtimeReached(adapter, invocation)) {
+      markBudgetReached(invocation);
+      break;
     }
   }
   return result;
 };
 
-export const deliverNotificationEvents = async ({ adapter, ownerId, sendPush, logger = console }) => {
-  const result = { inspected: 0, delivered: 0, retried: 0, expired: 0, skipped: 0, purged: 0 };
+export const deliverNotificationEvents = async ({
+  adapter,
+  ownerId,
+  sendPush,
+  logger = console,
+  limits = {},
+  budget
+}) => {
+  const invocation = budget ?? createInvocationBudget(adapter, limits);
+  const result = {
+    inspected: 0,
+    sent: 0,
+    delivered: 0,
+    retried: 0,
+    suppressed: 0,
+    exhausted: 0,
+    deferred: 0,
+    expired: 0,
+    skipped: 0,
+    purged: 0,
+    budgetReached: invocation.reached
+  };
+  let stop = false;
   let cursor;
-  while (true) {
+  while (!stop) {
+    if (invocation.events >= invocation.maxEvents
+      || invocation.sends >= invocation.maxSends
+      || runtimeReached(adapter, invocation)) {
+      markBudgetReached(invocation);
+      result.budgetReached = true;
+      break;
+    }
     const page = await adapter.scanEventPage(cursor);
     if (!page.items.length) break;
     for (const item of page.items) {
+      if (invocation.events >= invocation.maxEvents
+        || invocation.sends >= invocation.maxSends
+        || runtimeReached(adapter, invocation)) {
+        markBudgetReached(invocation);
+        result.budgetReached = true;
+        stop = true;
+        break;
+      }
+      invocation.events += 1;
       result.inspected += 1;
       let claim;
       try {
         claim = await adapter.claimEvent(item.id, ownerId);
         if (!claim) {
           result.skipped += 1;
+          continue;
+        }
+        if (claim.terminal === "exhausted") {
+          result.exhausted += 1;
+          safeLog(logger, "error", "EVENT_EXHAUSTED");
+          continue;
+        }
+        if (!(await adapter.recipientAvailable(claim.data.recipientUid))) {
+          await adapter.suppressEvent(claim.id, claim.token);
+          result.suppressed += 1;
+          safeLog(logger, "info", "RECIPIENT_UNAVAILABLE");
           continue;
         }
         const listCurrentSubscriptions = async () => {
@@ -114,13 +268,27 @@ export const deliverNotificationEvents = async ({ adapter, ownerId, sendPush, lo
         };
         const subscriptions = await listCurrentSubscriptions();
         let transientFailure = false;
+        let recipientUnavailable = false;
+        let invocationDeferred = false;
         for (const subscription of subscriptions) {
           await adapter.renewEvent(claim.id, claim.token);
           const { subscriptionFingerprint, deliveryId } = await deliveryIdentity(subscription);
           const settled = await adapter.getDelivery(deliveryId);
           if (["delivered", "expired"].includes(settled?.status)) continue;
+          if (invocation.sends >= invocation.maxSends || runtimeReached(adapter, invocation)) {
+            invocationDeferred = true;
+            markBudgetReached(invocation);
+            result.budgetReached = true;
+            break;
+          }
+          if (!(await adapter.recipientAvailable(claim.data.recipientUid))) {
+            recipientUnavailable = true;
+            break;
+          }
           let pushError;
           try {
+            invocation.sends += 1;
+            result.sent += 1;
             await sendPush(subscription, notificationPayload(claim.data.type, claim.id));
           } catch (error) {
             pushError = error;
@@ -162,6 +330,19 @@ export const deliverNotificationEvents = async ({ adapter, ownerId, sendPush, lo
             }
           }
         }
+        if (recipientUnavailable) {
+          await adapter.suppressEvent(claim.id, claim.token);
+          result.suppressed += 1;
+          safeLog(logger, "info", "RECIPIENT_UNAVAILABLE");
+          continue;
+        }
+        if (invocationDeferred) {
+          await adapter.deferEvent(claim.id, claim.token);
+          result.deferred += 1;
+          stop = true;
+          safeLog(logger, "info", "INVOCATION_BUDGET");
+          continue;
+        }
         await adapter.renewEvent(claim.id, claim.token);
         for (const subscription of await listCurrentSubscriptions()) {
           const { deliveryId } = await deliveryIdentity(subscription);
@@ -169,37 +350,56 @@ export const deliverNotificationEvents = async ({ adapter, ownerId, sendPush, lo
           if (!["delivered", "expired"].includes(settled?.status)) transientFailure = true;
         }
         if (transientFailure) {
-          await adapter.failEvent(claim.id, claim.token, "DELIVERY_TRANSIENT");
-          result.retried += 1;
+          const status = await adapter.failEvent(claim.id, claim.token, "DELIVERY_TRANSIENT");
+          if (status === "exhausted") result.exhausted += 1;
+          else result.retried += 1;
         } else {
           await adapter.completeEvent(claim.id, claim.token);
           result.delivered += 1;
           safeLog(logger, "info", "EVENT_DELIVERED");
         }
       } catch (error) {
-        result.retried += 1;
+        let status = "failed";
         if (claim?.token) {
-          try { await adapter.failEvent(claim.id, claim.token, fixedNotificationErrorCode(error)); }
+          try { status = await adapter.failEvent(claim.id, claim.token, fixedNotificationErrorCode(error)); }
           catch { safeLog(logger, "error", "FAIL_STATE_ERROR"); }
         }
+        if (status === "exhausted") result.exhausted += 1;
+        else result.retried += 1;
         safeLog(logger, "error", fixedNotificationErrorCode(error));
       }
     }
-    if (!page.nextCursor || page.nextCursor === cursor) {
+    if (stop) break;
+    if (!page.nextCursor) {
       throw Object.assign(new Error("cursor limit"), { code: "cursor-limit" });
     }
     cursor = page.nextCursor;
   }
-  result.purged = await adapter.purgeDeliveredBefore(adapter.timestamp(adapter.now() - NOTIFICATION_RETENTION_MS));
-  safeLog(logger, "info", `NOTIFICATION_RESULT inspected=${result.inspected} delivered=${result.delivered} retried=${result.retried} expired=${result.expired} skipped=${result.skipped} purged=${result.purged}`);
+  if (!runtimeReached(adapter, invocation)) {
+    result.purged = await adapter.purgeTerminalBefore(
+      adapter.timestamp(adapter.now() - NOTIFICATION_RETENTION_MS),
+      MAX_NOTIFICATION_EVENTS_PER_RUN
+    );
+  } else {
+    markBudgetReached(invocation);
+  }
+  result.budgetReached = invocation.reached;
+  safeLog(logger, "info", `NOTIFICATION_RESULT inspected=${result.inspected} sent=${result.sent} delivered=${result.delivered} retried=${result.retried} suppressed=${result.suppressed} exhausted=${result.exhausted} deferred=${result.deferred} expired=${result.expired} skipped=${result.skipped} purged=${result.purged}`);
   return result;
 };
 
-export const runNotificationProcessor = async ({ adapter, ownerId, sendPush, logger = console }) => {
+export const runNotificationProcessor = async ({
+  adapter,
+  ownerId,
+  sendPush,
+  logger = console,
+  limits = {}
+}) => {
+  const budget = createInvocationBudget(adapter, limits);
   await adapter.heartbeat("started");
   try {
-    const scan = await scanTrustedNotificationSources({ adapter });
-    const delivery = await deliverNotificationEvents({ adapter, ownerId, sendPush, logger });
+    const scan = await scanTrustedNotificationSources({ adapter, budget });
+    const delivery = await deliverNotificationEvents({ adapter, ownerId, sendPush, logger, budget });
     await adapter.heartbeat(delivery.retried ? "error" : "completed", delivery.retried ? "DELIVERY_TRANSIENT" : undefined);
     return { ...scan, ...delivery };
   } catch (error) {

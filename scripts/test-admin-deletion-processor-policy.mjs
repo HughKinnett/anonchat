@@ -12,9 +12,13 @@ assert.equal(isExactQueuedJob(queued, "target"), true);
 assert.equal(isExactQueuedJob({ ...queued, extra: true }, "target"), false);
 assert.equal(isExactQueuedJob({ ...queued, targetUid: "other" }, "target"), false);
 assert.equal(isProtectedAdministrator("\u00a0 I_LOVE_YOU_H \ufeff"), true);
-assert.equal(isProtectedAdministrator("ownerCyberCapone"), true);
+assert.equal(isProtectedAdministrator("CyberCapone"), true);
+assert.equal(isProtectedAdministrator("ownerCyberCapone"), false,
+  "a reservation for the former handle cannot make a trusted processor administrator");
 assert.equal(isProtectedAdministrator("ordinary"), false);
 assert.equal(isTrustedRequester("admin", { uid: "admin", username: "i_love_you_h", banned: false }, { uid: "admin", username: "i_love_you_h" }), true);
+assert.equal(isTrustedRequester("admin-two", { uid: "admin-two", username: "CyberCapone", banned: false }, { uid: "admin-two", username: "CyberCapone" }), true);
+assert.equal(isTrustedRequester("former", { uid: "former", username: "OwnerCyberCapone", banned: false }, { uid: "former", username: "OwnerCyberCapone" }), false);
 assert.equal(isTrustedRequester("admin", { uid: "admin", username: "i_love_you_h", banned: true }, { uid: "admin", username: "i_love_you_h" }), false);
 assert.equal(isTrustedRequester("admin", { uid: "admin", username: "i_love_you_h", banned: false }, { uid: "other", username: "i_love_you_h" }), false);
 assert.equal(isClaimableJob(queued, 10_000), true);
@@ -33,17 +37,23 @@ for (const required of [
   "owned-posts", "reposts-of-target", "comments-by-target", "replies-by-target", "reactions-by-target",
   "votes-by-target", "timeline-votes-by-target", "follows-from-target", "follows-to-target", "direct-messages",
   "message-requests-from-target", "message-requests-to-target", "reveals-from-target", "reveals-to-target",
-  "owned-rooms", "room-memberships", "owned-circles", "circle-memberships", "usernames-by-target", "preferences", "private-profile",
+  "owned-rooms", "room-memberships", "owned-circles", "circle-memberships", "preferences", "private-profile",
   "reports-by-target", "reports-about-target", "blocks-by-target", "blocks-of-target", "push-subscriptions",
   "notification-events", "notification-deliveries", "self-deletion-request"
 ]) assert.ok(queries.some((entry) => entry.name === required), `missing ${required}`);
 assert.ok(queries.some((entry) => entry.cascade === "post"));
 assert.ok(queries.some((entry) => entry.cascade === "circle"));
 assert.ok(queries.some((entry) => entry.cascade === "room"));
-assert.ok(queries.some((entry) => entry.field === "username" && entry.value === "target_name"));
-for (const name of ["posts-by-username", "original-posts-by-username", "community-posts-by-username"]) {
-  assert.equal(queries.find((entry) => entry.name === name).cascade, "post", `${name} must remove descendants`);
-}
+assert.equal(
+  queries.some((entry) => ["username", "originalUsername"].includes(entry.field)),
+  false,
+  "mutable usernames never select destructive cleanup targets"
+);
+assert.equal(
+  queries.some((entry) => entry.collection === "usernames"),
+  false,
+  "username reservations remain in place until destructive sweeps finish"
+);
 assert.equal(fixedErrorCode({ code: "auth/user-not-found" }), "AUTH_NOT_FOUND");
 assert.equal(fixedErrorCode({ code: "lease-lost", message: "secret-uid" }), "LEASE_LOST");
 assert.equal(fixedErrorCode(new Error("secret-uid")), "PROCESSOR_FAILURE");

@@ -89,7 +89,7 @@ service cloud.firestore {
 
     function isProtectedAdministrator(username) {
       return username is string
-        && username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*(i_love_you_h|ownercybercapone)[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$');
+        && username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*(i_love_you_h|cybercapone)[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$');
     }
 
     function hasMatchingAdminReservation(profile) {
@@ -101,10 +101,10 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/usernames/i_love_you_h).data.username == profile.username
         ) || (
           profile.username is string
-          && profile.username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*ownercybercapone[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$')
-          && exists(/databases/$(database)/documents/usernames/ownercybercapone)
-          && get(/databases/$(database)/documents/usernames/ownercybercapone).data.uid == request.auth.uid
-          && get(/databases/$(database)/documents/usernames/ownercybercapone).data.username == profile.username
+          && profile.username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*cybercapone[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$')
+          && exists(/databases/$(database)/documents/usernames/cybercapone)
+          && get(/databases/$(database)/documents/usernames/cybercapone).data.uid == request.auth.uid
+          && get(/databases/$(database)/documents/usernames/cybercapone).data.username == profile.username
         );
     }
 
@@ -143,6 +143,7 @@ service cloud.firestore {
 
     function validStandaloneAdminBan(userId) {
       return isAdmin()
+        && !isProtectedAdministrator(resource.data.username)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['banned'])
         && request.resource.data.banned is bool
         && (request.resource.data.banned == true

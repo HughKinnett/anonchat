@@ -4,7 +4,7 @@
   "scripts": {
     "test": "node scripts/test-regressions.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node scripts/test-firestore-rules.mjs\"",
-    "test:auth-activity": "node scripts/test-auth-activity.mjs",
+    "test:auth-activity": "node scripts/test-auth-activity.mjs && node --no-warnings --experimental-vm-modules scripts/test-default-follows.mjs",
     "test:push": "node scripts/test-push-policy.mjs && node scripts/test-push-client.mjs && node scripts/test-push-timeout.mjs && node scripts/test-push-alert-ui.mjs && node scripts/test-push-session.mjs && node scripts/test-push-auth-integration.mjs && node scripts/test-notification-storage.mjs && node scripts/test-vapid-generator.mjs && node scripts/test-push-service-worker.mjs",
     "test:push-rules": "firebase emulators:exec --only firestore \"node scripts/test-push-subscription-rules.mjs\"",
     "test:self-delete": "node scripts/test-account-deletion-push.mjs",
@@ -16,7 +16,8 @@
     "test:admin-deletion-cli": "node scripts/test-admin-deletion-cli.mjs",
     "test:admin-deletion-indexes": "node scripts/test-admin-deletion-indexes.mjs",
     "admin-deletion:process": "node scripts/admin-deletion-processor.mjs",
-    "test:legacy-migration": "node scripts/test-legacy-migration-policy.mjs",
+    "test:legacy-migration": "node scripts/test-legacy-migration-policy.mjs && firebase emulators:exec --only firestore \"node scripts/test-legacy-migration-firestore-integration.mjs\"",
+    "test:admin-dashboard": "node scripts/test-admin-dashboard-policy.mjs",
     "test:notification-policy": "node scripts/test-notification-policy.mjs",
     "test:notification-processor": "node scripts/test-notification-processor.mjs",
     "test:notification-cli": "node scripts/test-notification-cli.mjs",
@@ -27,7 +28,7 @@
     "test:notification-firestore-integration": "firebase emulators:exec --only firestore \"node scripts/test-notification-firestore-integration.mjs\"",
     "notification:process": "node scripts/notification-processor.mjs",
     "test:workflow-policy": "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs",
-    "test:firestore-ci": "npm run test:rules && npm run test:activity-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:auth-activity && npm test"
+    "test:firestore-ci": "npm run test:rules && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm test"
   },
   "dependencies": {
     "firebase-admin": "14.3.0",

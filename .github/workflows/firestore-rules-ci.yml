@@ -8,15 +8,12 @@ on:
       - firebase.json
       - package.json
       - package-lock.json
-      - .github/workflows/firestore-rules-ci.yml
-      - .github/workflows/process-admin-deletions.yml
-      - .github/workflows/process-notifications.yml
-      - workflow-policy.mjs
-      - notification-*.mjs
-      - push-config.mjs
-      - sw.js
-      - timeline.js
-      - community.js
+      - .github/workflows/**
+      - "*.js"
+      - "*.mjs"
+      - "*.html"
+      - "*.css"
+      - "*.webmanifest"
       - scripts/**
   workflow_dispatch:
 

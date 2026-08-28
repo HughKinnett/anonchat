@@ -2,7 +2,7 @@ export const PAGE_LIMIT = 200;
 export const BATCH_LIMIT = 400;
 export const LEASE_MS = 5 * 60 * 1000;
 export const COMPLETION_RETENTION_MS = 2 * 60 * 60 * 1000;
-export const PROTECTED_ADMINISTRATORS = Object.freeze(["i_love_you_h", "ownercybercapone"]);
+export const PROTECTED_ADMINISTRATORS = Object.freeze(["i_love_you_h", "cybercapone"]);
 
 const timestampMillis = (value) => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -42,17 +42,12 @@ const direct = (name, collection, path) => ({ name, collection, path, limit: PAG
 const field = (name, collection, fieldName, value, extra = {}) => ({
   name, collection, field: fieldName, value, limit: PAGE_LIMIT, ...extra
 });
-export const cleanupQueries = (targetUid, username = "") => Object.freeze([
+export const cleanupQueries = (targetUid) => Object.freeze([
   field("owned-posts", "posts", "authorId", targetUid, { cascade: "post" }),
   field("reposts-of-target", "posts", "originalAuthorId", targetUid, { cascade: "post" }),
-  field("posts-by-username", "posts", "username", username, { cascade: "post" }),
-  field("original-posts-by-username", "posts", "originalUsername", username, { cascade: "post" }),
   field("owned-community-posts", "communityPosts", "authorId", targetUid, { cascade: "post" }),
-  field("community-posts-by-username", "communityPosts", "username", username, { cascade: "post" }),
   field("comments-by-target", "comments", "uid", targetUid, { group: true }),
-  field("comments-by-username", "comments", "username", username, { group: true }),
   field("replies-by-target", "replies", "uid", targetUid, { group: true }),
-  field("replies-by-username", "replies", "username", username, { group: true }),
   field("reactions-by-target", "reactions", "uid", targetUid, { group: true }),
   field("votes-by-target", "communityVotes", "uid", targetUid),
   field("timeline-votes-by-target", "timelineVotes", "uid", targetUid),
@@ -69,7 +64,6 @@ export const cleanupQueries = (targetUid, username = "") => Object.freeze([
   field("room-messages", "roomMessages", "senderId", targetUid),
   field("owned-circles", "circles", "ownerId", targetUid, { cascade: "circle" }),
   field("circle-memberships", "circleMembers", "uid", targetUid),
-  field("usernames-by-target", "usernames", "uid", targetUid),
   direct("preferences", "userPreferences", targetUid),
   direct("private-profile", "userPrivate", targetUid),
   field("reports-by-target", "reports", "reporterId", targetUid),
@@ -86,7 +80,7 @@ export const cleanupQueries = (targetUid, username = "") => Object.freeze([
   field("notification-deliveries-for-target", "notificationDeliveries", "recipientUid", targetUid),
   field("notification-reads", "notificationReads", "uid", targetUid),
   direct("self-deletion-request", "accountDeletionRequests", targetUid)
-].filter((entry) => entry.value !== ""));
+]);
 
 const ERROR_CODES = new Map([
   ["auth/user-not-found", "AUTH_NOT_FOUND"], ["auth/internal-error", "AUTH_ERROR"],

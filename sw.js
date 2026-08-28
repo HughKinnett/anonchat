@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v37";
+const CACHE_NAME = "anonchat-v38";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -8,13 +8,20 @@ const APP_SHELL = [
   "./connections.html",
   "./community.html",
   "./delete-account.html",
+  "./admin.html",
   "./login.css",
   "./timeline.css",
   "./community.css",
   "./delete-account.css",
+  "./admin.css",
   "./firebase-config.js",
   "./legacy-profile.js",
   "./default-follows.js",
+  "./auth-persistence-policy.mjs",
+  "./access-activity-gate.mjs",
+  "./activity-policy.mjs",
+  "./activity.js",
+  "./activity-integration.mjs",
   "./loginfirebase.js",
   "./timeline.js",
   "./push-config.mjs",
@@ -34,6 +41,9 @@ const APP_SHELL = [
   "./community.js",
   "./message-request-policy.mjs",
   "./delete-account.js",
+  "./admin.js",
+  "./admin-dashboard-policy.mjs",
+  "./admin-deletion-policy.mjs",
   "./upload.js",
   "./pwa.js",
   "./manifest.webmanifest",
@@ -64,7 +74,14 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("./index.html")))
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        if (event.request.mode === "navigate" || event.request.destination === "document") {
+          return caches.match("./index.html");
+        }
+        return Response.error();
+      })
   );
 });
 

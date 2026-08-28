@@ -38,11 +38,11 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
     setDoc(doc(firestore, "users", "after-threshold-user"), profile("after-threshold-user", { lastActiveAt: moreThanTwentyFourHoursAgo })),
     setDoc(doc(firestore, "users", "future-activity"), profile("future-activity", { lastActiveAt: new Date(Date.now() + DAY_MS) })),
     setDoc(doc(firestore, "users", "admin-user"), { ...profile("admin-user"), username: "i_love_you_h" }),
-    setDoc(doc(firestore, "users", "banned-admin"), { ...profile("banned-admin", { banned: true }), username: "ownercybercapone" }),
+    setDoc(doc(firestore, "users", "banned-admin"), { ...profile("banned-admin", { banned: true }), username: "CyberCapone" }),
     setDoc(doc(firestore, "users", "ordinary-client-date"), profile("ordinary-client-date")),
     setDoc(doc(firestore, "users", "admin-client-date"), { ...profile("admin-client-date"), username: "i_love_you_h" }),
     setDoc(doc(firestore, "usernames", "i_love_you_h"), { uid: "admin-user", username: "i_love_you_h", createdAt: new Date(0) }),
-    setDoc(doc(firestore, "usernames", "ownercybercapone"), { uid: "banned-admin", username: "ownercybercapone", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "usernames", "cybercapone"), { uid: "banned-admin", username: "CyberCapone", createdAt: new Date(0) }),
     setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) })
   ]);
 });
@@ -88,6 +88,24 @@ try {
   await assertSucceeds(createProfile({
     uid: "new-user",
     username: "new_user",
+    createdAt: serverTimestamp(),
+    lastActiveAt: serverTimestamp()
+  }));
+
+  await testEnv.clearFirestore();
+  await seed();
+  await assertSucceeds(createProfile({
+    uid: "new-user",
+    username: "OwnerCyberCapone",
+    createdAt: serverTimestamp(),
+    lastActiveAt: serverTimestamp()
+  }));
+
+  await testEnv.clearFirestore();
+  await seed();
+  await assertFails(createProfile({
+    uid: "new-user",
+    username: "CyberCapone",
     createdAt: serverTimestamp(),
     lastActiveAt: serverTimestamp()
   }));
