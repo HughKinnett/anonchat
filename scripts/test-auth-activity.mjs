@@ -37,7 +37,7 @@ assert.equal(activityStatus({ toMillis: () => now - 23 * 60 * 60 * 1000 }, now),
 assert.equal(activityStatus({ toMillis: () => now - 7 * 24 * 60 * 60 * 1000 }, now), "active", "activity stays active through seven full days");
 assert.equal(activityStatus({ toMillis: () => now - 7 * 24 * 60 * 60 * 1000 - 1 }, now), "inactive", "activity becomes inactive after seven full days");
 assert.equal(isActivityWriteDue({ toMillis: () => now - 23 * 60 * 60 * 1000 }, now), false, "23-hour-old activity is not due");
-assert.equal(isActivityWriteDue({ toMillis: () => now - ACTIVITY_WRITE_INTERVAL_MS }, now), true, "24-hour-old activity is due");
+assert.equal(isActivityWriteDue({ toMillis: () => now - ACTIVITY_WRITE_INTERVAL_MS }, now), true, "the deterministic 24-hour boundary is inclusive");
 
 let writes = 0;
 assert.deepEqual(
@@ -127,6 +127,12 @@ assert.deepEqual(pageActivityWrite, {
 const loginSource = await readFile(new URL("../loginfirebase.js", import.meta.url), "utf8");
 assert.match(loginSource, /chooseDurablePersistence/, "login uses the durable persistence policy");
 assert.doesNotMatch(loginSource, /inMemoryPersistence/, "login has no memory-only persistence fallback");
+const rulesSource = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
+assert.match(
+  rulesSource,
+  /request\.time\s*-\s*resource\.data\.lastActiveAt\s*>=\s*duration\.value\(24,\s*'h'\)/,
+  "the Firestore commit rule uses the same inclusive 24-hour boundary"
+);
 
 for (const [surface, filename] of Object.entries({
   timeline: "timeline.js",

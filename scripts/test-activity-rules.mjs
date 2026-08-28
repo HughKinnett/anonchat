@@ -9,15 +9,24 @@ const testEnv = await initializeTestEnvironment({
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const exactlyTwentyFourHoursAgo = new Date(Date.now() - DAY_MS);
 const moreThanTwentyFourHoursAgo = new Date(Date.now() - DAY_MS - 60_000);
-const profile = (uid, { banned = false, lastActiveAt = new Date(0) } = {}) => ({
-  uid,
-  username: uid.replace("-", "_"),
-  createdAt: new Date(0),
-  lastActiveAt,
-  banned
-});
+const profile = (uid, options = {}) => {
+  const data = {
+    uid,
+    username: uid.replace("-", "_"),
+    createdAt: new Date(0),
+    banned: options.banned ?? false
+  };
+  if (!Object.hasOwn(options, "lastActiveAt")) data.lastActiveAt = new Date(0);
+  if (options.lastActiveAt !== undefined) data.lastActiveAt = options.lastActiveAt;
+  return data;
+};
+const missingActivityProfile = profile("missing-activity", { lastActiveAt: undefined });
+assert.equal(
+  Object.hasOwn(missingActivityProfile, "lastActiveAt"),
+  false,
+  "the missing-activity fixture omits lastActiveAt instead of assigning a default"
+);
 
 const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
   const firestore = context.firestore();
@@ -25,12 +34,13 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
     setDoc(doc(firestore, "users", "user-a"), profile("user-a")),
     setDoc(doc(firestore, "users", "user-b"), profile("user-b")),
     setDoc(doc(firestore, "users", "banned-user"), profile("banned-user", { banned: true })),
-    setDoc(doc(firestore, "users", "missing-activity"), profile("missing-activity", { lastActiveAt: undefined })),
-    setDoc(doc(firestore, "users", "threshold-user"), profile("threshold-user", { lastActiveAt: exactlyTwentyFourHoursAgo })),
+    setDoc(doc(firestore, "users", "missing-activity"), missingActivityProfile),
     setDoc(doc(firestore, "users", "after-threshold-user"), profile("after-threshold-user", { lastActiveAt: moreThanTwentyFourHoursAgo })),
     setDoc(doc(firestore, "users", "future-activity"), profile("future-activity", { lastActiveAt: new Date(Date.now() + DAY_MS) })),
     setDoc(doc(firestore, "users", "admin-user"), { ...profile("admin-user"), username: "i_love_you_h" }),
     setDoc(doc(firestore, "users", "banned-admin"), { ...profile("banned-admin", { banned: true }), username: "ownercybercapone" }),
+    setDoc(doc(firestore, "users", "ordinary-client-date"), profile("ordinary-client-date")),
+    setDoc(doc(firestore, "users", "admin-client-date"), { ...profile("admin-client-date"), username: "i_love_you_h" }),
     setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) })
   ]);
 });
@@ -41,25 +51,25 @@ try {
   const userB = testEnv.authenticatedContext("user-b").firestore();
   const bannedUser = testEnv.authenticatedContext("banned-user").firestore();
   const missingActivity = testEnv.authenticatedContext("missing-activity").firestore();
-  const thresholdUser = testEnv.authenticatedContext("threshold-user").firestore();
   const afterThresholdUser = testEnv.authenticatedContext("after-threshold-user").firestore();
   const futureActivity = testEnv.authenticatedContext("future-activity").firestore();
   const adminUser = testEnv.authenticatedContext("admin-user").firestore();
   const bannedAdmin = testEnv.authenticatedContext("banned-admin").firestore();
+  const ordinaryClientDate = testEnv.authenticatedContext("ordinary-client-date").firestore();
+  const adminClientDate = testEnv.authenticatedContext("admin-client-date").firestore();
 
   await assertSucceeds(updateDoc(doc(userA, "users", "user-a"), { lastActiveAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(userA, "users", "user-a"), { lastActiveAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(userB, "users", "user-a"), { lastActiveAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(bannedUser, "users", "banned-user"), { lastActiveAt: serverTimestamp() }));
-  await assertFails(updateDoc(doc(userA, "users", "user-a"), { lastActiveAt: new Date() }));
   await assertSucceeds(updateDoc(doc(missingActivity, "users", "missing-activity"), { lastActiveAt: serverTimestamp() }));
-  await assertSucceeds(updateDoc(doc(thresholdUser, "users", "threshold-user"), { lastActiveAt: serverTimestamp() }));
   await assertSucceeds(updateDoc(doc(afterThresholdUser, "users", "after-threshold-user"), { lastActiveAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(futureActivity, "users", "future-activity"), { lastActiveAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(ordinaryClientDate, "users", "ordinary-client-date"), { lastActiveAt: new Date() }));
 
   await assertSucceeds(updateDoc(doc(adminUser, "users", "admin-user"), { lastActiveAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(adminUser, "users", "user-b"), { lastActiveAt: serverTimestamp() }));
-  await assertFails(updateDoc(doc(adminUser, "users", "admin-user"), { lastActiveAt: new Date() }));
+  await assertFails(updateDoc(doc(adminClientDate, "users", "admin-client-date"), { lastActiveAt: new Date() }));
   await assertFails(updateDoc(doc(bannedAdmin, "users", "banned-admin"), { lastActiveAt: serverTimestamp() }));
   await assertSucceeds(updateDoc(doc(adminUser, "users", "user-b"), { banned: true }));
 
