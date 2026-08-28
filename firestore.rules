@@ -18,6 +18,11 @@ service cloud.firestore {
         && !existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(uid));
     }
 
+    function hasNoDeletionBarrierAfter(uid) {
+      return uid is string
+        && !existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(uid));
+    }
+
     function activeUserAfter() {
       return signedIn()
         && accountAvailableAfter(request.auth.uid)
@@ -33,11 +38,11 @@ service cloud.firestore {
 
     function linkedContentAvailableAfter(content) {
       return content.keys().hasAny(['authorId', 'originalAuthorId', 'ownerId', 'senderId'])
-        && (!content.keys().hasAny(['authorId']) || accountAvailableAfter(content.authorId))
+        && (!content.keys().hasAny(['authorId']) || hasNoDeletionBarrierAfter(content.authorId))
         && (!content.keys().hasAny(['originalAuthorId'])
-          || accountAvailableAfter(content.originalAuthorId))
-        && (!content.keys().hasAny(['ownerId']) || accountAvailableAfter(content.ownerId))
-        && (!content.keys().hasAny(['senderId']) || accountAvailableAfter(content.senderId))
+          || hasNoDeletionBarrierAfter(content.originalAuthorId))
+        && (!content.keys().hasAny(['ownerId']) || hasNoDeletionBarrierAfter(content.ownerId))
+        && (!content.keys().hasAny(['senderId']) || hasNoDeletionBarrierAfter(content.senderId))
         && (!content.keys().hasAny(['circleId']) || circleAvailableAfter(content.circleId))
         && (!content.keys().hasAny(['roomId']) || roomAvailableAfter(content.roomId));
     }
@@ -55,12 +60,12 @@ service cloud.firestore {
 
     function circleAvailableAfter(circleId) {
       return existsAfter(/databases/$(database)/documents/circles/$(circleId))
-        && accountAvailableAfter(getAfter(/databases/$(database)/documents/circles/$(circleId)).data.ownerId);
+        && hasNoDeletionBarrierAfter(getAfter(/databases/$(database)/documents/circles/$(circleId)).data.ownerId);
     }
 
     function roomAvailableAfter(roomId) {
       return existsAfter(/databases/$(database)/documents/rooms/$(roomId))
-        && accountAvailableAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId);
+        && hasNoDeletionBarrierAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId);
     }
 
     function isAdmin() {
@@ -178,7 +183,7 @@ service cloud.firestore {
         && original.data.type == 'original'
         && request.resource.data.originalAuthorId == original.data.authorId
         && request.resource.data.originalUsername == original.data.username
-        && accountAvailableAfter(original.data.authorId)
+        && hasNoDeletionBarrierAfter(original.data.authorId)
         && request.resource.data.content == original.data.content
         && request.resource.data.get('imageData', '') == original.data.get('imageData', '')
         && request.resource.data.createdAt == request.time;

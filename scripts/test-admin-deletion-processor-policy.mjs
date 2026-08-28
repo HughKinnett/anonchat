@@ -24,6 +24,7 @@ assert.equal(isClaimableJob({ ...queued, status: "processing", leaseExpiresAt: i
 const marker = completionMarker(instant(20_000), (value) => instant(value));
 assert.deepEqual(Object.keys(marker).sort(), ["completedAt", "purgeAfter", "status"]);
 assert.equal(marker.purgeAfter.toMillis() - marker.completedAt.toMillis(), COMPLETION_RETENTION_MS);
+assert.ok(COMPLETION_RETENTION_MS > 60 * 60 * 1000, "completion barrier must outlive the cached-token window");
 assert.equal(isExactCompletionMarker(marker), true);
 assert.equal(isExactCompletionMarker({ ...marker, targetUid: "target" }), false);
 const queries = cleanupQueries("target", "target_name");

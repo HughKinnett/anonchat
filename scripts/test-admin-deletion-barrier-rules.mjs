@@ -10,30 +10,38 @@ const profile = (uid, username = uid) => ({ uid, username, createdAt: new Date(0
 const queuedProfile = { ...profile("target"), banned: true, adminDeletionRequestedAt: new Date(1), adminDeletionRequestedBy: "admin", adminDeletionStatus: "queued" };
 const queuedJob = { targetUid: "target", requesterUid: "admin", requestedAt: new Date(1), status: "queued" };
 const completedMarker = { status: "completed", completedAt: new Date(1_000), purgeAfter: new Date(7_201_000) };
-const seed = async ({ targetJob = null, targetProfile = profile("target") } = {}) => testEnv.withSecurityRulesDisabled(async (context) => {
+const seed = async ({ targetJob = null, targetProfile = profile("target"), principalBarriers = [] } = {}) => testEnv.withSecurityRulesDisabled(async (context) => {
   const firestore = context.firestore();
   const writes = [
     setDoc(doc(firestore, "users", "admin"), profile("admin", "i_love_you_h")),
     setDoc(doc(firestore, "usernames", "i_love_you_h"), { uid: "admin", username: "i_love_you_h", createdAt: new Date(0) }),
     setDoc(doc(firestore, "users", "member"), profile("member")), setDoc(doc(firestore, "users", "other"), profile("other")),
+    setDoc(doc(firestore, "users", "post_author"), profile("post_author")), setDoc(doc(firestore, "users", "circle_owner"), profile("circle_owner")),
+    setDoc(doc(firestore, "users", "message_author"), profile("message_author")), setDoc(doc(firestore, "users", "room_owner"), profile("room_owner")),
     setDoc(doc(firestore, "usernames", "member"), { uid: "member", username: "member", createdAt: new Date(0) }),
     setDoc(doc(firestore, "usernames", "other"), { uid: "other", username: "other", createdAt: new Date(0) }),
     setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) }),
     setDoc(doc(firestore, "posts", "target-post"), { type: "original", authorId: "target", username: "target", content: "target post", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
     setDoc(doc(firestore, "posts", "other-post"), { type: "original", authorId: "other", username: "other", content: "other post", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
     setDoc(doc(firestore, "posts", "other-repost-target"), { type: "repost", authorId: "other", username: "other", originalPostId: "target-post", originalAuthorId: "target", originalUsername: "target", content: "target post", imageData: "", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "posts", "three-original"), { type: "original", authorId: "post_author", username: "post_author", content: "three original", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
     setDoc(doc(firestore, "communityPosts", "target-community"), { authorId: "target", username: "target", content: "target community", category: "Question", circleId: "target-circle", options: [], createdAt: new Date(0) }),
     setDoc(doc(firestore, "communityPosts", "other-in-target-circle"), { authorId: "other", username: "other", content: "other in target circle", category: "Question", circleId: "target-circle", options: [], createdAt: new Date(0) }),
     setDoc(doc(firestore, "circles", "target-circle"), { name: "Target circle", description: "", ownerId: "target", createdAt: new Date(0) }),
     setDoc(doc(firestore, "circles", "other-circle"), { name: "Other circle", description: "", ownerId: "other", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "circles", "three-circle"), { name: "Three circle", description: "", ownerId: "circle_owner", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "communityPosts", "three-community"), { authorId: "post_author", username: "post_author", content: "three principals", category: "Question", circleId: "three-circle", options: [], createdAt: new Date(0) }),
     setDoc(doc(firestore, "rooms", "target-room"), { name: "Target room", topic: "topic", ownerId: "target", createdAt: new Date(0) }),
     setDoc(doc(firestore, "rooms", "other-room"), { name: "Other room", topic: "topic", ownerId: "other", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "rooms", "three-room"), { name: "Three room", topic: "topic", ownerId: "room_owner", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "roomMessages", "three-room-message"), { roomId: "three-room", senderId: "message_author", tempName: "Author", text: "message", createdAt: new Date(0) }),
     setDoc(doc(firestore, "roomMessages", "other-in-target-room"), { roomId: "target-room", senderId: "other", tempName: "Other", text: "message", createdAt: new Date(0) }),
     setDoc(doc(firestore, "messageRequests", "member_target"), { fromId: "member", toId: "target", status: "accepted", createdAt: new Date(0) }),
     setDoc(doc(firestore, "messageRequests", "member_other"), { fromId: "member", toId: "other", status: "accepted", createdAt: new Date(0) })
   ];
   if (targetProfile) writes.push(setDoc(doc(firestore, "users", "target"), targetProfile), setDoc(doc(firestore, "usernames", "target"), { uid: "target", username: "target", createdAt: new Date(0) }));
   if (targetJob) writes.push(setDoc(doc(firestore, "adminDeletionJobs", "target"), targetJob));
+  for (const [uid, barrier] of principalBarriers) writes.push(setDoc(doc(firestore, "adminDeletionJobs", uid), barrier));
   await Promise.all(writes);
 });
 const contentWrites = (firestore, target) => {
@@ -65,9 +73,33 @@ const rename = (firestore, uid, from, to) => {
   batch.delete(doc(firestore, "usernames", from));
   return batch.commit();
 };
+const threePrincipalWrites = (firestore) => [
+  ["original-repost", () => setDoc(doc(firestore, "posts", "repost_member_three-original"), { type: "repost", authorId: "member", username: "member", originalPostId: "three-original", originalAuthorId: "post_author", originalUsername: "post_author", content: "three original", imageData: "", createdAt: serverTimestamp() })],
+  ["community-comment", () => setDoc(doc(firestore, "communityPosts", "three-community", "comments", "member"), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() })],
+  ["community-reaction", () => setDoc(doc(firestore, "communityPosts", "three-community", "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() })],
+  ["community-vote", () => setDoc(doc(firestore, "communityVotes", "three-community_member"), { postId: "three-community", uid: "member", option: 0, createdAt: serverTimestamp() })],
+  ["room-comment", () => setDoc(doc(firestore, "roomMessages", "three-room-message", "comments", "member"), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() })],
+  ["room-reaction", () => setDoc(doc(firestore, "roomMessages", "three-room-message", "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() })]
+];
+const assertBarrierDenial = async (operation, label) => {
+  try {
+    await operation();
+    assert.fail(`${label} unexpectedly succeeded`);
+  } catch (error) {
+    assert.equal(error.code, "permission-denied", `${label} must be denied by the barrier`);
+    assert.doesNotMatch(error.message, /(too many|access[- ]call|maximum.*call)/i, `${label} exceeded the access-call budget`);
+  }
+};
+const barrierStates = (uid) => [
+  ["queued", { targetUid: uid, requesterUid: "admin", requestedAt: new Date(1), status: "queued" }],
+  ["processing", { status: "processing", phase: "second-sweep" }],
+  ["completed", completedMarker],
+  ["malformed", { status: "malformed" }]
+];
 try {
   await seed(); let member = testEnv.authenticatedContext("member").firestore();
   for (const operation of contentWrites(member, false)) await assertSucceeds(operation());
+  for (const [, operation] of threePrincipalWrites(member)) await assertSucceeds(operation());
   await assertSucceeds(deleteDoc(doc(member, "messageRequests", "member_other")));
   await assertSucceeds(setDoc(doc(member, "messageRequests", "member_other"), { fromId: "member", toId: "other", status: "pending", createdAt: serverTimestamp() }));
   await assertSucceeds(rename(member, "member", "member", "member_new"));
@@ -139,5 +171,19 @@ try {
   await testEnv.clearFirestore(); await seed({ targetJob: queuedJob, targetProfile: queuedProfile });
   await testEnv.withSecurityRulesDisabled(async (context) => deleteDoc(doc(context.firestore(), "usernames", "target")));
   await assertFails(setDoc(doc(testEnv.authenticatedContext("target").firestore(), "usernames", "target"), { uid: "target", username: "target", createdAt: serverTimestamp() }));
+
+  for (const principal of ["post_author", "circle_owner", "message_author", "room_owner"]) {
+    for (const [state, barrier] of barrierStates(principal)) {
+      await testEnv.clearFirestore();
+      await seed({ principalBarriers: [[principal, barrier]] });
+      const actor = testEnv.authenticatedContext("member").firestore();
+      const relevant = threePrincipalWrites(actor).filter(([name]) => {
+        if (principal === "post_author") return name === "original-repost" || name.startsWith("community-");
+        if (principal === "circle_owner") return name.startsWith("community-");
+        return name.startsWith("room-");
+      });
+      for (const [name, operation] of relevant) await assertBarrierDenial(operation, `${principal}-${state}-${name}`);
+    }
+  }
   console.log("Firestore administrator deletion availability barrier passed");
 } finally { await testEnv.cleanup(); }
