@@ -65,6 +65,46 @@ const rulesWriteOverride = clone(rulesWorkflow);
 rulesWriteOverride.jobs.test.permissions = { contents: "write" };
 assertRejected(validateRulesWorkflow, rulesWriteOverride, "rules job permission escalation");
 
+const deletionInstallSecretEnv = clone(deletionWorkflow);
+deletionInstallSecretEnv.jobs.process.steps[2].env = { FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}" };
+assertRejected(validateDeletionWorkflow, deletionInstallSecretEnv, "secret-bearing environment on npm ci");
+
+const deletionWorkflowEnv = clone(deletionWorkflow);
+deletionWorkflowEnv.env = { FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}" };
+assertRejected(validateDeletionWorkflow, deletionWorkflowEnv, "deletion workflow environment");
+
+const deletionJobEnv = clone(deletionWorkflow);
+deletionJobEnv.jobs.process.env = { FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}" };
+assertRejected(validateDeletionWorkflow, deletionJobEnv, "deletion job environment");
+
+const rulesWorkflowEnv = clone(rulesWorkflow);
+rulesWorkflowEnv.env = { FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}" };
+assertRejected(validateRulesWorkflow, rulesWorkflowEnv, "rules workflow environment");
+
+const rulesJobEnv = clone(rulesWorkflow);
+rulesJobEnv.jobs.test.env = { FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}" };
+assertRejected(validateRulesWorkflow, rulesJobEnv, "rules job environment");
+
+const rulesTestConditional = clone(rulesWorkflow);
+rulesTestConditional.jobs.test.steps[5].if = false;
+assertRejected(validateRulesWorkflow, rulesTestConditional, "conditional Firestore CI test command");
+
+const rulesTestNonBlocking = clone(rulesWorkflow);
+rulesTestNonBlocking.jobs.test.steps[5]["continue-on-error"] = true;
+assertRejected(validateRulesWorkflow, rulesTestNonBlocking, "non-blocking Firestore CI test command");
+
+const rulesTestAlternateShell = clone(rulesWorkflow);
+rulesTestAlternateShell.jobs.test.steps[5].shell = "sh";
+assertRejected(validateRulesWorkflow, rulesTestAlternateShell, "alternate-shell Firestore CI test command");
+
+const rulesTestTimeout = clone(rulesWorkflow);
+rulesTestTimeout.jobs.test.steps[5]["timeout-minutes"] = 1;
+assertRejected(validateRulesWorkflow, rulesTestTimeout, "time-limited Firestore CI test command");
+
+const deletionProcessorConditional = clone(deletionWorkflow);
+deletionProcessorConditional.jobs.process.steps[4].if = false;
+assertRejected(validateDeletionWorkflow, deletionProcessorConditional, "conditional deletion processor command");
+
 const wrongDeletionFixture = parseWorkflow(`
 # cron: "*/5 * * * *"
 # credentials_json: \${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
