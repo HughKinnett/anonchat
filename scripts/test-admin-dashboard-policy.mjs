@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import {
   canConfirmDeletion,
+  deletionJobRecord,
   deletionDialogJobTransition,
   filterUsers,
   processorHealth,
+  queueFailureDialogTransition,
+  resolveUserFocus,
   statusForUser,
   sortInactiveUsers
 } from "../admin-dashboard-policy.mjs";
@@ -37,18 +40,45 @@ assert.equal(canConfirmDeletion({ typedUsername: "Target", targetUsername: "Targ
 assert.equal(canConfirmDeletion({ typedUsername: "target", targetUsername: "Target", blocked: false }), false);
 assert.equal(canConfirmDeletion({ typedUsername: "Target ", targetUsername: "Target", blocked: false }), false);
 assert.equal(canConfirmDeletion({ typedUsername: "Target", targetUsername: "Target", blocked: true }), false);
-assert.deepEqual(deletionDialogJobTransition({ open: true, targetUid: "target" }, { id: "other", status: "queued" }), { open: true, targetUid: "target" });
-assert.deepEqual(deletionDialogJobTransition({ open: true, targetUid: "target" }, { id: "target", status: "failed" }), {
+assert.deepEqual(deletionDialogJobTransition({ open: true, targetUid: "target" }, { pathId: "other", hasPendingWrites: false, data: { status: "queued" } }), { open: true, targetUid: "target" });
+assert.deepEqual(deletionDialogJobTransition({ open: true, targetUid: "target" }, { pathId: "target", hasPendingWrites: false, data: { status: "failed" } }), {
   open: false,
   targetUid: "target",
   feedback: "This account is already locked for permanent deletion and needs attention."
 });
+assert.deepEqual(deletionDialogJobTransition({ open: true, targetUid: "target", submitting: true }, {
+  pathId: "target", hasPendingWrites: true, data: { id: "other", status: "queued" }
+}), { open: true, targetUid: "target", submitting: true });
+assert.deepEqual(deletionJobRecord("target", { id: "other", status: "queued" }, false), {
+  pathId: "target", data: { id: "other", status: "queued" }, hasPendingWrites: false
+});
+assert.deepEqual(deletionDialogJobTransition({ open: true, targetUid: "target", submitting: true }, {
+  pathId: "target", hasPendingWrites: false, data: { id: "other", status: "queued" }
+}), {
+  open: false,
+  targetUid: "target",
+  submitting: true,
+  feedback: "Account locked. Permanent deletion queued."
+});
+assert.deepEqual(queueFailureDialogTransition({ open: true, targetUid: "target", submitting: true }, {
+  pathId: "target", hasPendingWrites: false, data: { status: "completed" }
+}), { open: false, targetUid: "target", submitting: true, feedback: "Account locked. Permanent deletion queued." });
+assert.deepEqual(queueFailureDialogTransition({ open: true, targetUid: "target", submitting: true }, {
+  pathId: "target", hasPendingWrites: true, data: { status: "queued" }
+}), { open: true, targetUid: "target", submitting: false, feedback: "Could not queue permanent deletion. No changes were made." });
+assert.deepEqual(deletionDialogJobTransition({ open: true, targetUid: "target" }, {
+  pathId: "other", hasPendingWrites: false, data: { id: "target", status: "queued" }
+}), { open: true, targetUid: "target" });
+assert.equal(resolveUserFocus({ activeFocusKey: "manage-delete-target", availableFocusKeys: ["manage-delete-target"], fallbackFocusKey: "admin-user-search" }), "manage-delete-target");
+assert.equal(resolveUserFocus({ activeFocusKey: "manage-delete-target", availableFocusKeys: [], fallbackFocusKey: "admin-user-search" }), "admin-user-search");
 
-assert.equal(processorHealth({ updatedAt: now - 10 * 60 * 1000 }, now).kind, "working");
-assert.equal(processorHealth({ updatedAt: now - 10 * 60 * 1000 - 1 }, now).kind, "delayed");
-assert.equal(processorHealth({ updatedAt: now - 20 * 60 * 1000 }, now).kind, "delayed");
-assert.equal(processorHealth({ updatedAt: now - 20 * 60 * 1000 - 1 }, now).kind, "not-running");
-assert.equal(processorHealth({ status: "failed", updatedAt: now }, now).kind, "not-running");
-assert.equal(processorHealth({ updatedAt: "unknown" }, now).kind, "not-running");
+assert.equal(processorHealth({ status: "started", updatedAt: now - 10 * 60 * 1000 }, now).kind, "working");
+assert.equal(processorHealth({ status: "completed", updatedAt: now - 10 * 60 * 1000 - 1 }, now).kind, "delayed");
+assert.equal(processorHealth({ status: "started", updatedAt: now - 20 * 60 * 1000 }, now).kind, "delayed");
+assert.equal(processorHealth({ status: "completed", updatedAt: now - 20 * 60 * 1000 - 1 }, now).kind, "not-running");
+assert.equal(processorHealth({ status: "error", updatedAt: now }, now).kind, "not-running");
+assert.equal(processorHealth({ status: "working", updatedAt: now }, now).kind, "not-running");
+assert.equal(processorHealth({ updatedAt: now }, now).kind, "not-running");
+assert.equal(processorHealth({ status: "started", updatedAt: "unknown" }, now).kind, "not-running");
 
 console.log("Admin dashboard policy behavior passed");

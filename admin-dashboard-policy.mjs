@@ -37,20 +37,33 @@ export const canConfirmDeletion = ({ typedUsername, targetUsername, blocked }) =
   && typeof targetUsername === "string"
   && typedUsername === targetUsername;
 
+export const deletionJobRecord = (pathId, data, hasPendingWrites) => ({ pathId, data, hasPendingWrites: hasPendingWrites === true });
+
 export const deletionDialogJobTransition = (dialog, job) => {
-  if (!dialog.open || job?.id !== dialog.targetUid) return dialog;
+  if (!dialog.open || job?.pathId !== dialog.targetUid || (dialog.submitting && job.hasPendingWrites)) return dialog;
   return {
     ...dialog,
     open: false,
-    feedback: job.status === "failed"
+    feedback: job.data?.status === "failed"
       ? "This account is already locked for permanent deletion and needs attention."
-      : "This account is already locked for permanent deletion."
+      : "Account locked. Permanent deletion queued."
   };
 };
 
+export const queueFailureDialogTransition = (dialog, job) => {
+  const confirmed = job && !job.hasPendingWrites ? deletionDialogJobTransition(dialog, job) : dialog;
+  return confirmed.open === false
+    ? confirmed
+    : { ...dialog, open: true, submitting: false, feedback: "Could not queue permanent deletion. No changes were made." };
+};
+
+export const resolveUserFocus = ({ activeFocusKey, availableFocusKeys, fallbackFocusKey }) => availableFocusKeys.includes(activeFocusKey)
+  ? activeFocusKey
+  : fallbackFocusKey;
+
 export const processorHealth = (processor, now = Date.now()) => {
   const updatedAt = timestampMillis(processor?.updatedAt);
-  if (processor?.status === "failed" || updatedAt === null || now < updatedAt) {
+  if (!(["started", "completed"].includes(processor?.status)) || updatedAt === null || now < updatedAt) {
     return { kind: "not-running", label: "Not running" };
   }
   const age = now - updatedAt;
