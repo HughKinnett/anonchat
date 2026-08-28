@@ -22,6 +22,7 @@ const APP_SHELL = [
   "./push-client.mjs",
   "./push-alert-ui.mjs",
   "./push-session.mjs",
+  "./push-exit.js",
   "./notification-storage.mjs",
   "./account-deletion-push.mjs",
   "./nav-menu.js",

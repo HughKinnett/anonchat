@@ -24,3 +24,27 @@ export async function cleanupAfterAuthLoss({ cleanupPush, redirect }) {
     redirect();
   }
 }
+
+export function createPushExitCoordinator({
+  cleanupAuthenticated,
+  cleanupUnauthenticated,
+  signOut
+}) {
+  return {
+    authenticated({ user, stopListeners = () => {}, redirect = () => {} }) {
+      return signOutWithPushCleanup({
+        user,
+        stopListeners,
+        cleanupPush: cleanupAuthenticated,
+        signOut,
+        redirect
+      });
+    },
+    authLoss({ redirect = () => {} }) {
+      return cleanupAfterAuthLoss({
+        cleanupPush: cleanupUnauthenticated,
+        redirect
+      });
+    }
+  };
+}

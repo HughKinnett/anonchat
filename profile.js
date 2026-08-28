@@ -1,7 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -358,7 +359,7 @@ onAuthStateChanged(auth, async (user) => {
     const destination = targetUserId
       ? `index.html?next=${encodeURIComponent(`profile.html?uid=${targetUserId}`)}`
       : "index.html";
-    window.location.replace(destination);
+    await exitAfterAuthLoss({ redirect: () => window.location.replace(destination) });
     return;
   }
 
@@ -371,8 +372,10 @@ onAuthStateChanged(auth, async (user) => {
   const currentProfileRef = doc(db, "users", user.uid);
   let currentProfileSnapshot = await getDoc(currentProfileRef);
   if (currentProfileSnapshot.exists() && currentProfileSnapshot.data().banned === true) {
-    await signOut(auth);
-    window.location.replace("index.html");
+    await exitAuthenticatedSession({
+      user,
+      redirect: () => window.location.replace("index.html")
+    });
     return;
   }
   if (!currentProfileSnapshot.exists() || !validProfile(currentProfileSnapshot.data(), user.uid)) {

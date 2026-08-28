@@ -1,7 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { resolveConnectionsTarget } from "./connections-target.mjs";
 import { recordPageActivity } from "./activity-integration.mjs";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection,
   deleteDoc,
@@ -110,11 +111,16 @@ const render = () => {
   setStatus("");
 };
 
-document.getElementById("connections-sign-out").addEventListener("click", () => signOut(auth));
+document.getElementById("connections-sign-out").addEventListener("click", async () => {
+  await exitAuthenticatedSession({
+    user: currentUser,
+    redirect: () => location.replace("index.html")
+  });
+});
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    location.replace("index.html");
+    await exitAfterAuthLoss({ redirect: () => location.replace("index.html") });
     return;
   }
   const target = resolveConnectionsTarget(location.search, user.uid);

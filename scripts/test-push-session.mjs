@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cleanupAfterAuthLoss, signOutWithPushCleanup } from "../push-session.mjs";
+import { cleanupAfterAuthLoss, createPushExitCoordinator, signOutWithPushCleanup } from "../push-session.mjs";
 
 {
   const events = [];
@@ -41,6 +41,32 @@ import { cleanupAfterAuthLoss, signOutWithPushCleanup } from "../push-session.mj
     redirect: () => events.push("redirected")
   }));
   assert.deepEqual(events, ["push-cleanup-failed", "redirected"], "automatic auth-loss redirect completes when browser cleanup fails");
+}
+
+{
+  const events = [];
+  const exits = createPushExitCoordinator({
+    cleanupAuthenticated: async (user) => { events.push(`cleanup:${user.uid}`); throw new Error("document delete failed"); },
+    cleanupUnauthenticated: async () => { throw new Error("not used"); },
+    signOut: async () => events.push("signed-out")
+  });
+  await assert.doesNotReject(exits.authenticated({
+    user: { uid: "user-a" },
+    stopListeners: () => events.push("listeners-stopped"),
+    redirect: () => events.push("redirected")
+  }));
+  assert.deepEqual(events, ["listeners-stopped", "cleanup:user-a", "signed-out", "redirected"], "shared authenticated exit completes sign-out and redirect after cleanup failure");
+}
+
+{
+  const events = [];
+  const exits = createPushExitCoordinator({
+    cleanupAuthenticated: async () => { throw new Error("not used"); },
+    cleanupUnauthenticated: async (options) => { events.push(`cleanup:${options.removeDocument}`); throw new Error("unsubscribe failed"); },
+    signOut: async () => { throw new Error("auth-loss must not call sign-out"); }
+  });
+  await assert.doesNotReject(exits.authLoss({ redirect: () => events.push("redirected") }));
+  assert.deepEqual(events, ["cleanup:false", "redirected"], "shared auth-loss exit redirects after unsubscribe failure without an owner write or sign-out call");
 }
 
 console.log("Push sign-out handoff passed");

@@ -3,7 +3,8 @@ import { recordPageActivity } from "./activity-integration.mjs";
 import { preparePushForAccountDeletion } from "./account-deletion-push.mjs";
 import { createPushAlertsClient } from "./push-client.mjs";
 import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
-import { deleteUser, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { deleteUser, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, runTransaction,
   serverTimestamp, updateDoc, where, writeBatch
@@ -75,9 +76,11 @@ const gatherOwnedData=async(uid)=>{
 };
 
 onAuthStateChanged(auth,async user=>{
-  if(!user){location.replace("index.html");return;}
+  if(!user){await exitAfterAuthLoss({redirect:()=>location.replace("index.html")});return;}
   currentUser=user;const snap=await getDoc(doc(db,"users",user.uid));
-  if(!snap.exists()){await signOut(auth);location.replace("index.html");return;}
+  if(!snap.exists()){
+    await exitAuthenticatedSession({user,redirect:()=>location.replace("index.html")});return;
+  }
   profile=snap.data();
   void recordPageActivity({
     surface: "delete-account",

@@ -2,13 +2,14 @@ import { auth, db } from "./firebase-config.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { adminDeletionQueuePayloads, canAdminSetBanned, canQueueAdminDeletion, isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
 import { canConfirmDeletion, deletionDialogJobTransition, deletionJobRecord, filterUsers, processorHealth, queueFailureDialogTransition, resolveUserFocus, sortInactiveUsers, statusForUser, timestampMillis } from "./admin-dashboard-policy.mjs";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { collection, collectionGroup, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = id => document.getElementById(id);
 const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], roomMessages: [], votes: [], jobs: new Map(), processor: null };
 const unsubs = [];
-let adminUid = "", userFilter = "all", pageActive = true, listenersStarted = false, heartbeatTimer = null;
+let adminUid = "", adminUser = null, userFilter = "all", pageActive = true, listenersStarted = false, heartbeatTimer = null;
 let dialogState = { open: false, targetUid: "", submitting: false }, dialogTarget = null, dialogTrigger = null;
 
 const setStatus = (message, error = false) => { $("admin-status").textContent = message; $("admin-status").style.color = error ? "#fca5a5" : ""; };
@@ -209,17 +210,26 @@ function stopLiveData() { while (unsubs.length) unsubs.pop()(); if (heartbeatTim
 
 $("admin-user-search").oninput = renderUsers; $("admin-content-search").oninput = renderContent; $("admin-content-type").onchange = renderContent; $("metric-window").onchange = () => { renderMetrics(); renderAnalytics(); };
 document.querySelectorAll("[data-user-filter]").forEach(button => { button.onclick = () => { userFilter = button.dataset.userFilter; document.querySelectorAll("[data-user-filter]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); renderUsers(); }; });
-$("refresh-admin").onclick = () => { renderAll(); setStatus("Dashboard recalculated from live data."); }; $("admin-sign-out").onclick = async () => { await signOut(auth); location.replace("index.html"); };
+$("refresh-admin").onclick = () => { renderAll(); setStatus("Dashboard recalculated from live data."); }; $("admin-sign-out").onclick = async () => {
+  await exitAuthenticatedSession({
+    user: adminUser,
+    stopListeners: stopLiveData,
+    redirect: () => location.replace("index.html")
+  });
+};
 $("delete-account-confirmation").oninput = updateDialogConfirmation; $("delete-account-confirm").onclick = queueDeletion;
 $("delete-account-dialog").addEventListener("close", () => { const fallback = $("admin-user-search"), trigger = dialogTrigger?.node?.isConnected ? dialogTrigger.node : controlByFocusKey(dialogTrigger?.focusKey); (trigger || fallback).focus(); dialogTrigger = null; });
 window.addEventListener("pagehide", () => { pageActive = false; stopLiveData(); }); window.addEventListener("pageshow", () => { pageActive = true; startLiveData(); });
 
 onAuthStateChanged(auth, async user => {
-  if (!user) { location.replace("index.html"); return; }
+  if (!user) {
+    await exitAfterAuthLoss({ redirect: () => location.replace("index.html") });
+    return;
+  }
   const profile = await getDoc(doc(db, "users", user.uid)), profileData = profile.exists() ? profile.data() : null, username = profileData?.username || "";
   const reservation = isProtectedAdministrator(username) ? await getDoc(doc(db, "usernames", normalizeUsername(username))) : null;
   const authorized = !profileData?.banned && reservation?.exists() && reservation.data().uid === user.uid && reservation.data().username === username;
   if (!authorized) { location.replace("timeline.html"); return; }
-  adminUid = user.uid; $("admin-identity").textContent = `Signed in as @${username}`;
+  adminUid = user.uid; adminUser = user; $("admin-identity").textContent = `Signed in as @${username}`;
   void recordPageActivity({ surface: "admin", profile: profileData, user, db, firestore: { doc, updateDoc, serverTimestamp }, isAuthorizedAdmin: authorized }); startLiveData();
 });

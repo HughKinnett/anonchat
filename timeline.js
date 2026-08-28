@@ -4,9 +4,9 @@ import { recordPageActivity } from "./activity-integration.mjs";
 import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
 import { createPushAlertsClient } from "./push-client.mjs";
 import { applyPushAlertState } from "./push-alert-ui.mjs";
-import { cleanupAfterAuthLoss, signOutWithPushCleanup } from "./push-session.mjs";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { markNotificationsSeen, readSeenNotificationIds } from "./notification-storage.mjs";
-import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -1039,8 +1039,7 @@ profilePostsButton.addEventListener("click", () => setFeedView(true));
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    await cleanupAfterAuthLoss({
-      cleanupPush: (options) => pushAlertsClient.cleanupForSignOut(null, options),
+    await exitAfterAuthLoss({
       redirect: () => window.location.replace("index.html")
     });
     return;
@@ -1052,11 +1051,9 @@ onAuthStateChanged(auth, async (user) => {
   let profile = await getDoc(profileRef);
   if (profile.exists() && profile.data().banned === true) {
     setStatus("This account has been banned.", true);
-    await signOutWithPushCleanup({
+    await exitAuthenticatedSession({
       user,
       stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
-      cleanupPush: (authenticatedUser) => pushAlertsClient.cleanupForSignOut(authenticatedUser),
-      signOut: () => signOut(auth),
       redirect: () => window.location.replace("index.html")
     });
     return;
@@ -1244,11 +1241,9 @@ form.addEventListener("submit", async (event) => {
 });
 
 document.getElementById("sign-out").addEventListener("click", async () => {
-  await signOutWithPushCleanup({
+  await exitAuthenticatedSession({
     user: currentUser,
     stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
-    cleanupPush: (user) => pushAlertsClient.cleanupForSignOut(user),
-    signOut: () => signOut(auth),
     redirect: () => window.location.replace("index.html")
   });
 });

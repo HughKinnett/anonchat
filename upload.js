@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { exitAfterAuthLoss } from "./push-exit.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -38,7 +39,10 @@ const compressImage = (file, maxWidth, maxHeight, quality = 0.72) => new Promise
 });
 
 onAuthStateChanged(auth, async (user) => {
-  if (!user) return;
+  if (!user) {
+    await exitAfterAuthLoss({ redirect: () => location.replace("index.html") });
+    return;
+  }
   const profileRef = doc(db, "users", user.uid);
   const snapshot = await getDoc(profileRef);
   if (snapshot.exists()) {

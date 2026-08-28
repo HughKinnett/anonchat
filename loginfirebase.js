@@ -1,9 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { chooseDurablePersistence } from "./auth-persistence-policy.mjs";
 import { ensureDefaultOwnerFollows } from "./default-follows.js";
-import { createPushAlertsClient } from "./push-client.mjs";
-import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
-import { signOutWithPushCleanup } from "./push-session.mjs";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import {
   browserLocalPersistence,
   browserSessionPersistence,
@@ -11,12 +9,10 @@ import {
   deleteUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signOut,
   setPersistence,
   updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  deleteDoc,
   doc,
   getDoc,
   runTransaction,
@@ -25,27 +21,6 @@ import {
 
 const status = document.getElementById("auth-status");
 let authInProgress = false;
-
-const serviceWorkerSupported = "serviceWorker" in navigator;
-const loginPushClient = createPushAlertsClient({
-  notification: "Notification" in window ? window.Notification : null,
-  serviceWorkerSupported,
-  pushSupported: "PushManager" in window,
-  serviceWorkerReady: serviceWorkerSupported ? navigator.serviceWorker.ready : null,
-  publicKey: VAPID_PUBLIC_KEY,
-  subtle: window.crypto?.subtle,
-  timestamp: serverTimestamp,
-  persist: async () => {},
-  remove: ({ id }) => deleteDoc(doc(db, "pushSubscriptions", id))
-});
-
-const signOutForPrivacy = (user) => signOutWithPushCleanup({
-  user,
-  stopListeners: () => {},
-  cleanupPush: (authenticatedUser) => loginPushClient.cleanupForSignOut(authenticatedUser),
-  signOut: () => signOut(auth),
-  redirect: () => {}
-});
 
 const setStatus = (message, isError = false) => {
   status.textContent = message;
@@ -87,10 +62,14 @@ const signInMessage = (error) => {
 };
 
 onAuthStateChanged(auth, async (user) => {
-  if (!user || authInProgress) return;
+  if (!user) {
+    await exitAfterAuthLoss({ redirect: () => {} });
+    return;
+  }
+  if (authInProgress) return;
   const profile = await getDoc(doc(db, "users", user.uid));
   if (profile.exists() && profile.data().banned === true) {
-    await signOutForPrivacy(user);
+    await exitAuthenticatedSession({ user, redirect: () => {} });
     setStatus("This account has been banned.", true);
     return;
   }
@@ -108,7 +87,7 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
     const credential = await signInAcrossDevices(email, password);
     const profile = await getDoc(doc(db, "users", credential.user.uid));
     if (profile.exists() && profile.data().banned === true) {
-      await signOutForPrivacy(credential.user);
+      await exitAuthenticatedSession({ user: credential.user, redirect: () => {} });
       throw new Error("account-banned");
     }
     window.location.replace("timeline.html");

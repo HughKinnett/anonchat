@@ -1,7 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
 import { recordPageActivity } from "./activity-integration.mjs";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc, collection, doc, getDoc, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where
@@ -47,9 +48,11 @@ document.querySelectorAll('[role="tab"]').forEach((button) => button.addEventLis
 selectPanel(location.hash.slice(1));
 
 $("sign-out").addEventListener("click", async () => {
-  listeners.forEach((unsubscribe) => unsubscribe());
-  await signOut(auth);
-  location.replace("index.html");
+  await exitAuthenticatedSession({
+    user: state.user,
+    stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+    redirect: () => location.replace("index.html")
+  });
 });
 
 const renderIdentity = () => {
@@ -494,14 +497,17 @@ const listen = (reference, key, render) => listeners.push(onSnapshot(reference, 
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    location.replace("index.html");
+    await exitAfterAuthLoss({ redirect: () => location.replace("index.html") });
     return;
   }
   state.user = user;
   const profile = await getDoc(doc(db, "users", user.uid));
   if (!profile.exists() || profile.data().banned) {
-    await signOut(auth);
-    location.replace("index.html");
+    await exitAuthenticatedSession({
+      user,
+      stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+      redirect: () => location.replace("index.html")
+    });
     return;
   }
   state.profile = profile.data();
