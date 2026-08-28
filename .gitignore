@@ -2,3 +2,4 @@ node_modules/
 .firebase/
 firebase-debug.log
 gha-creds-*.json
+.worktrees/
