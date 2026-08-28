@@ -14,7 +14,8 @@ const IDS = {
   denied: "c".repeat(64),
   banned: "d".repeat(64),
   deleting: "e".repeat(64),
-  selfDeleting: "f".repeat(64)
+  selfDeleting: "f".repeat(64),
+  selfDeleteFlow: "0".repeat(64)
 };
 const data = (uid, suffix = uid) => ({
   uid,
@@ -38,6 +39,7 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
     setDoc(doc(db, "users", "banned-user"), { uid: "banned-user", username: "banned_user", banned: true, createdAt: new Date(0) }),
     setDoc(doc(db, "users", "deleting-user"), { uid: "deleting-user", username: "deleting_user", banned: false, createdAt: new Date(0) }),
     setDoc(doc(db, "users", "self-deleting-user"), { uid: "self-deleting-user", username: "self_deleting_user", banned: false, createdAt: new Date(0) }),
+    setDoc(doc(db, "users", "self-delete-flow"), { uid: "self-delete-flow", username: "self_delete_flow", banned: false, createdAt: new Date(0) }),
     setDoc(doc(db, "users", "admin-user"), { uid: "admin-user", username: "i_love_you_h", banned: false, createdAt: new Date(0) }),
     setDoc(doc(db, "usernames", "i_love_you_h"), { uid: "admin-user", username: "i_love_you_h", createdAt: new Date(0) }),
     setDoc(doc(db, "adminDeletionJobs", "deleting-user"), { targetUid: "deleting-user", status: "queued" }),
@@ -55,6 +57,7 @@ try {
   const banned = testEnv.authenticatedContext("banned-user").firestore();
   const deleting = testEnv.authenticatedContext("deleting-user").firestore();
   const selfDeleting = testEnv.authenticatedContext("self-deleting-user").firestore();
+  const selfDeleteFlow = testEnv.authenticatedContext("self-delete-flow").firestore();
   const admin = testEnv.authenticatedContext("admin-user").firestore();
   const unauthenticated = testEnv.unauthenticatedContext().firestore();
 
@@ -80,6 +83,22 @@ try {
   await assertFails(deleteDoc(doc(deleting, "pushSubscriptions", IDS.deleting)));
   await assertFails(getDoc(doc(selfDeleting, "pushSubscriptions", IDS.selfDeleting)));
   await assertFails(deleteDoc(doc(selfDeleting, "pushSubscriptions", IDS.selfDeleting)));
+
+  await assertSucceeds(setDoc(doc(selfDeleteFlow, "pushSubscriptions", IDS.selfDeleteFlow), data("self-delete-flow")));
+  const selfDeleteSubscriptions = await assertSucceeds(getDocs(query(
+    collection(selfDeleteFlow, "pushSubscriptions"),
+    where("uid", "==", "self-delete-flow")
+  )));
+  await assertSucceeds(deleteDoc(selfDeleteSubscriptions.docs[0].ref));
+  await assertSucceeds(setDoc(doc(selfDeleteFlow, "accountDeletionRequests", "self-delete-flow"), {
+    uid: "self-delete-flow",
+    username: "self_delete_flow",
+    createdAt: serverTimestamp()
+  }));
+  await assertFails(getDocs(query(
+    collection(selfDeleteFlow, "pushSubscriptions"),
+    where("uid", "==", "self-delete-flow")
+  )));
 
   await assertFails(setDoc(doc(userA, "pushSubscriptions", "NOT-A-SHA256-ID"), data("user-a", "bad-id")));
   await assertFails(setDoc(doc(userA, "pushSubscriptions", IDS.denied), { ...data("user-a", "extra"), username: "private-name" }));

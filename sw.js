@@ -20,6 +20,10 @@ const APP_SHELL = [
   "./push-config.mjs",
   "./push-policy.mjs",
   "./push-client.mjs",
+  "./push-alert-ui.mjs",
+  "./push-session.mjs",
+  "./notification-storage.mjs",
+  "./account-deletion-push.mjs",
   "./nav-menu.js",
   "./profile.js",
   "./forgot-password.js",
@@ -77,9 +81,32 @@ self.addEventListener("push", (event) => {
   }));
 });
 
+const NOTIFICATION_ROUTES = new Set([
+  "/timeline.html",
+  "/community.html",
+  "/profile.html",
+  "/connections.html"
+]);
+
+const safeNotificationTarget = (value) => {
+  const fallback = new URL("./timeline.html", self.location.origin).href;
+  try {
+    const candidate = new URL(String(value || "./timeline.html"), self.location.origin);
+    if (
+      candidate.origin !== self.location.origin
+      || candidate.username
+      || candidate.password
+      || !NOTIFICATION_ROUTES.has(candidate.pathname)
+    ) return fallback;
+    return candidate.href;
+  } catch {
+    return fallback;
+  }
+};
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || "./timeline.html", self.location.origin).href;
+  const target = safeNotificationTarget(event.notification.data?.url);
   event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
     const existing = windows.find((client) => client.url.startsWith(self.location.origin));
     if (existing) { existing.navigate(target); return existing.focus(); }

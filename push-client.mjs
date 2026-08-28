@@ -2,6 +2,7 @@ import {
   PUSH_ALERT_STATES,
   createPushSubscriptionRecord,
   pushCapabilityState,
+  pushSubscriptionId,
   urlBase64ToUint8Array
 } from "./push-policy.mjs";
 
@@ -26,8 +27,12 @@ export function createPushAlertsClient({
   subtle = globalThis.crypto?.subtle,
   timestamp,
   persist,
+  remove = async () => {},
   onState = () => {},
-  logger = console
+  logger = console,
+  readinessTimeoutMs = 10_000,
+  setTimeoutFn = globalThis.setTimeout,
+  clearTimeoutFn = globalThis.clearTimeout
 }) {
   const capabilityState = () => pushCapabilityState({
     notificationSupported: Boolean(notification),
@@ -45,26 +50,74 @@ export function createPushAlertsClient({
     return PUSH_ALERT_STATES.RETRY;
   };
 
+  const waitForRegistration = () => new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeoutFn(timer);
+      callback(value);
+    };
+    const timer = setTimeoutFn(
+      () => finish(reject, new Error("Service worker readiness timed out.")),
+      readinessTimeoutMs
+    );
+    Promise.resolve(serviceWorkerReady).then(
+      (registration) => finish(resolve, registration),
+      (error) => finish(reject, error)
+    );
+  });
+
+  const unsubscribeSafely = async (subscription) => {
+    try {
+      return (await subscription.unsubscribe()) !== false;
+    } catch {
+      logger?.error?.("Phone alert cleanup could not finish.");
+      return false;
+    }
+  };
+
+  const persistForUser = async (user, subscription) => {
+    const record = await createPushSubscriptionRecord({
+      uid: user.uid,
+      subscription,
+      timestamp: timestamp(),
+      subtle
+    });
+    await persist(record);
+    return record;
+  };
+
   const reconcile = async (user, allowCreate) => {
     try {
-      const registration = await serviceWorkerReady;
+      const registration = await waitForRegistration();
       let subscription = await registration.pushManager.getSubscription();
-      if (!subscription && allowCreate) {
+      if (subscription) {
+        try {
+          await persistForUser(user, subscription);
+          onState(PUSH_ALERT_STATES.ENABLED);
+          return PUSH_ALERT_STATES.ENABLED;
+        } catch {
+          const removed = await unsubscribeSafely(subscription);
+          if (!allowCreate || !removed) return reportFailure();
+          subscription = null;
+        }
+      }
+      if (allowCreate) {
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(publicKey)
         });
       }
       if (!subscription) return null;
-      const record = await createPushSubscriptionRecord({
-        uid: user.uid,
-        subscription,
-        timestamp: timestamp(),
-        subtle
-      });
-      await persist(record);
-      onState(PUSH_ALERT_STATES.ENABLED);
-      return PUSH_ALERT_STATES.ENABLED;
+      try {
+        await persistForUser(user, subscription);
+        onState(PUSH_ALERT_STATES.ENABLED);
+        return PUSH_ALERT_STATES.ENABLED;
+      } catch {
+        await unsubscribeSafely(subscription);
+        return reportFailure();
+      }
     } catch {
       return reportFailure();
     }
@@ -100,6 +153,30 @@ export function createPushAlertsClient({
       }
       if (notification.permission !== "granted") return null;
       return reconcile(user, false);
+    },
+
+    async cleanupForSignOut(user, { removeDocument = true } = {}) {
+      if (!serviceWorkerSupported || !pushSupported) return true;
+      let subscription;
+      try {
+        const registration = await waitForRegistration();
+        subscription = await registration.pushManager.getSubscription();
+        if (!subscription) return true;
+        if (removeDocument) {
+          try {
+            await remove({
+              id: await pushSubscriptionId(subscription.endpoint, subtle),
+              uid: user.uid
+            });
+          } catch {
+            logger?.error?.("Phone alert document cleanup could not finish.");
+          }
+        }
+      } catch {
+        logger?.error?.("Phone alert cleanup could not start.");
+        return false;
+      }
+      return unsubscribeSafely(subscription);
     }
   };
 }

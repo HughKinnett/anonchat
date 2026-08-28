@@ -2,7 +2,10 @@ import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
-import { createPushAlertsClient, PUSH_ALERT_MESSAGES } from "./push-client.mjs";
+import { createPushAlertsClient } from "./push-client.mjs";
+import { applyPushAlertState } from "./push-alert-ui.mjs";
+import { signOutWithPushCleanup } from "./push-session.mjs";
+import { markNotificationsSeen, readSeenNotificationIds } from "./notification-storage.mjs";
 import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -61,7 +64,6 @@ const postImagePreview = document.getElementById("post-image-preview");
 const alertsButton = document.getElementById("enable-alerts");
 const phoneAlertStatus = document.getElementById("phone-alert-status");
 const editUsernameButton = document.getElementById("edit-username");
-let browserAlertIds = null;
 const spotifyCard = document.querySelector(".spotify-profile-card");
 const spotifyPlayerWrap = document.getElementById("spotify-player-wrap");
 const spotifyForm = document.getElementById("spotify-song-form");
@@ -172,11 +174,8 @@ const pushAlertsClient = createPushAlertsClient({
   subtle: window.crypto?.subtle,
   timestamp: serverTimestamp,
   persist: persistPushSubscription,
-  onState: (state) => {
-    phoneAlertStatus.textContent = PUSH_ALERT_MESSAGES[state] || "";
-    alertsButton.disabled = state === "enabling" || state === "unsupported";
-    alertsButton.textContent = state === "enabled" ? "Phone alerts on" : "Enable phone alerts";
-  }
+  remove: ({ id }) => deleteDoc(doc(db, "pushSubscriptions", id)),
+  onState: (state) => applyPushAlertState({ state, button: alertsButton, status: phoneAlertStatus })
 });
 
 alertsButton?.addEventListener("click", () => {
@@ -576,41 +575,6 @@ const renderNotifications = () => {
     );
 
   currentNotificationIds = items.map((item) => item.id);
-  if ("Notification" in window && Notification.permission === "granted") {
-    if (browserAlertIds === null) {
-      browserAlertIds = new Set(currentNotificationIds);
-    } else {
-      items.filter((item) => !browserAlertIds.has(item.id)).forEach((notification) => {
-        const actor = notification.actorLabel || usernames.get(notification.actorId) || "Anonymous user";
-        const alert = new Notification("AnonChat", {
-          body: `${notification.actorLabel ? actor : `@${actor}`} ${notification.message}`,
-          icon: "Untitled.jpeg",
-          tag: `anonchat-${notification.id}`
-        });
-        alert.onclick = () => {
-          window.focus();
-          if (notification.url) {
-            window.location.href = notification.url;
-            alert.close();
-            return;
-          }
-          setFeedView(false);
-          requestAnimationFrame(() => {
-            findPostElement(notification.postId)?.scrollIntoView({
-              behavior: "smooth",
-              block: "center"
-            });
-          });
-          alert.close();
-        };
-      });
-    }
-    currentNotificationIds.forEach((id) => browserAlertIds.add(id));
-    localStorage.setItem(
-      `anonchat-browser-alerts-${currentUser.uid}`,
-      JSON.stringify([...browserAlertIds])
-    );
-  }
   const unseenCount = currentNotificationIds.filter((id) => !seenNotificationIds.has(id)).length;
   notificationBadge.textContent = unseenCount > 99 ? "99+" : String(unseenCount);
   notificationBadge.hidden = unseenCount === 0;
@@ -669,11 +633,12 @@ notificationButton.addEventListener("click", () => {
   notificationPanel.hidden = !opening;
   notificationButton.setAttribute("aria-expanded", String(opening));
   if (opening && currentUser) {
-    currentNotificationIds.forEach((id) => seenNotificationIds.add(id));
-    localStorage.setItem(
-      `anonchat-seen-notifications-${currentUser.uid}`,
-      JSON.stringify([...seenNotificationIds])
-    );
+    markNotificationsSeen({
+      storage: localStorage,
+      uid: currentUser.uid,
+      seenIds: seenNotificationIds,
+      currentIds: currentNotificationIds
+    });
     notificationBadge.hidden = true;
   }
 });
@@ -1079,15 +1044,7 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
-  const storedAlertIds = localStorage.getItem(`anonchat-browser-alerts-${user.uid}`);
-  browserAlertIds = storedAlertIds ? new Set(JSON.parse(storedAlertIds)) : null;
-  try {
-    seenNotificationIds = new Set(JSON.parse(
-      localStorage.getItem(`anonchat-seen-notifications-${user.uid}`) || "[]"
-    ));
-  } catch {
-    seenNotificationIds = new Set();
-  }
+  seenNotificationIds = readSeenNotificationIds({ storage: localStorage, uid: user.uid });
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
   if (profile.exists() && profile.data().banned === true) {
@@ -1279,7 +1236,11 @@ form.addEventListener("submit", async (event) => {
 });
 
 document.getElementById("sign-out").addEventListener("click", async () => {
-  listeners.forEach((unsubscribe) => unsubscribe());
-  await signOut(auth);
-  window.location.replace("index.html");
+  await signOutWithPushCleanup({
+    user: currentUser,
+    stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+    cleanupPush: (user) => pushAlertsClient.cleanupForSignOut(user),
+    signOut: () => signOut(auth),
+    redirect: () => window.location.replace("index.html")
+  });
 });

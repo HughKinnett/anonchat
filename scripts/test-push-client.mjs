@@ -96,4 +96,204 @@ const makeHarness = ({ permission = "default", existing = null, configuredKey = 
   assert.equal(exposed.includes("valid_auth"), false, "auth material is absent from UI and logs");
 }
 
+{
+  let currentOwner = "user-a";
+  let currentSubscription;
+  let subscriptionNumber = 0;
+  const unsubscribed = [];
+  const states = [];
+  const makeOwnedSubscription = (label) => {
+    const ownedEndpoint = `https://push.example/private/${label}`;
+    const subscription = {
+      endpoint: ownedEndpoint,
+      expirationTime: null,
+      toJSON: () => ({ endpoint: ownedEndpoint, expirationTime: null, keys: { p256dh: `p256dh_${label}`, auth: `auth_${label}` } }),
+      async unsubscribe() {
+        unsubscribed.push(label);
+        if (currentSubscription === subscription) currentSubscription = null;
+        return true;
+      }
+    };
+    return subscription;
+  };
+  currentSubscription = makeOwnedSubscription("account-a");
+  const client = createPushAlertsClient({
+    notification: { permission: "granted", requestPermission: async () => "granted" },
+    serviceWorkerSupported: true,
+    pushSupported: true,
+    serviceWorkerReady: Promise.resolve({
+      pushManager: {
+        getSubscription: async () => currentSubscription,
+        subscribe: async () => {
+          subscriptionNumber += 1;
+          currentSubscription = makeOwnedSubscription(`account-b-${subscriptionNumber}`);
+          return currentSubscription;
+        }
+      }
+    }),
+    publicKey,
+    subtle: webcrypto.subtle,
+    timestamp: () => ({ sentinel: "serverTimestamp" }),
+    persist: async (record) => {
+      if (record.data.endpoint.endsWith("account-a") && record.data.uid !== currentOwner) {
+        throw new Error(`owner conflict for ${record.data.endpoint}`);
+      }
+      currentOwner = record.data.uid;
+    },
+    remove: async () => { currentOwner = null; },
+    onState: (state) => states.push(state),
+    logger: { error: () => {} }
+  });
+
+  await client.reconcileExisting({ uid: "user-b" });
+  assert.equal(currentSubscription, null, "passive B reconciliation removes A's origin subscription after an ownership conflict");
+  assert.deepEqual(unsubscribed, ["account-a"]);
+  assert.equal(subscriptionNumber, 0, "passive handoff never creates B's replacement");
+  assert.equal(states.at(-1), "retry");
+
+  await client.enableFromGesture({ uid: "user-b" });
+  assert.equal(currentOwner, "user-b", "B's explicit gesture persists a fresh B subscription");
+  assert.match(currentSubscription.endpoint, /account-b-1$/);
+  assert.equal(subscriptionNumber, 1);
+
+  await client.cleanupForSignOut({ uid: "user-b" });
+  assert.equal(currentOwner, null, "sign-out deletes B's endpoint-derived document while still authenticated");
+  assert.equal(currentSubscription, null, "sign-out always unsubscribes the origin subscription");
+}
+
+{
+  let currentSubscription;
+  let persistedOwner = "user-a";
+  let subscribeCount = 0;
+  const unsubscribed = [];
+  const makeOwnedSubscription = (label) => {
+    const ownedEndpoint = `https://push.example/private/${label}`;
+    const subscription = {
+      endpoint: ownedEndpoint,
+      expirationTime: null,
+      toJSON: () => ({ endpoint: ownedEndpoint, expirationTime: null, keys: { p256dh: `p256dh_${label}`, auth: `auth_${label}` } }),
+      async unsubscribe() {
+        unsubscribed.push(label);
+        if (currentSubscription === subscription) currentSubscription = null;
+        return true;
+      }
+    };
+    return subscription;
+  };
+  currentSubscription = makeOwnedSubscription("stale-a");
+  const client = createPushAlertsClient({
+    notification: { permission: "granted", requestPermission: async () => "granted" },
+    serviceWorkerSupported: true,
+    pushSupported: true,
+    serviceWorkerReady: Promise.resolve({
+      pushManager: {
+        getSubscription: async () => currentSubscription,
+        subscribe: async () => {
+          subscribeCount += 1;
+          currentSubscription = makeOwnedSubscription("fresh-b");
+          return currentSubscription;
+        }
+      }
+    }),
+    publicKey,
+    subtle: webcrypto.subtle,
+    timestamp: () => ({ sentinel: "serverTimestamp" }),
+    persist: async (record) => {
+      if (record.data.endpoint.endsWith("stale-a")) throw new Error("ownership denied");
+      persistedOwner = record.data.uid;
+    },
+    remove: async () => {},
+    onState: () => {},
+    logger: { error: () => {} }
+  });
+  await client.enableFromGesture({ uid: "user-b" });
+  assert.deepEqual(unsubscribed, ["stale-a"], "explicit B enable removes A's stale subscription first");
+  assert.equal(subscribeCount, 1, "the same explicit gesture creates one fresh replacement");
+  assert.equal(persistedOwner, "user-b");
+  assert.match(currentSubscription.endpoint, /fresh-b$/);
+}
+
+{
+  const privateEndpoint = "https://push.example/private/deletion-failure";
+  let currentSubscription;
+  let unsubscribeCount = 0;
+  const logs = [];
+  currentSubscription = {
+    endpoint: privateEndpoint,
+    expirationTime: null,
+    toJSON: () => ({ endpoint: privateEndpoint, expirationTime: null, keys: { p256dh: "private_p256dh", auth: "private_auth" } }),
+    async unsubscribe() {
+      unsubscribeCount += 1;
+      currentSubscription = null;
+      return true;
+    }
+  };
+  const client = createPushAlertsClient({
+    notification: { permission: "granted", requestPermission: async () => "granted" },
+    serviceWorkerSupported: true,
+    pushSupported: true,
+    serviceWorkerReady: Promise.resolve({ pushManager: { getSubscription: async () => currentSubscription } }),
+    publicKey,
+    subtle: webcrypto.subtle,
+    timestamp: () => ({ sentinel: "serverTimestamp" }),
+    persist: async () => {},
+    remove: async () => { throw new Error(`delete failed ${privateEndpoint}`); },
+    onState: () => {},
+    logger: { error: (...values) => logs.push(values.join(" ")) }
+  });
+  await assert.doesNotReject(client.cleanupForSignOut({ uid: "user-a" }));
+  assert.equal(unsubscribeCount, 1, "document deletion failure cannot prevent browser unsubscribe");
+  assert.equal(currentSubscription, null);
+  assert.equal(logs.join(" ").includes(privateEndpoint), false, "cleanup logs never expose endpoint material");
+}
+
+{
+  let currentSubscription;
+  let subscribeCount = 0;
+  const unsubscribed = [];
+  const makeFailingSubscription = (label) => {
+    const failingEndpoint = `https://push.example/private/${label}`;
+    const subscription = {
+      endpoint: failingEndpoint,
+      expirationTime: null,
+      toJSON: () => ({ endpoint: failingEndpoint, expirationTime: null, keys: { p256dh: `p256dh_${label}`, auth: `auth_${label}` } }),
+      async unsubscribe() {
+        unsubscribed.push(label);
+        if (currentSubscription === subscription) currentSubscription = null;
+        return true;
+      }
+    };
+    return subscription;
+  };
+  currentSubscription = makeFailingSubscription("stale-a");
+  const states = [];
+  const client = createPushAlertsClient({
+    notification: { permission: "granted", requestPermission: async () => "granted" },
+    serviceWorkerSupported: true,
+    pushSupported: true,
+    serviceWorkerReady: Promise.resolve({
+      pushManager: {
+        getSubscription: async () => currentSubscription,
+        subscribe: async () => {
+          subscribeCount += 1;
+          currentSubscription = makeFailingSubscription("fresh-b");
+          return currentSubscription;
+        }
+      }
+    }),
+    publicKey,
+    subtle: webcrypto.subtle,
+    timestamp: () => ({ sentinel: "serverTimestamp" }),
+    persist: async () => { throw new Error("storage unavailable"); },
+    remove: async () => {},
+    onState: (state) => states.push(state),
+    logger: { error: () => {} }
+  });
+  await client.enableFromGesture({ uid: "user-b" });
+  assert.equal(subscribeCount, 1);
+  assert.deepEqual(unsubscribed, ["stale-a", "fresh-b"], "both stale and unpersistable fresh subscriptions are privacy-first unsubscribed");
+  assert.equal(currentSubscription, null, "no browser endpoint survives when B's replacement cannot be persisted");
+  assert.equal(states.at(-1), "retry");
+}
+
 console.log("Push alerts client passed");

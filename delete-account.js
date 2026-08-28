@@ -1,5 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { recordPageActivity } from "./activity-integration.mjs";
+import { preparePushForAccountDeletion } from "./account-deletion-push.mjs";
+import { createPushAlertsClient } from "./push-client.mjs";
+import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
 import { deleteUser, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, runTransaction,
@@ -11,6 +14,7 @@ let currentUser=null,profile=null;
 const setStatus=(text)=>{status.textContent=text;};
 const uniqueDocs=docs=>[...new Map(docs.map(x=>[x.ref.path,x])).values()];
 const queryDocs=async(ref)=>[...(await getDocs(ref)).docs];
+const serviceWorkerSupported="serviceWorker" in navigator,pushSupported="PushManager" in window;
 
 const deleteInChunks=async(refs)=>{
   const unique=[...new Map(refs.map(ref=>[ref.path,ref])).values()];
@@ -18,6 +22,18 @@ const deleteInChunks=async(refs)=>{
     const batch=writeBatch(db);unique.slice(start,start+400).forEach(ref=>batch.delete(ref));await batch.commit();
   }
 };
+
+const deletionPushClient=createPushAlertsClient({
+  notification:"Notification" in window?window.Notification:null,
+  serviceWorkerSupported,
+  pushSupported,
+  serviceWorkerReady:serviceWorkerSupported?navigator.serviceWorker.ready:null,
+  publicKey:VAPID_PUBLIC_KEY,
+  subtle:window.crypto?.subtle,
+  timestamp:serverTimestamp,
+  persist:async()=>{},
+  remove:({id})=>deleteDoc(doc(db,"pushSubscriptions",id))
+});
 
 const gatherOwnedData=async(uid)=>{
   const [
@@ -88,7 +104,17 @@ form.addEventListener("submit",async event=>{
     if(email.toLowerCase()!==String(currentUser.email||"").toLowerCase())throw new Error("email-mismatch");
     await reauthenticateWithCredential(currentUser,EmailAuthProvider.credential(email,password));
     const requestRef=doc(db,"accountDeletionRequests",currentUser.uid);
-    await setDoc(requestRef,{uid:currentUser.uid,username:profile.username,createdAt:serverTimestamp()});
+    if(!(await getDoc(requestRef)).exists()){
+      await preparePushForAccountDeletion({
+        uid:currentUser.uid,
+        listSubscriptionRefs:async uid=>(await queryDocs(query(collection(db,"pushSubscriptions"),where("uid","==",uid)))).map(snapshot=>snapshot.ref),
+        deleteSubscriptionRefs:deleteInChunks,
+        unsubscribeCurrent:async()=>{
+          if(!(await deletionPushClient.cleanupForSignOut(currentUser,{removeDocument:false})))throw new Error("push-unsubscribe-failed");
+        },
+        createDeletionRequest:()=>setDoc(requestRef,{uid:currentUser.uid,username:profile.username,createdAt:serverTimestamp()})
+      });
+    }
     setStatus("Removing your posts and account activity…");
     const refs=await gatherOwnedData(currentUser.uid);
     refs.push(doc(db,"userPreferences",currentUser.uid),doc(db,"userPrivate",currentUser.uid));
