@@ -27,8 +27,14 @@ assert.deepEqual(rulesWorkflow.on.pull_request.paths, [
   "package-lock.json",
   ".github/workflows/firestore-rules-ci.yml",
   ".github/workflows/process-admin-deletions.yml",
+  ".github/workflows/process-notifications.yml",
+  "notification-*.mjs",
+  "push-config.mjs",
+  "sw.js",
+  "timeline.js",
+  "community.js",
   "scripts/**"
-], "Firestore CI must run when the trusted deletion workflow changes");
+], "Firestore CI must run when trusted processors and notification clients change");
 
 const assertRejected = (validator, workflow, label) => assert.notDeepEqual(validator(workflow), [], `${label} must be rejected`);
 const clone = (workflow) => structuredClone(workflow);

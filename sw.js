@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v36";
+const CACHE_NAME = "anonchat-v37";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -24,6 +24,7 @@ const APP_SHELL = [
   "./push-session.mjs",
   "./push-exit.js",
   "./notification-storage.mjs",
+  "./notification-ui-policy.mjs",
   "./account-deletion-push.mjs",
   "./nav-menu.js",
   "./profile.js",
@@ -68,17 +69,40 @@ self.addEventListener("fetch", (event) => {
 });
 
 
+const PUSH_PAYLOADS = Object.freeze({
+  reaction: Object.freeze({ title: "New reaction", body: "Someone reacted to your post.", url: "/timeline.html" }),
+  comment: Object.freeze({ title: "New comment", body: "Someone commented on your post.", url: "/timeline.html" }),
+  "message-request": Object.freeze({ title: "New message request", body: "You have a new private conversation request.", url: "/community.html#messages-panel" }),
+  "room-message": Object.freeze({ title: "New room message", body: "A temporary room you joined has a new message.", url: "/community.html#rooms-panel" }),
+  "reveal-request": Object.freeze({ title: "New mutual reveal request", body: "You have a new mutual reveal request.", url: "/community.html#messages-panel" })
+});
+const FALLBACK_PUSH_PAYLOAD = Object.freeze({
+  title: "AnonChat",
+  body: "You have a new notification.",
+  url: "/timeline.html",
+  tag: "anonchat-update"
+});
+const exactPushPayload = (payload) => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const keys = Object.keys(payload).sort();
+  if (keys.join("\u0000") !== ["body", "tag", "title", "type", "url"].sort().join("\u0000")) return null;
+  const fixed = PUSH_PAYLOADS[payload.type];
+  if (!fixed || payload.title !== fixed.title || payload.body !== fixed.body || payload.url !== fixed.url) return null;
+  if (payload.title.length > 80 || payload.body.length > 160 || !/^anonchat-[0-9a-f]{64}$/.test(payload.tag)) return null;
+  return payload;
+};
+
 self.addEventListener("push", (event) => {
-  let payload = { title: "AnonChat", body: "You have a new notification.", url: "./timeline.html" };
-  try { payload = { ...payload, ...(event.data?.json?.() || {}) }; } catch {
-    if (event.data) payload.body = event.data.text();
-  }
-  event.waitUntil(self.registration.showNotification(payload.title || "AnonChat", {
+  let payload;
+  try { payload = exactPushPayload(event.data?.json?.()); } catch {}
+  payload ??= FALLBACK_PUSH_PAYLOAD;
+  const target = safeNotificationTarget(payload.url);
+  event.waitUntil(self.registration.showNotification(payload.title, {
     body: payload.body,
     icon: "./Untitled.jpeg",
     badge: "./Untitled.jpeg",
-    tag: payload.tag || "anonchat-update",
-    data: { url: payload.url || "./timeline.html" }
+    tag: payload.tag,
+    data: { url: target }
   }));
 });
 

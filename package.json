@@ -17,8 +17,17 @@
     "test:admin-deletion-indexes": "node scripts/test-admin-deletion-indexes.mjs",
     "admin-deletion:process": "node scripts/admin-deletion-processor.mjs",
     "test:legacy-migration": "node scripts/test-legacy-migration-policy.mjs",
-    "test:workflow-policy": "node scripts/test-workflow-policy.mjs",
-    "test:firestore-ci": "npm run test:rules && npm run test:activity-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:auth-activity && npm test"
+    "test:notification-policy": "node scripts/test-notification-policy.mjs",
+    "test:notification-processor": "node scripts/test-notification-processor.mjs",
+    "test:notification-cli": "node scripts/test-notification-cli.mjs",
+    "test:notification-ui": "node scripts/test-notification-ui.mjs",
+    "test:notification-indexes": "node scripts/test-notification-indexes.mjs",
+    "test:notification": "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes",
+    "test:notification-rules": "firebase emulators:exec --only firestore \"node scripts/test-notification-rules.mjs\"",
+    "test:notification-firestore-integration": "firebase emulators:exec --only firestore \"node scripts/test-notification-firestore-integration.mjs\"",
+    "notification:process": "node scripts/notification-processor.mjs",
+    "test:workflow-policy": "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs",
+    "test:firestore-ci": "npm run test:rules && npm run test:activity-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:auth-activity && npm test"
   },
   "dependencies": {
     "firebase-admin": "14.3.0",

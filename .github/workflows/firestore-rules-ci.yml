@@ -10,6 +10,12 @@ on:
       - package-lock.json
       - .github/workflows/firestore-rules-ci.yml
       - .github/workflows/process-admin-deletions.yml
+      - .github/workflows/process-notifications.yml
+      - notification-*.mjs
+      - push-config.mjs
+      - sw.js
+      - timeline.js
+      - community.js
       - scripts/**
   workflow_dispatch:
 

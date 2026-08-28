@@ -6,6 +6,7 @@ import { createPushAlertsClient } from "./push-client.mjs";
 import { applyPushAlertState } from "./push-alert-ui.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { markNotificationsSeen, readSeenNotificationIds } from "./notification-storage.mjs";
+import { buildInAppNotifications, notificationUiId } from "./notification-ui-policy.mjs";
 import { onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -47,6 +48,7 @@ let messageRequests = [];
 let roomMessages = [];
 let roomMemberships = [];
 let rooms = [];
+let reveals = [];
 let showingProfile = false;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -470,59 +472,31 @@ const allTimelinePosts = () => [...postDocs, ...communityPostDocs];
 
 const renderNotifications = () => {
   if (!currentUser) return;
-  const ownedPosts = new Map(
-    allTimelinePosts()
-      .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
-      .map((post) => [post.id, post.data()])
-  );
-  const allPosts = new Map(allTimelinePosts().map((post) => [post.id, post.data()]));
-  const usernames = new Map(users.map((profile) => [profile.id, profile.data().username]));
-  const readIds = new Set(notificationReads.map((read) => read.data().reactionId));
-  const notificationItems = [];
-
-  reactions.forEach((reaction) => {
-    const postId = reaction.ref.parent.parent?.id;
-    const data = reaction.data();
-    const post = ownedPosts.get(postId);
-    if (!post || data.uid === currentUser.uid) return;
-    notificationItems.push({
-      id: reaction.id,
-      postId,
-      actorId: data.uid,
-      createdAt: data.createdAt,
-      message: data.type === "heart"
-        ? `reacted ❤️ to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-        : data.type === "laugh"
-          ? `reacted 😂 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-          : data.type === "sad"
-            ? `reacted 😢 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-            : `reacted 🖕 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-    });
+  const readIds = new Set(notificationReads.map((read) => read.data().eventId ?? read.data().reactionId));
+  const notificationItems = buildInAppNotifications({
+    currentUid: currentUser.uid,
+    posts: allTimelinePosts(),
+    reactions,
+    comments,
+    messageRequests,
+    roomMessages,
+    roomMemberships,
+    reveals
   });
 
+  const ownedPostIds = new Set(allTimelinePosts()
+    .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
+    .map((post) => post.id));
   comments.forEach((comment) => {
-    const postId = comment.ref.parent.parent?.id;
     const data = comment.data();
-    const post = allPosts.get(postId);
-    if (!post || data.uid === currentUser.uid) return;
-    if (ownedPosts.has(postId)) {
-      notificationItems.push({
-        id: `comment_${comment.id}`,
-        postId,
-        actorId: data.uid,
-        createdAt: data.createdAt,
-        message: `commented on your post “${post.content.slice(0, 55)}${post.content.length > 55 ? "…" : ""}”: “${data.text.slice(0, 70)}${data.text.length > 70 ? "…" : ""}”`
-      });
-    }
-    if (mentionsCurrentUser(data.text)) {
-      notificationItems.push({
-        id: `comment_mention_${comment.id}`,
-        postId,
-        actorId: data.uid,
-        createdAt: data.createdAt,
-        message: `tagged you in a comment: “${data.text.slice(0, 90)}${data.text.length > 90 ? "…" : ""}”`
-      });
-    }
+    const postId = comment.ref.parent.parent?.id;
+    if (data.uid === currentUser.uid || ownedPostIds.has(postId) || !mentionsCurrentUser(data.text)) return;
+    notificationItems.push({
+      id: notificationUiId("comment-mention", comment.ref.path, data.createdAt),
+      postId,
+      createdAt: data.createdAt,
+      message: "Someone tagged you in a comment."
+    });
   });
 
   allTimelinePosts().forEach((postDoc) => {
@@ -533,38 +507,10 @@ const renderNotifications = () => {
       !mentionsCurrentUser(post.content)
     ) return;
     notificationItems.push({
-      id: `post_mention_${postDoc.id}`,
+      id: notificationUiId("post-mention", postDoc.ref.path, post.createdAt),
       postId: postDoc.id,
-      actorId: post.authorId,
       createdAt: post.createdAt,
-      message: `tagged you in a post: “${post.content.slice(0, 100)}${post.content.length > 100 ? "…" : ""}”`
-    });
-  });
-
-  messageRequests
-    .filter((request) => request.data().toId === currentUser.uid && request.data().status === "pending")
-    .forEach((request) => {
-      const data = request.data();
-      notificationItems.push({
-        id: `message_request_${request.id}`,
-        actorId: data.fromId,
-        createdAt: data.createdAt,
-        message: "sent you a message request",
-        url: "community.html#messages-panel"
-      });
-    });
-
-  const joinedRoomIds = new Set(roomMemberships.map((membership) => membership.data().roomId));
-  roomMessages.forEach((message) => {
-    const data = message.data();
-    if (data.senderId === currentUser.uid || !joinedRoomIds.has(data.roomId) || data.expiresAt?.toMillis?.() <= Date.now()) return;
-    const roomName = rooms.find((room) => room.id === data.roomId)?.data().name || "a temporary room";
-    notificationItems.push({
-      id: `room_message_${message.id}`,
-      actorLabel: data.tempName || "Someone",
-      createdAt: data.createdAt,
-      message: `posted in ${roomName}: “${data.text.slice(0, 90)}${data.text.length > 90 ? "…" : ""}”`,
-      url: "community.html#rooms-panel"
+      message: "Someone tagged you in a post."
     });
   });
 
@@ -585,8 +531,7 @@ const renderNotifications = () => {
     open.type = "button";
     const message = document.createElement("span");
     message.className = "notification-message";
-    const actor = notification.actorLabel || usernames.get(notification.actorId) || "Anonymous user";
-    message.textContent = `${notification.actorLabel ? actor : `@${actor}`} ${notification.message}`;
+    message.textContent = notification.message;
     const time = document.createElement("time");
     time.textContent = formatNotificationTime(notification.createdAt);
     open.append(message, time);
@@ -595,12 +540,12 @@ const renderNotifications = () => {
       try {
         await setDoc(doc(db, "notificationReads", `${currentUser.uid}_${notification.id}`), {
           uid: currentUser.uid,
-          reactionId: notification.id,
+          eventId: notification.id,
           readAt: serverTimestamp()
         });
         notificationPanel.hidden = true;
         notificationButton.setAttribute("aria-expanded", "false");
-        if (notification.url) {
+        if (!notification.postId && notification.url) {
           window.location.href = notification.url;
           return;
         }
@@ -623,7 +568,7 @@ const renderNotifications = () => {
   if (!items.length) {
     const empty = document.createElement("li");
     empty.className = "notification-empty";
-    empty.textContent = "No new reactions, comments, tags, room messages, or message requests.";
+    empty.textContent = "No new reactions, comments, tags, room messages, message requests, or reveal requests.";
     notificationList.append(empty);
   }
 };
@@ -1195,6 +1140,15 @@ onAuthStateChanged(auth, async (user) => {
     roomMessages = snapshot.docs;
     renderNotifications();
   }));
+
+  listeners.push(onSnapshot(
+    query(collection(db, "reveals"), where("toId", "==", user.uid)),
+    (snapshot) => {
+      reveals = snapshot.docs;
+      renderNotifications();
+    },
+    () => setStatus("Could not load reveal-request notifications.", true)
+  ));
 });
 
 form.addEventListener("submit", async (event) => {

@@ -282,6 +282,10 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    match /system/notificationProcessor {
+      allow read, create, update, delete: if false;
+    }
+
     match /pageViews/{day} {
       allow read: if isAdmin();
       allow create: if activeUserAfter()
@@ -466,13 +470,22 @@ service cloud.firestore {
     match /notificationReads/{readId} {
       allow read: if signedIn() && resource.data.uid == request.auth.uid;
       allow create: if activeUserAfter()
-        && readId == request.auth.uid + '_' + request.resource.data.reactionId
-        && request.resource.data.keys().hasOnly(['uid', 'reactionId', 'readAt'])
+        && readId == request.auth.uid + '_' + request.resource.data.eventId
+        && request.resource.data.keys().hasOnly(['uid', 'eventId', 'readAt'])
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.reactionId is string
+        && request.resource.data.eventId is string
+        && request.resource.data.eventId.matches('^event-[0-9a-f]{16}$')
         && request.resource.data.readAt == request.time;
       allow update: if false;
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /notificationEvents/{eventId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /notificationDeliveries/{deliveryId} {
+      allow read, create, update, delete: if false;
     }
 
     match /{documentPath=**}/comments/{commentId} {

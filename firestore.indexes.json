@@ -1,5 +1,14 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "notificationEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": [
     {
       "collectionGroup": "comments",
@@ -12,8 +21,18 @@
       "indexes": [{ "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }]
     },
     {
+      "collectionGroup": "comments",
+      "fieldPath": "createdAt",
+      "indexes": [{ "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }]
+    },
+    {
       "collectionGroup": "reactions",
       "fieldPath": "uid",
+      "indexes": [{ "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }]
+    },
+    {
+      "collectionGroup": "reactions",
+      "fieldPath": "createdAt",
       "indexes": [{ "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }]
     },
     {
