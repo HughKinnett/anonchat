@@ -43,8 +43,8 @@ service cloud.firestore {
           || hasNoDeletionBarrierAfter(content.originalAuthorId))
         && (!content.keys().hasAny(['ownerId']) || hasNoDeletionBarrierAfter(content.ownerId))
         && (!content.keys().hasAny(['senderId']) || hasNoDeletionBarrierAfter(content.senderId))
-        && (!content.keys().hasAny(['circleId']) || circleAvailableAfter(content.circleId))
-        && (!content.keys().hasAny(['roomId']) || roomAvailableAfter(content.roomId));
+        && (!content.keys().hasAny(['circleId']) || linkedCircleAvailableAfter(content.circleId))
+        && (!content.keys().hasAny(['roomId']) || linkedRoomAvailableAfter(content.roomId));
     }
 
     function postAvailableAfter(postId) {
@@ -60,10 +60,20 @@ service cloud.firestore {
 
     function circleAvailableAfter(circleId) {
       return existsAfter(/databases/$(database)/documents/circles/$(circleId))
-        && hasNoDeletionBarrierAfter(getAfter(/databases/$(database)/documents/circles/$(circleId)).data.ownerId);
+        && accountAvailableAfter(getAfter(/databases/$(database)/documents/circles/$(circleId)).data.ownerId);
     }
 
     function roomAvailableAfter(roomId) {
+      return existsAfter(/databases/$(database)/documents/rooms/$(roomId))
+        && accountAvailableAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId);
+    }
+
+    function linkedCircleAvailableAfter(circleId) {
+      return existsAfter(/databases/$(database)/documents/circles/$(circleId))
+        && hasNoDeletionBarrierAfter(getAfter(/databases/$(database)/documents/circles/$(circleId)).data.ownerId);
+    }
+
+    function linkedRoomAvailableAfter(roomId) {
       return existsAfter(/databases/$(database)/documents/rooms/$(roomId))
         && hasNoDeletionBarrierAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId);
     }
@@ -183,7 +193,7 @@ service cloud.firestore {
         && original.data.type == 'original'
         && request.resource.data.originalAuthorId == original.data.authorId
         && request.resource.data.originalUsername == original.data.username
-        && hasNoDeletionBarrierAfter(original.data.authorId)
+        && accountAvailableAfter(original.data.authorId)
         && request.resource.data.content == original.data.content
         && request.resource.data.get('imageData', '') == original.data.get('imageData', '')
         && request.resource.data.createdAt == request.time;

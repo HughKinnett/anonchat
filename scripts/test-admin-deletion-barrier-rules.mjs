@@ -81,6 +81,13 @@ const threePrincipalWrites = (firestore) => [
   ["room-comment", () => setDoc(doc(firestore, "roomMessages", "three-room-message", "comments", "member"), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() })],
   ["room-reaction", () => setDoc(doc(firestore, "roomMessages", "three-room-message", "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() })]
 ];
+const topLevelOwnerWrites = (firestore) => [
+  ["repost", threePrincipalWrites(firestore)[0][1]],
+  ["circle-membership", () => setDoc(doc(firestore, "circleMembers", "three-circle_member"), { circleId: "three-circle", uid: "member", createdAt: serverTimestamp() })],
+  ["community-post", () => setDoc(doc(firestore, "communityPosts", "missing-circle-owner"), { authorId: "member", username: "member", content: "missing owner", category: "Question", circleId: "three-circle", options: [], createdAt: serverTimestamp() })],
+  ["room-membership", () => setDoc(doc(firestore, "roomMembers", "three-room_member"), { roomId: "three-room", uid: "member", joinedAt: serverTimestamp() })],
+  ["room-message", () => setDoc(doc(firestore, "roomMessages", "missing-room-owner"), { roomId: "three-room", senderId: "member", tempName: "Member", text: "missing owner", createdAt: serverTimestamp() })]
+];
 const assertBarrierDenial = async (operation, label) => {
   try {
     await operation();
@@ -89,6 +96,19 @@ const assertBarrierDenial = async (operation, label) => {
     assert.equal(error.code, "permission-denied", `${label} must be denied by the barrier`);
     assert.doesNotMatch(error.message, /(too many|access[- ]call|maximum.*call)/i, `${label} exceeded the access-call budget`);
   }
+};
+const assertAllDenied = async (operations) => {
+  const unexpectedSuccesses = [];
+  for (const [label, operation] of operations) {
+    try {
+      await operation();
+      unexpectedSuccesses.push(label);
+    } catch (error) {
+      assert.equal(error.code, "permission-denied", `${label} must be denied`);
+      assert.doesNotMatch(error.message, /(too many|access[- ]call|maximum.*call)/i, `${label} exceeded the access-call budget`);
+    }
+  }
+  assert.deepEqual(unexpectedSuccesses, [], "missing owner profiles must deny every top-level family");
 };
 const barrierStates = (uid) => [
   ["queued", { targetUid: uid, requesterUid: "admin", requestedAt: new Date(1), status: "queued" }],
@@ -171,6 +191,14 @@ try {
   await testEnv.clearFirestore(); await seed({ targetJob: queuedJob, targetProfile: queuedProfile });
   await testEnv.withSecurityRulesDisabled(async (context) => deleteDoc(doc(context.firestore(), "usernames", "target")));
   await assertFails(setDoc(doc(testEnv.authenticatedContext("target").firestore(), "usernames", "target"), { uid: "target", username: "target", createdAt: serverTimestamp() }));
+
+  await testEnv.clearFirestore(); await seed();
+  await testEnv.withSecurityRulesDisabled(async (context) => Promise.all([
+    deleteDoc(doc(context.firestore(), "users", "post_author")),
+    deleteDoc(doc(context.firestore(), "users", "circle_owner")),
+    deleteDoc(doc(context.firestore(), "users", "room_owner"))
+  ]));
+  await assertAllDenied(topLevelOwnerWrites(testEnv.authenticatedContext("member").firestore()));
 
   for (const principal of ["post_author", "circle_owner", "message_author", "room_owner"]) {
     for (const [state, barrier] of barrierStates(principal)) {
