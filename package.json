@@ -3,7 +3,9 @@
   "type": "module",
   "scripts": {
     "test": "node scripts/test-regressions.mjs",
-    "test:rules": "firebase emulators:exec --only firestore \"node scripts/test-firestore-rules.mjs\""
+    "test:rules": "firebase emulators:exec --only firestore \"node scripts/test-firestore-rules.mjs\"",
+    "test:auth-activity": "node scripts/test-auth-activity.mjs",
+    "test:activity-rules": "firebase emulators:exec --only firestore \"node scripts/test-activity-rules.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.2",

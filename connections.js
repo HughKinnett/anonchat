@@ -1,13 +1,17 @@
 import { auth, db } from "./firebase-config.js";
 import { resolveConnectionsTarget } from "./connections-target.mjs";
+import { createFirebaseActivityWriter, recordDailyActivity } from "./activity.js";
+import { runAccessActivityGate } from "./access-activity-gate.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
   serverTimestamp,
-  setDoc
+  setDoc,
+  updateDoc
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 let targetUserId = new URLSearchParams(location.search).get("uid");
@@ -109,7 +113,7 @@ const render = () => {
 
 document.getElementById("connections-sign-out").addEventListener("click", () => signOut(auth));
 
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
   if (!user) {
     location.replace("index.html");
     return;
@@ -120,6 +124,14 @@ onAuthStateChanged(auth, (user) => {
     history.replaceState(null, "", `${location.pathname}${target.canonicalSearch}${location.hash}`);
   }
   currentUser = user;
+  const profile = await getDoc(doc(db, "users", user.uid));
+  void runAccessActivityGate({
+    profile: profile.exists() ? profile.data() : null,
+    recordActivity: () => recordDailyActivity({
+      lastActiveAt: profile.data()?.lastActiveAt,
+      writeLastActiveAt: createFirebaseActivityWriter({ db, doc, updateDoc, serverTimestamp })(user)
+    })
+  });
   document.getElementById("back-to-profile").href =
     `profile.html?uid=${encodeURIComponent(targetUserId)}`;
   onSnapshot(collection(db, "users"), (snapshot) => {

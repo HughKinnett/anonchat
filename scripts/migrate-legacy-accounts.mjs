@@ -62,7 +62,8 @@ const migrateUser = async (user) => {
       transaction.set(profileRef, {
         uid: user.uid,
         username,
-        createdAt: profile.createdAt || FieldValue.serverTimestamp()
+        createdAt: profile.createdAt || FieldValue.serverTimestamp(),
+        lastActiveAt: profile.lastActiveAt || FieldValue.serverTimestamp()
       });
     }
 

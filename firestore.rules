@@ -137,11 +137,12 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn()
         && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'lastActiveAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username is string
         && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
         && request.resource.data.createdAt == request.time
+        && request.resource.data.lastActiveAt == request.time
         && ((exists(/databases/$(database)/documents/system/accountStats)
           && getAfter(/databases/$(database)/documents/system/accountStats).data.count
             == get(/databases/$(database)/documents/system/accountStats).data.count + 1)
@@ -151,6 +152,9 @@ service cloud.firestore {
         || (activeUser()
           && request.auth.uid == userId
           && (
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastActiveAt'])
+              && request.resource.data.lastActiveAt == request.time)
+            ||
             (request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['profileImage', 'coverImage'])
               && request.resource.data.get('profileImage', '').size() <= 360000

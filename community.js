@@ -1,5 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
+import { createFirebaseActivityWriter, recordDailyActivity } from "./activity.js";
+import { runAccessActivityGate } from "./access-activity-gate.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc, collection, doc, getDoc, onSnapshot, orderBy, query,
@@ -504,6 +506,13 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   state.profile = profile.data();
+  void runAccessActivityGate({
+    profile: state.profile,
+    recordActivity: () => recordDailyActivity({
+      lastActiveAt: state.profile.lastActiveAt,
+      writeLastActiveAt: createFirebaseActivityWriter({ db, doc, updateDoc, serverTimestamp })(user)
+    })
+  });
   const privateSnapshot = await getDoc(doc(db, "userPrivate", user.uid));
   state.privateDetails = privateSnapshot.exists() ? privateSnapshot.data() : {};
   loadPrivacy();

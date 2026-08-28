@@ -1,5 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
+import { createFirebaseActivityWriter, recordDailyActivity } from "./activity.js";
+import { runAccessActivityGate } from "./access-activity-gate.mjs";
 import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -1081,6 +1083,13 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     profileUsername = profile.data().username;
   }
+  void runAccessActivityGate({
+    profile: profile.data(),
+    recordActivity: () => recordDailyActivity({
+      lastActiveAt: profile.data().lastActiveAt,
+      writeLastActiveAt: createFirebaseActivityWriter({ db, doc, updateDoc, serverTimestamp })(user)
+    })
+  });
   renderSpotifySong(profile.data().spotifyTrackUrl || "");
   document.getElementById("display-name").textContent = profileUsername || "AnonChat user";
   document.getElementById("user-handle").textContent = profileUsername ? `@${profileUsername}` : "";

@@ -1,6 +1,8 @@
 import { auth, db } from "./firebase-config.js";
+import { createFirebaseActivityWriter, recordDailyActivity } from "./activity.js";
+import { runAccessActivityGate } from "./access-activity-gate.mjs";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { collection, collectionGroup, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { collection, collectionGroup, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $=id=>document.getElementById(id);
 const state={users:[],posts:[],communityPosts:[],comments:[],reactions:[],follows:[],views:[],circles:[],members:[],rooms:[],roomMessages:[],votes:[]};
@@ -139,7 +141,8 @@ $("admin-sign-out").onclick=async()=>{await signOut(auth);location.replace("inde
 $("download-admin-data").onclick=()=>{const summary={generatedAt:new Date().toISOString(),profiles:state.users.length,banned:state.users.filter(x=>x.data().banned).length,timelinePosts:state.posts.length,communityPosts:state.communityPosts.length,comments:state.comments.length,reactions:state.reactions.length,follows:state.follows.length,circles:state.circles.length,rooms:state.rooms.length,pollVotes:state.votes.length,pageViews:state.views.map(x=>({date:x.id,views:x.data().views||0}))};const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(summary,null,2)],{type:"application/json"}));a.download="anonchat-admin-summary.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);};
 
 const listen=(ref,key)=>unsubs.push(onSnapshot(ref,s=>{state[key]=s.docs;renderAll();},()=>setStatus("Could not load "+key+".",true)));
-onAuthStateChanged(auth,async user=>{if(!user){location.replace("index.html");return;}const profile=await getDoc(doc(db,"users",user.uid));const username=profile.data()?.username||"";if(!["i_love_you_h","ownercybercapone"].includes(username.toLowerCase())){location.replace("timeline.html");return;}
+onAuthStateChanged(auth,async user=>{if(!user){location.replace("index.html");return;}const profile=await getDoc(doc(db,"users",user.uid));const profileData=profile.exists()?profile.data():null;const username=profileData?.username||"";const isAuthorizedAdmin=["i_love_you_h","ownercybercapone"].includes(username.toLowerCase());if(!isAuthorizedAdmin){location.replace("timeline.html");return;}
+  void runAccessActivityGate({profile:profileData,requireAdmin:true,isAuthorizedAdmin,recordActivity:()=>recordDailyActivity({lastActiveAt:profileData.lastActiveAt,writeLastActiveAt:createFirebaseActivityWriter({db,doc,updateDoc,serverTimestamp})(user)})});
   setText("admin-identity",`Signed in as @${username} · public activity analytics only`);
   listen(collection(db,"users"),"users");listen(query(collection(db,"posts"),orderBy("createdAt","desc")),"posts");listen(query(collection(db,"communityPosts"),orderBy("createdAt","desc")),"communityPosts");
   listen(collectionGroup(db,"comments"),"comments");listen(collectionGroup(db,"reactions"),"reactions");listen(collection(db,"follows"),"follows");listen(collection(db,"pageViews"),"views");

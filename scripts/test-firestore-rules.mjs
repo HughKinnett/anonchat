@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 
 const testEnv = await initializeTestEnvironment({
   projectId: "anonchat-message-request-rules-test",
@@ -22,7 +22,7 @@ try {
   await seed();
   const userB = testEnv.authenticatedContext("user-b").firestore();
   await assertSucceeds(updateDoc(doc(userB, requestPath), {
-    fromId: "user-b", toId: "user-a", status: "pending", createdAt: new Date()
+    fromId: "user-b", toId: "user-a", status: "pending", createdAt: serverTimestamp()
   }));
   assert.equal((await getDoc(doc(userB, requestPath))).data().fromId, "user-b");
 
@@ -30,41 +30,41 @@ try {
   await seed();
   const userA = testEnv.authenticatedContext("user-a").firestore();
   await assertSucceeds(updateDoc(doc(userA, requestPath), {
-    fromId: "user-a", toId: "user-b", status: "pending", createdAt: new Date()
+    fromId: "user-a", toId: "user-b", status: "pending", createdAt: serverTimestamp()
   }));
 
   await testEnv.clearFirestore();
   await seed({ ...declinedRequest, status: "accepted" });
   await assertFails(updateDoc(doc(userB, requestPath), {
-    fromId: "user-b", toId: "user-a", status: "pending", createdAt: new Date()
+    fromId: "user-b", toId: "user-a", status: "pending", createdAt: serverTimestamp()
   }));
 
   await testEnv.clearFirestore();
   await seed();
   const userC = testEnv.authenticatedContext("user-c").firestore();
   await assertFails(updateDoc(doc(userC, requestPath), {
-    fromId: "user-c", toId: "user-a", status: "pending", createdAt: new Date()
+    fromId: "user-c", toId: "user-a", status: "pending", createdAt: serverTimestamp()
   }));
   await assertFails(updateDoc(doc(userB, requestPath), {
-    fromId: "user-b", toId: "user-c", status: "pending", createdAt: new Date()
+    fromId: "user-b", toId: "user-c", status: "pending", createdAt: serverTimestamp()
   }));
   await assertFails(updateDoc(doc(userB, requestPath), {
-    fromId: "user-b", toId: "user-a", status: "pending", createdAt: new Date(), injected: true
+    fromId: "user-b", toId: "user-a", status: "pending", createdAt: serverTimestamp(), injected: true
   }));
 
   await testEnv.clearFirestore();
   await seed({ ...declinedRequest, status: "pending" });
   await assertSucceeds(updateDoc(doc(userB, requestPath), {
-    status: "accepted", respondedAt: new Date()
+    status: "accepted", respondedAt: serverTimestamp()
   }));
 
   await testEnv.clearFirestore();
   await seed({ ...declinedRequest, status: "pending" });
   await assertFails(updateDoc(doc(userA, requestPath), {
-    status: "accepted", respondedAt: new Date()
+    status: "accepted", respondedAt: serverTimestamp()
   }));
   await assertFails(updateDoc(doc(userC, requestPath), {
-    status: "accepted", respondedAt: new Date()
+    status: "accepted", respondedAt: serverTimestamp()
   }));
 
   console.log("Firestore message request authorization regressions passed");
