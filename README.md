@@ -15,4 +15,3 @@ A pseudonymous social media app.
 - installable Progressive Web App with an offline app shell
 
 
-

@@ -63,7 +63,8 @@ export const ensureUserProfile = async (user, db) => {
     transaction.set(profileRef, {
       uid: user.uid,
       username,
-      createdAt: profileSnapshot.data()?.createdAt || serverTimestamp()
+      createdAt: profileSnapshot.data()?.createdAt || serverTimestamp(),
+      lastActiveAt: profileSnapshot.data()?.lastActiveAt || serverTimestamp()
     });
   });
 

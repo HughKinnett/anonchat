@@ -1,14 +1,14 @@
 import { auth, db } from "./firebase-config.js";
+import { chooseDurablePersistence } from "./auth-persistence-policy.mjs";
 import { ensureDefaultOwnerFollows } from "./default-follows.js";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import {
   browserLocalPersistence,
   browserSessionPersistence,
-  inMemoryPersistence,
   createUserWithEmailAndPassword,
   deleteUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signOut,
   setPersistence,
   updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
@@ -34,20 +34,10 @@ if (new URLSearchParams(window.location.search).get("accountDeleted") === "1") {
 const invalidCredentialCodes = ["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found", "auth/invalid-email"];
 
 const signInAcrossDevices = async (email, password) => {
-  // Some desktop privacy modes block IndexedDB/localStorage. Authentication must
-  // still work, so progressively fall back to a tab session and then memory.
-  for (const persistence of [
+  await chooseDurablePersistence(setPersistence, auth, [
     browserLocalPersistence,
-    browserSessionPersistence,
-    inMemoryPersistence
-  ]) {
-    try {
-      await setPersistence(auth, persistence);
-      break;
-    } catch {
-      // Continue to a storage mode supported by this browser.
-    }
-  }
+    browserSessionPersistence
+  ]);
 
   const normalizedEmail = email.trim().toLowerCase();
   return signInWithEmailAndPassword(auth, normalizedEmail, password);
@@ -55,6 +45,9 @@ const signInAcrossDevices = async (email, password) => {
 
 const signInMessage = (error) => {
   if (error.message === "account-banned") return "This account has been banned.";
+  if (error.code === "auth/storage-unavailable") {
+    return "Your browser is blocking the storage AnonChat needs to keep you signed in. Allow site data for anonchatlogin.web.app, then try again.";
+  }
   if (error.code === "auth/too-many-requests") {
     return "Too many sign-in attempts. Wait a few minutes or use Forgot password below.";
   }
@@ -69,10 +62,14 @@ const signInMessage = (error) => {
 };
 
 onAuthStateChanged(auth, async (user) => {
-  if (!user || authInProgress) return;
+  if (!user) {
+    await exitAfterAuthLoss({ redirect: () => {} });
+    return;
+  }
+  if (authInProgress) return;
   const profile = await getDoc(doc(db, "users", user.uid));
   if (profile.exists() && profile.data().banned === true) {
-    await signOut(auth);
+    await exitAuthenticatedSession({ user, redirect: () => {} });
     setStatus("This account has been banned.", true);
     return;
   }
@@ -90,7 +87,7 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
     const credential = await signInAcrossDevices(email, password);
     const profile = await getDoc(doc(db, "users", credential.user.uid));
     if (profile.exists() && profile.data().banned === true) {
-      await signOut(auth);
+      await exitAuthenticatedSession({ user: credential.user, redirect: () => {} });
       throw new Error("account-banned");
     }
     window.location.replace("timeline.html");
@@ -116,6 +113,10 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
   setStatus("Creating your anonymous account…");
   let newUser;
   try {
+    await chooseDurablePersistence(setPersistence, auth, [
+      browserLocalPersistence,
+      browserSessionPersistence
+    ]);
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     newUser = credential.user;
 
@@ -139,7 +140,8 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
       transaction.set(doc(db, "users", newUser.uid), {
         uid: newUser.uid,
         username,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        lastActiveAt: serverTimestamp()
       });
       if (statsSnapshot.exists()) {
         transaction.update(statsRef, {
@@ -166,6 +168,9 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
     if (error.message === "username-taken") message = "That anonymous username is already taken.";
     if (error.message === "site-full") message = "AnonChat has reached its current 500-user limit.";
     if (error.code === "auth/email-already-in-use") message = "That email address already has an account.";
+    if (error.code === "auth/storage-unavailable") {
+      message = "Your browser is blocking the storage AnonChat needs to keep you signed in. Allow site data for anonchatlogin.web.app, then try again.";
+    }
     setStatus(message, true);
   }
 });

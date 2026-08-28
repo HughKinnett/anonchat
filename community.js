@@ -1,6 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { recordPageActivity } from "./activity-integration.mjs";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc, collection, doc, getDoc, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where
@@ -13,8 +15,6 @@ const state = {
   messages: [], reveals: [], preferences: null, activeRoom: ""
 };
 const listeners = [];
-const notificationSessionStartedAt = Date.now();
-let communityAlertIds = new Set();
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
   $("status").classList.toggle("danger", error);
@@ -46,9 +46,11 @@ document.querySelectorAll('[role="tab"]').forEach((button) => button.addEventLis
 selectPanel(location.hash.slice(1));
 
 $("sign-out").addEventListener("click", async () => {
-  listeners.forEach((unsubscribe) => unsubscribe());
-  await signOut(auth);
-  location.replace("index.html");
+  await exitAuthenticatedSession({
+    user: state.user,
+    stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+    redirect: () => location.replace("index.html")
+  });
 });
 
 const renderIdentity = () => {
@@ -63,45 +65,6 @@ const renderIdentity = () => {
   const note = document.createElement("span");
   note.textContent = "Email hidden · private details controlled by you";
   card.append(name, trust, note);
-};
-
-const notifyCommunityEvents = () => {
-  if (!state.user || !("Notification" in window) || Notification.permission !== "granted") return;
-  const joined = new Set(state.roomMemberships.map((membership) => membership.data().roomId));
-  const events = [
-    ...state.requests
-      .filter((request) => request.data().toId === state.user.uid && request.data().status === "pending")
-      .map((request) => ({
-        id: `request_${request.id}`,
-        time: request.data().createdAt?.toMillis?.() || 0,
-        title: "New message request",
-        body: `@${userName(request.data().fromId)} wants to message you`,
-        panel: "messages-panel"
-      })),
-    ...state.roomMessages
-      .filter((message) => message.data().senderId !== state.user.uid && joined.has(message.data().roomId) && message.data().expiresAt?.toMillis?.() > Date.now())
-      .map((message) => {
-        const roomName = state.rooms.find((room) => room.id === message.data().roomId)?.data().name || "Temporary room";
-        return {
-          id: `room_${message.id}`,
-          time: message.data().createdAt?.toMillis?.() || 0,
-          title: roomName,
-          body: `${message.data().tempName}: ${message.data().text}`,
-          panel: "rooms-panel"
-        };
-      })
-  ];
-  events.forEach((entry) => {
-    if (communityAlertIds.has(entry.id) || entry.time <= notificationSessionStartedAt) return;
-    const alert = new Notification(entry.title, { body: entry.body, icon: "Untitled.jpeg", tag: `anonchat-${entry.id}` });
-    alert.onclick = () => {
-      window.focus();
-      selectPanel(entry.panel);
-      history.replaceState(null, "", `#${entry.panel}`);
-      alert.close();
-    };
-    communityAlertIds.add(entry.id);
-  });
 };
 
 const aliasFor = (roomId) => {
@@ -136,7 +99,6 @@ const renderRooms = () => {
     card.append(copy, enter);
     return card;
   }));
-  notifyCommunityEvents();
 };
 
 const openRoom = async (id, name) => {
@@ -176,7 +138,6 @@ const renderRoomMessages = () => {
     return item;
   }));
   $("room-messages").scrollTop = $("room-messages").scrollHeight;
-  notifyCommunityEvents();
 };
 
 $("room-form").addEventListener("submit", async (event) => {
@@ -352,7 +313,6 @@ const renderRequests = () => {
     empty.textContent = "No pending message requests.";
     $("request-list").append(empty);
   }
-  notifyCommunityEvents();
 };
 
 $("conversation-user").addEventListener("change", () => {
@@ -493,17 +453,27 @@ const listen = (reference, key, render) => listeners.push(onSnapshot(reference, 
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    location.replace("index.html");
+    await exitAfterAuthLoss({ redirect: () => location.replace("index.html") });
     return;
   }
   state.user = user;
   const profile = await getDoc(doc(db, "users", user.uid));
   if (!profile.exists() || profile.data().banned) {
-    await signOut(auth);
-    location.replace("index.html");
+    await exitAuthenticatedSession({
+      user,
+      stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+      redirect: () => location.replace("index.html")
+    });
     return;
   }
   state.profile = profile.data();
+  void recordPageActivity({
+    surface: "community",
+    profile: state.profile,
+    user,
+    db,
+    firestore: { doc, updateDoc, serverTimestamp }
+  });
   const privateSnapshot = await getDoc(doc(db, "userPrivate", user.uid));
   state.privateDetails = privateSnapshot.exists() ? privateSnapshot.data() : {};
   loadPrivacy();

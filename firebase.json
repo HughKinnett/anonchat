@@ -1,12 +1,14 @@
 {
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "hosting": {
     "public": ".",
     "ignore": [
       "firebase.json",
       "firestore.rules",
+      "firestore.indexes.json",
       "README.md",
       "package.json",
       "package-lock.json",

@@ -1,6 +1,13 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
-import { onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { recordPageActivity } from "./activity-integration.mjs";
+import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
+import { createPushAlertsClient } from "./push-client.mjs";
+import { applyPushAlertState } from "./push-alert-ui.mjs";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { markNotificationsSeen, readSeenNotificationIds } from "./notification-storage.mjs";
+import { buildInAppNotifications, notificationUiId } from "./notification-ui-policy.mjs";
+import { onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -41,6 +48,7 @@ let messageRequests = [];
 let roomMessages = [];
 let roomMemberships = [];
 let rooms = [];
+let reveals = [];
 let showingProfile = false;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -56,8 +64,8 @@ const postImageInput = document.getElementById("post-image-upload");
 const postImagePreviewWrap = document.getElementById("post-image-preview-wrap");
 const postImagePreview = document.getElementById("post-image-preview");
 const alertsButton = document.getElementById("enable-alerts");
+const phoneAlertStatus = document.getElementById("phone-alert-status");
 const editUsernameButton = document.getElementById("edit-username");
-let browserAlertIds = null;
 const spotifyCard = document.querySelector(".spotify-profile-card");
 const spotifyPlayerWrap = document.getElementById("spotify-player-wrap");
 const spotifyForm = document.getElementById("spotify-song-form");
@@ -134,32 +142,47 @@ spotifyRemove?.addEventListener("click", async () => {
   }
 });
 
-const updateAlertsButton = () => {
-  if (!alertsButton) return;
-  if (!("Notification" in window)) {
-    alertsButton.textContent = "Alerts unavailable";
-    alertsButton.disabled = true;
-    return;
-  }
-  alertsButton.textContent = Notification.permission === "granted" ? "Alerts on" : "Enable alerts";
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+  || window.navigator.standalone === true;
+const serviceWorkerSupported = "serviceWorker" in navigator;
+const pushSupported = "PushManager" in window;
+
+const persistPushSubscription = async ({ id, data }) => {
+  await runTransaction(db, async (transaction) => {
+    const reference = doc(db, "pushSubscriptions", id);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) {
+      transaction.set(reference, data);
+      return;
+    }
+    transaction.update(reference, {
+      expirationTime: data.expirationTime,
+      p256dh: data.p256dh,
+      auth: data.auth,
+      updatedAt: data.updatedAt
+    });
+  });
 };
 
-alertsButton?.addEventListener("click", async () => {
-  if (!("Notification" in window)) return;
-  const permission = await Notification.requestPermission();
-  updateAlertsButton();
-  if (permission === "granted" && currentUser) {
-    browserAlertIds = new Set(currentNotificationIds);
-    localStorage.setItem(
-      `anonchat-browser-alerts-${currentUser.uid}`,
-      JSON.stringify([...browserAlertIds])
-    );
-    setStatus("Phone alerts are on while AnonChat is open or running in the background.");
-  } else if (permission !== "granted") {
-    setStatus("Allow notifications in your browser settings to receive alerts.", true);
-  }
+const pushAlertsClient = createPushAlertsClient({
+  notification: "Notification" in window ? window.Notification : null,
+  serviceWorkerSupported,
+  pushSupported,
+  serviceWorkerReady: serviceWorkerSupported ? navigator.serviceWorker.ready : null,
+  publicKey: VAPID_PUBLIC_KEY,
+  isIOS,
+  isStandalone,
+  subtle: window.crypto?.subtle,
+  timestamp: serverTimestamp,
+  persist: persistPushSubscription,
+  remove: ({ id }) => deleteDoc(doc(db, "pushSubscriptions", id)),
+  onState: (state) => applyPushAlertState({ state, button: alertsButton, status: phoneAlertStatus })
 });
-updateAlertsButton();
+
+alertsButton?.addEventListener("click", () => {
+  if (currentUser) void pushAlertsClient.enableFromGesture(currentUser);
+});
 
 editUsernameButton?.addEventListener("click", async () => {
   if (!currentUser || !profileUsername) return;
@@ -449,59 +472,31 @@ const allTimelinePosts = () => [...postDocs, ...communityPostDocs];
 
 const renderNotifications = () => {
   if (!currentUser) return;
-  const ownedPosts = new Map(
-    allTimelinePosts()
-      .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
-      .map((post) => [post.id, post.data()])
-  );
-  const allPosts = new Map(allTimelinePosts().map((post) => [post.id, post.data()]));
-  const usernames = new Map(users.map((profile) => [profile.id, profile.data().username]));
-  const readIds = new Set(notificationReads.map((read) => read.data().reactionId));
-  const notificationItems = [];
-
-  reactions.forEach((reaction) => {
-    const postId = reaction.ref.parent.parent?.id;
-    const data = reaction.data();
-    const post = ownedPosts.get(postId);
-    if (!post || data.uid === currentUser.uid) return;
-    notificationItems.push({
-      id: reaction.id,
-      postId,
-      actorId: data.uid,
-      createdAt: data.createdAt,
-      message: data.type === "heart"
-        ? `reacted ❤️ to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-        : data.type === "laugh"
-          ? `reacted 😂 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-          : data.type === "sad"
-            ? `reacted 😢 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-            : `reacted 🖕 to your post: “${post.content.slice(0, 80)}${post.content.length > 80 ? "…" : ""}”`
-    });
+  const readIds = new Set(notificationReads.map((read) => read.data().eventId ?? read.data().reactionId));
+  const notificationItems = buildInAppNotifications({
+    currentUid: currentUser.uid,
+    posts: allTimelinePosts(),
+    reactions,
+    comments,
+    messageRequests,
+    roomMessages,
+    roomMemberships,
+    reveals
   });
 
+  const ownedPostIds = new Set(allTimelinePosts()
+    .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
+    .map((post) => post.id));
   comments.forEach((comment) => {
-    const postId = comment.ref.parent.parent?.id;
     const data = comment.data();
-    const post = allPosts.get(postId);
-    if (!post || data.uid === currentUser.uid) return;
-    if (ownedPosts.has(postId)) {
-      notificationItems.push({
-        id: `comment_${comment.id}`,
-        postId,
-        actorId: data.uid,
-        createdAt: data.createdAt,
-        message: `commented on your post “${post.content.slice(0, 55)}${post.content.length > 55 ? "…" : ""}”: “${data.text.slice(0, 70)}${data.text.length > 70 ? "…" : ""}”`
-      });
-    }
-    if (mentionsCurrentUser(data.text)) {
-      notificationItems.push({
-        id: `comment_mention_${comment.id}`,
-        postId,
-        actorId: data.uid,
-        createdAt: data.createdAt,
-        message: `tagged you in a comment: “${data.text.slice(0, 90)}${data.text.length > 90 ? "…" : ""}”`
-      });
-    }
+    const postId = comment.ref.parent.parent?.id;
+    if (data.uid === currentUser.uid || ownedPostIds.has(postId) || !mentionsCurrentUser(data.text)) return;
+    notificationItems.push({
+      id: notificationUiId("comment-mention", comment.ref.path, data.createdAt),
+      postId,
+      createdAt: data.createdAt,
+      message: "Someone tagged you in a comment."
+    });
   });
 
   allTimelinePosts().forEach((postDoc) => {
@@ -512,38 +507,10 @@ const renderNotifications = () => {
       !mentionsCurrentUser(post.content)
     ) return;
     notificationItems.push({
-      id: `post_mention_${postDoc.id}`,
+      id: notificationUiId("post-mention", postDoc.ref.path, post.createdAt),
       postId: postDoc.id,
-      actorId: post.authorId,
       createdAt: post.createdAt,
-      message: `tagged you in a post: “${post.content.slice(0, 100)}${post.content.length > 100 ? "…" : ""}”`
-    });
-  });
-
-  messageRequests
-    .filter((request) => request.data().toId === currentUser.uid && request.data().status === "pending")
-    .forEach((request) => {
-      const data = request.data();
-      notificationItems.push({
-        id: `message_request_${request.id}`,
-        actorId: data.fromId,
-        createdAt: data.createdAt,
-        message: "sent you a message request",
-        url: "community.html#messages-panel"
-      });
-    });
-
-  const joinedRoomIds = new Set(roomMemberships.map((membership) => membership.data().roomId));
-  roomMessages.forEach((message) => {
-    const data = message.data();
-    if (data.senderId === currentUser.uid || !joinedRoomIds.has(data.roomId) || data.expiresAt?.toMillis?.() <= Date.now()) return;
-    const roomName = rooms.find((room) => room.id === data.roomId)?.data().name || "a temporary room";
-    notificationItems.push({
-      id: `room_message_${message.id}`,
-      actorLabel: data.tempName || "Someone",
-      createdAt: data.createdAt,
-      message: `posted in ${roomName}: “${data.text.slice(0, 90)}${data.text.length > 90 ? "…" : ""}”`,
-      url: "community.html#rooms-panel"
+      message: "Someone tagged you in a post."
     });
   });
 
@@ -554,41 +521,6 @@ const renderNotifications = () => {
     );
 
   currentNotificationIds = items.map((item) => item.id);
-  if ("Notification" in window && Notification.permission === "granted") {
-    if (browserAlertIds === null) {
-      browserAlertIds = new Set(currentNotificationIds);
-    } else {
-      items.filter((item) => !browserAlertIds.has(item.id)).forEach((notification) => {
-        const actor = notification.actorLabel || usernames.get(notification.actorId) || "Anonymous user";
-        const alert = new Notification("AnonChat", {
-          body: `${notification.actorLabel ? actor : `@${actor}`} ${notification.message}`,
-          icon: "Untitled.jpeg",
-          tag: `anonchat-${notification.id}`
-        });
-        alert.onclick = () => {
-          window.focus();
-          if (notification.url) {
-            window.location.href = notification.url;
-            alert.close();
-            return;
-          }
-          setFeedView(false);
-          requestAnimationFrame(() => {
-            findPostElement(notification.postId)?.scrollIntoView({
-              behavior: "smooth",
-              block: "center"
-            });
-          });
-          alert.close();
-        };
-      });
-    }
-    currentNotificationIds.forEach((id) => browserAlertIds.add(id));
-    localStorage.setItem(
-      `anonchat-browser-alerts-${currentUser.uid}`,
-      JSON.stringify([...browserAlertIds])
-    );
-  }
   const unseenCount = currentNotificationIds.filter((id) => !seenNotificationIds.has(id)).length;
   notificationBadge.textContent = unseenCount > 99 ? "99+" : String(unseenCount);
   notificationBadge.hidden = unseenCount === 0;
@@ -599,8 +531,7 @@ const renderNotifications = () => {
     open.type = "button";
     const message = document.createElement("span");
     message.className = "notification-message";
-    const actor = notification.actorLabel || usernames.get(notification.actorId) || "Anonymous user";
-    message.textContent = `${notification.actorLabel ? actor : `@${actor}`} ${notification.message}`;
+    message.textContent = notification.message;
     const time = document.createElement("time");
     time.textContent = formatNotificationTime(notification.createdAt);
     open.append(message, time);
@@ -609,12 +540,12 @@ const renderNotifications = () => {
       try {
         await setDoc(doc(db, "notificationReads", `${currentUser.uid}_${notification.id}`), {
           uid: currentUser.uid,
-          reactionId: notification.id,
+          eventId: notification.id,
           readAt: serverTimestamp()
         });
         notificationPanel.hidden = true;
         notificationButton.setAttribute("aria-expanded", "false");
-        if (notification.url) {
+        if (!notification.postId && notification.url) {
           window.location.href = notification.url;
           return;
         }
@@ -637,7 +568,7 @@ const renderNotifications = () => {
   if (!items.length) {
     const empty = document.createElement("li");
     empty.className = "notification-empty";
-    empty.textContent = "No new reactions, comments, tags, room messages, or message requests.";
+    empty.textContent = "No new reactions, comments, tags, room messages, message requests, or reveal requests.";
     notificationList.append(empty);
   }
 };
@@ -647,11 +578,12 @@ notificationButton.addEventListener("click", () => {
   notificationPanel.hidden = !opening;
   notificationButton.setAttribute("aria-expanded", String(opening));
   if (opening && currentUser) {
-    currentNotificationIds.forEach((id) => seenNotificationIds.add(id));
-    localStorage.setItem(
-      `anonchat-seen-notifications-${currentUser.uid}`,
-      JSON.stringify([...seenNotificationIds])
-    );
+    markNotificationsSeen({
+      getStorage: () => window.localStorage,
+      uid: currentUser.uid,
+      seenIds: seenNotificationIds,
+      currentIds: currentNotificationIds
+    });
     notificationBadge.hidden = true;
   }
 });
@@ -1052,27 +984,23 @@ profilePostsButton.addEventListener("click", () => setFeedView(true));
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    window.location.replace("index.html");
+    await exitAfterAuthLoss({
+      redirect: () => window.location.replace("index.html")
+    });
     return;
   }
 
   currentUser = user;
-  const storedAlertIds = localStorage.getItem(`anonchat-browser-alerts-${user.uid}`);
-  browserAlertIds = storedAlertIds ? new Set(JSON.parse(storedAlertIds)) : null;
-  updateAlertsButton();
-  try {
-    seenNotificationIds = new Set(JSON.parse(
-      localStorage.getItem(`anonchat-seen-notifications-${user.uid}`) || "[]"
-    ));
-  } catch {
-    seenNotificationIds = new Set();
-  }
+  seenNotificationIds = readSeenNotificationIds({ getStorage: () => window.localStorage, uid: user.uid });
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
   if (profile.exists() && profile.data().banned === true) {
     setStatus("This account has been banned.", true);
-    await signOut(auth);
-    window.location.replace("index.html");
+    await exitAuthenticatedSession({
+      user,
+      stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+      redirect: () => window.location.replace("index.html")
+    });
     return;
   }
   if (!profile.exists() || !validProfile(profile.data(), user.uid)) {
@@ -1081,13 +1009,21 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     profileUsername = profile.data().username;
   }
+  void pushAlertsClient.reconcileExisting(user);
+  void recordPageActivity({
+    surface: "timeline",
+    profile: profile.data(),
+    user,
+    db,
+    firestore: { doc, updateDoc, serverTimestamp }
+  });
   renderSpotifySong(profile.data().spotifyTrackUrl || "");
   document.getElementById("display-name").textContent = profileUsername || "AnonChat user";
   document.getElementById("user-handle").textContent = profileUsername ? `@${profileUsername}` : "";
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
-    !["i_love_you_h", "ownercybercapone"].includes(profileUsername.toLowerCase());
+    !["i_love_you_h", "cybercapone"].includes(profileUsername.toLowerCase());
   const statsRef = doc(db, "system", "accountStats");
   if (!(await getDoc(statsRef)).exists()) {
     await setDoc(statsRef, {
@@ -1204,6 +1140,15 @@ onAuthStateChanged(auth, async (user) => {
     roomMessages = snapshot.docs;
     renderNotifications();
   }));
+
+  listeners.push(onSnapshot(
+    query(collection(db, "reveals"), where("toId", "==", user.uid)),
+    (snapshot) => {
+      reveals = snapshot.docs;
+      renderNotifications();
+    },
+    () => setStatus("Could not load reveal-request notifications.", true)
+  ));
 });
 
 form.addEventListener("submit", async (event) => {
@@ -1250,7 +1195,9 @@ form.addEventListener("submit", async (event) => {
 });
 
 document.getElementById("sign-out").addEventListener("click", async () => {
-  listeners.forEach((unsubscribe) => unsubscribe());
-  await signOut(auth);
-  window.location.replace("index.html");
+  await exitAuthenticatedSession({
+    user: currentUser,
+    stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+    redirect: () => window.location.replace("index.html")
+  });
 });

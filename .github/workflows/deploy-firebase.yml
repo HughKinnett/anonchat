@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy Hosting and Firestore rules
+    name: Deploy Hosting, Firestore rules, and indexes
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -32,4 +32,4 @@ jobs:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
 
       - name: Deploy Firebase production
-        run: npx --yes firebase-tools@15.28.1 deploy --project anonchatlogin --only "firestore:rules,hosting" --non-interactive
+        run: npx --yes firebase-tools@15.28.1 deploy --project anonchatlogin --only "firestore:rules,firestore:indexes,hosting" --non-interactive

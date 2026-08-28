@@ -1,6 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
-import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { recordPageActivity } from "./activity-integration.mjs";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -13,6 +15,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -356,7 +359,7 @@ onAuthStateChanged(auth, async (user) => {
     const destination = targetUserId
       ? `index.html?next=${encodeURIComponent(`profile.html?uid=${targetUserId}`)}`
       : "index.html";
-    window.location.replace(destination);
+    await exitAfterAuthLoss({ redirect: () => window.location.replace(destination) });
     return;
   }
 
@@ -369,8 +372,10 @@ onAuthStateChanged(auth, async (user) => {
   const currentProfileRef = doc(db, "users", user.uid);
   let currentProfileSnapshot = await getDoc(currentProfileRef);
   if (currentProfileSnapshot.exists() && currentProfileSnapshot.data().banned === true) {
-    await signOut(auth);
-    window.location.replace("index.html");
+    await exitAuthenticatedSession({
+      user,
+      redirect: () => window.location.replace("index.html")
+    });
     return;
   }
   if (!currentProfileSnapshot.exists() || !validProfile(currentProfileSnapshot.data(), user.uid)) {
@@ -379,6 +384,13 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     currentProfileUsername = currentProfileSnapshot.data().username;
   }
+  void recordPageActivity({
+    surface: "profile",
+    profile: currentProfileSnapshot.data(),
+    user,
+    db,
+    firestore: { doc, updateDoc, serverTimestamp }
+  });
 
   const targetProfileRef = doc(db, "users", targetUserId);
   let profileSnapshot = await getDoc(targetProfileRef);
@@ -411,7 +423,7 @@ onAuthStateChanged(auth, async (user) => {
   if (targetProfile.coverImage) {
     document.getElementById("view-profile-cover").src = targetProfile.coverImage;
   }
-  const adminUsernames = ["i_love_you_h", "ownercybercapone"];
+  const adminUsernames = ["i_love_you_h", "cybercapone"];
   const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
   document.getElementById("profile-admin-link").hidden = !viewerIsAdmin;
   const viewDay = new Date().toISOString().slice(0, 10);
