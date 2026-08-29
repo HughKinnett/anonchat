@@ -272,6 +272,13 @@ service cloud.firestore {
         || kind in ['roomMessage', 'user'];
     }
 
+    function validAdminMaterialRestore() {
+      return isAdmin()
+        && resource.data.get('moderationState', 'visible') == 'hidden'
+        && request.resource.data.get('moderationState', 'visible') == 'visible'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moderationState']);
+    }
+
     function validModerationHoldUpdate(targetKind, targetId, reportedUserId) {
       let reportId = request.auth.uid + '_' + targetKind + '_' + targetId;
       let intake = getAfter(/databases/$(database)/documents/reportIntakes/$(reportId));
@@ -632,7 +639,14 @@ service cloud.firestore {
     match /moderationCases/{caseId} {
       allow read: if isAdmin();
       allow create: if validAdminDeletionCase(caseId);
-      allow update, delete: if false;
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'updatedAt', 'resolvedAt', 'resolvedBy'])
+        && request.resource.data.status in ['restored', 'deleted']
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.resolvedAt == request.time
+        && request.resource.data.resolvedBy == request.auth.uid;
+      allow delete: if false;
 
       match /reports/{reportId} {
         allow read: if isAdmin();
@@ -1030,8 +1044,9 @@ service cloud.firestore {
         && request.resource.data.options.size() <= 4
         && request.resource.data.moderationState == 'visible'
         && request.resource.data.createdAt == request.time;
-      allow update: if validModerationHoldUpdate('communityPost', postId, resource.data.authorId);
-      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      allow update: if validModerationHoldUpdate('communityPost', postId, resource.data.authorId)
+        || validAdminMaterialRestore();
+      allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);
     }
 
     match /communityVotes/{voteId} {
@@ -1220,8 +1235,9 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter() && (validOriginalPost() || validRepost(postId));
-      allow update: if validModerationHoldUpdate('post', postId, resource.data.authorId);
-      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      allow update: if validModerationHoldUpdate('post', postId, resource.data.authorId)
+        || validAdminMaterialRestore();
+      allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);
     }
   }
 }

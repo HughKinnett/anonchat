@@ -1153,3 +1153,17 @@ button:not(.avatar-button):not(.banner-button):hover, .nav-button:hover,
 }
 .post-interaction-summary li + li { margin-top: 8px; }
 .post-interaction-summary a { color: #ddd6fe; font-weight: 800; }
+
+
+/* Facebook-style interaction summary */
+.reactions { align-items: center; }
+.reaction-button { min-width: 38px; justify-content: center; }
+.reaction-button[aria-pressed="true"] {
+  border-color: rgba(196, 181, 253, .95) !important;
+  background: rgba(139, 92, 246, .38) !important;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, .16);
+}
+.post-interaction-summary > summary {
+  letter-spacing: .01em;
+  white-space: nowrap;
+}

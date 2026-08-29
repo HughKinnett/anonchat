@@ -892,14 +892,10 @@ const toggleReaction = async (parent, type, currentType) => {
   });
 };
 
-const reactionButton = (parent, type, emoji, reactionDocs, reactionsTruncated) => {
-  const matching = reactionDocs.filter((reaction) => reaction.data().type === type);
+const reactionButton = (parent, type, emoji, reactionDocs) => {
   const myReaction = reactionDocs.find((reaction) => reaction.data().uid === currentUser.uid);
   const currentType = myReaction?.data().type;
   const selected = currentType === type;
-  const wrapper = document.createElement("span");
-  wrapper.className = "reaction-control";
-
   const button = document.createElement("button");
   button.className = "reaction-button";
   button.type = "button";
@@ -919,31 +915,7 @@ const reactionButton = (parent, type, emoji, reactionDocs, reactionsTruncated) =
       button.disabled = false;
     }
   });
-
-  const details = document.createElement("details");
-  details.className = "reaction-details";
-  const summary = document.createElement("summary");
-  summary.textContent = boundedInteractionCount(matching.length, reactionsTruncated);
-  summary.title = `Show who chose ${emoji}`;
-  const list = document.createElement("ul");
-  if (!matching.length) {
-    const empty = document.createElement("li");
-    empty.textContent = "No reactions yet.";
-    list.append(empty);
-  } else {
-    matching.forEach((reaction) => {
-      const entry = document.createElement("li");
-      const profile = users.find((user) => user.id === reaction.data().uid)?.data();
-      const link = document.createElement("a");
-      link.href = `profile.html?uid=${encodeURIComponent(reaction.data().uid)}`;
-      link.textContent = `@${profile?.username || "anonymous"}`;
-      entry.append(link, document.createTextNode(` chose ${emoji}`));
-      list.append(entry);
-    });
-  }
-  details.append(summary, list);
-  wrapper.append(button, details);
-  return wrapper;
+  return button;
 };
 
 const sharePost = async (postDoc) => {
@@ -1035,7 +1007,12 @@ const renderPost = (postDoc) => {
   const interactionSummary = document.createElement("details");
   interactionSummary.className = "post-interaction-summary";
   const interactionSummaryLabel = document.createElement("summary");
-  interactionSummaryLabel.textContent = `${reactionDocs.length} interaction${reactionDocs.length === 1 ? "" : "s"}`;
+  const activeReactionTypes = [...new Set(reactionDocs.map((reaction) => reaction.data().type))];
+  const reactionEmoji = { heart: "❤️", middle_finger: "🖕", laugh: "😂", sad: "😢" };
+  const activeReactionIcons = activeReactionTypes.map((type) => reactionEmoji[type]).filter(Boolean).join(" ");
+  interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${reactionDocs.length}`;
+  interactionSummaryLabel.setAttribute("aria-label",
+    `${reactionDocs.length} interaction${reactionDocs.length === 1 ? "" : "s"}. Show who interacted.`);
   interactionSummaryLabel.title = "Show who interacted with this post";
   const interactionPeople = document.createElement("ul");
   if (!reactionDocs.length) {
@@ -1043,7 +1020,6 @@ const renderPost = (postDoc) => {
     emptyInteraction.textContent = "No interactions yet.";
     interactionPeople.append(emptyInteraction);
   } else {
-    const reactionEmoji = { heart: "❤️", middle_finger: "🖕", laugh: "😂", sad: "😢" };
     reactionDocs.forEach((reaction) => {
       const row = document.createElement("li");
       const profile = users.find((user) => user.id === reaction.data().uid)?.data();

@@ -169,17 +169,38 @@ function restoreReportFocus({ sourceFocusKey, reportId } = {}) {
 }
 
 async function queueModerationAction(item, action, control) {
-  if (!moderationControlsReady()) {
+  const directPostAction = ["post", "communityPost"].includes(item.targetKind)
+    && ["restore", "deleteMaterial"].includes(action);
+  if (!directPostAction && !moderationControlsReady()) {
     setStatus("Moderation actions are paused until the trusted service is healthy.", true);
     return;
   }
   const user = reportUser(item), existingAction = reportAction(item), intendedFocus = { sourceFocusKey: control.dataset.focusKey, reportId: item.id };
   const actionState = moderationActionState({ caseRecord: item, action: existingAction, deletionPending: reportDeletionPending(item), username: user?.username });
-  if (actionState[action]?.disabled || pendingModerationActions.has(item.id)) return;
+  if ((!directPostAction && actionState[action]?.disabled) || pendingModerationActions.has(item.id)) return;
   const pending = { action, status: "queued" };
   pendingModerationActions.set(item.id, pending); control.disabled = true; renderReports(intendedFocus);
   try {
-    const requestedAt = serverTimestamp(), terminalRetry = isTerminalModerationAction(existingAction);
+    const requestedAt = serverTimestamp();
+    if (directPostAction) {
+      const batch = writeBatch(db);
+      const materialRef = doc(db, item.targetCollection, item.targetId);
+      if (action === "restore") batch.update(materialRef, { moderationState: "visible" });
+      else batch.delete(materialRef);
+      batch.update(doc(db, "moderationCases", item.id), {
+        status: action === "restore" ? "restored" : "deleted",
+        updatedAt: requestedAt,
+        resolvedAt: requestedAt,
+        resolvedBy: adminUid
+      });
+      await batch.commit();
+      pendingModerationActions.delete(item.id);
+      if (action === "deleteMaterial") evictModerationEvidence(item.id);
+      setStatus(action === "restore" ? "Material restored immediately." : "Material permanently deleted.");
+      renderReports(intendedFocus);
+      return;
+    }
+    const terminalRetry = isTerminalModerationAction(existingAction);
     await setDoc(doc(db, "moderationActions", item.id), terminalRetry
       ? moderationActionRetryPayload({ caseRecord: item, action, existingAction, requestedAt })
       : moderationActionPayload({ caseRecord: item, action, requestedBy: adminUid, requestedAt }));
@@ -190,7 +211,9 @@ async function queueModerationAction(item, action, control) {
       : action === "restore" ? "Restore material queued." : "Permanent material deletion queued.");
   } catch {
     pendingModerationActions.delete(item.id);
-    setStatus("Could not queue that material action. No changes were made.", true);
+    setStatus(directPostAction
+      ? "Could not complete that material action. No changes were made."
+      : "Could not queue that material action. No changes were made.", true);
     renderReports();
   }
 }
