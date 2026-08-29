@@ -48,6 +48,25 @@
         <div id="room-messages" class="message-stream"></div>
         <form id="room-message-form" class="inline-form"><input id="room-message" maxlength="280" required placeholder="Message as your temporary identity"><button class="primary">Send</button></form>
       </dialog>
+      <dialog id="room-report-dialog" class="room-report-dialog" aria-labelledby="room-report-title">
+        <form id="room-report-form">
+          <h2 id="room-report-title">Report Room</h2>
+          <p>Choose the reason that best describes the problem.</p>
+          <fieldset>
+            <legend>Reason</legend>
+            <label><input type="radio" name="reason" value="Spam" required> Spam</label>
+            <label><input type="radio" name="reason" value="Harassment"> Harassment</label>
+            <label><input type="radio" name="reason" value="Threats"> Threats</label>
+            <label><input type="radio" name="reason" value="Sexual content"> Sexual content</label>
+            <label><input type="radio" name="reason" value="Other"> Other</label>
+          </fieldset>
+          <p class="report-hold-copy">The room will be suspended immediately. Expiration paused for admin review.</p>
+          <div class="room-report-actions">
+            <button id="cancel-room-report" class="secondary" type="button">Cancel</button>
+            <button class="primary" type="submit">Submit report</button>
+          </div>
+        </form>
+      </dialog>
     </section>
 
     <section id="messages-panel" class="panel" role="tabpanel" hidden>

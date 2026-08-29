@@ -101,16 +101,23 @@
                 <option value="Poll">Poll</option>
               </select>
             </label>
-            <label>Disappear
-              <select id="post-expiry">
-                <option value="0">Never</option>
-                <option value="1">After 1 hour</option>
-                <option value="24">After 24 hours</option>
-                <option value="168">After 7 days</option>
-                <option value="720">After 30 days</option>
-              </select>
-            </label>
+            <div class="expiry-photo-controls">
+              <label>Disappear
+                <select id="post-expiry">
+                  <option value="0">Never</option>
+                  <option value="1">After 1 hour</option>
+                  <option value="24">After 24 hours</option>
+                  <option value="168">After 7 days</option>
+                  <option value="720">After 30 days</option>
+                </select>
+              </label>
+              <button id="post-image-button" class="photo-upload-button compact-photo-button" type="button" aria-label="Add a photo">
+                <span aria-hidden="true">＋</span>
+              </button>
+              <input id="post-image-upload" class="visually-hidden-file-input" type="file" accept="image/*" tabindex="-1">
+            </div>
           </div>
+          <p id="post-expiry-preview" class="post-expiry-preview" aria-live="polite">This post will not disappear automatically.</p>
           <div id="poll-options" class="timeline-poll-options" hidden>
             <label>Poll choices<input class="poll-option" maxlength="80" placeholder="Choice 1"></label>
             <input class="poll-option" maxlength="80" aria-label="Poll choice 2" placeholder="Choice 2">
@@ -122,8 +129,6 @@
             <button id="remove-post-image" type="button" aria-label="Remove selected photo">Remove photo</button>
           </div>
           <div class="composer-footer">
-            <label class="photo-upload-button modern-photo-button" for="post-image-upload"><span class="photo-button-icon" aria-hidden="true">＋</span><span><strong>Add photo</strong><small>Upload from your device</small></span></label>
-            <input id="post-image-upload" type="file" accept="image/*" hidden>
             <span>500 characters max</span>
             <button class="primary-button" type="submit">Post</button>
           </div>
@@ -144,6 +149,26 @@
       </section>
     </div>
   </main>
+
+  <dialog id="post-report-dialog" class="report-dialog" aria-labelledby="post-report-title">
+    <form id="post-report-form">
+      <h2 id="post-report-title">Report post</h2>
+      <p>Choose the reason that best describes the problem.</p>
+      <fieldset>
+        <legend>Reason</legend>
+        <label><input type="radio" name="reason" value="Spam" required> Spam</label>
+        <label><input type="radio" name="reason" value="Harassment"> Harassment</label>
+        <label><input type="radio" name="reason" value="Threats"> Threats</label>
+        <label><input type="radio" name="reason" value="Sexual content"> Sexual content</label>
+        <label><input type="radio" name="reason" value="Other"> Other</label>
+      </fieldset>
+      <p class="report-hold-copy">The post will be hidden and its expiration paused for admin review.</p>
+      <div class="report-dialog-actions">
+        <button id="cancel-post-report" class="secondary-button" type="button">Cancel</button>
+        <button class="primary-button" type="submit">Submit report</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="upload.js"></script>
   <script type="module" src="timeline.js"></script>

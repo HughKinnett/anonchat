@@ -9,6 +9,7 @@ const deletionCron = "*/5 * * * *";
 const secretReference = "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}";
 const credentialPathReference = "${{ steps.auth.outputs.credentials_file_path }}";
 const deployCommand = "npx --yes firebase-tools@15.28.1 deploy --project anonchatlogin --only \"firestore:rules,firestore:indexes,hosting\" --non-interactive";
+const productionMigrationsCommand = "npm run production-migrations:apply";
 const rulesPaths = [
   "firestore.rules",
   "firestore.indexes.json",
@@ -23,8 +24,11 @@ const rulesPaths = [
   "*.webmanifest",
   "scripts/**"
 ];
-const firestoreCiCommand = "npm run test:rules && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm test";
+const firestoreCiCommand = "npm run test:rules && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:moderation-policy && npm run test:moderation-rules && npm run test:admin-moderation && npm run test:moderation-deletion && npm run test:vote-schema && npm run test:production-migrations-cli && npm run test:deletion-processors-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:moderation-status-backfill && npm run test:auth-activity && npm test";
 const notificationTestCommand = "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes && node scripts/test-push-service-worker.mjs";
+const moderationDeletionTestCommand = "npm run test:moderation-deletion-policy && npm run test:moderation-deletion-processor && npm run test:moderation-deletion-firestore-integration && npm run test:moderation-deletion-cli && npm run test:moderation-deletion-indexes";
+const voteSchemaTestCommand = "node scripts/test-vote-schema-policy.mjs && node scripts/test-vote-schema-backfill-policy.mjs && node scripts/test-vote-schema-backfill-cli.mjs";
+const deletionProcessorsCommand = "node scripts/deletion-processors.mjs";
 
 export const parseWorkflow = (source, label = "workflow") => {
   const document = parseDocument(source, { version: "1.2" });
@@ -88,7 +92,7 @@ const validateStep = (errors, step, expected, label) => {
 export const validateDeletionWorkflow = (workflow) => {
   const errors = [];
   exactlyKeys(errors, workflow, ["name", "on", "permissions", "concurrency", "jobs"], "deletion workflow");
-  exactly(errors, workflow.name, "Process administrator account deletions", "deletion workflow name");
+  exactly(errors, workflow.name, "Process account and moderation deletions", "deletion workflow name");
   const triggers = workflowTriggers(workflow);
   if (!sameKeys(triggers, ["schedule", "workflow_dispatch"])) errors.push("deletion workflow triggers must be schedule and workflow_dispatch only");
   exactly(errors, triggers?.workflow_dispatch, null, "deletion workflow dispatch trigger");
@@ -104,7 +108,7 @@ export const validateDeletionWorkflow = (workflow) => {
   effectiveReadOnlyPermissions(errors, workflow, job, "deletion workflow");
   exactly(errors, job["runs-on"], "ubuntu-latest", "deletion workflow runner");
   const steps = jobSteps(job, errors, "jobs.process");
-  exactlyOrderedSteps(errors, steps, ["uses:actions/checkout@v4", "uses:actions/setup-node@v4", "run:npm ci", "uses:google-github-actions/auth@v3", "run:npm run admin-deletion:process"], "deletion workflow steps");
+  exactlyOrderedSteps(errors, steps, ["uses:actions/checkout@v4", "uses:actions/setup-node@v4", "run:npm ci", "uses:google-github-actions/auth@v3", "run:npm run deletion-processors:process"], "deletion workflow steps");
   const node = singleStep(errors, steps, "uses", "actions/setup-node@v4", "Node setup");
   exactly(errors, String(node?.with?.["node-version"]), "20", "Node version");
   const install = singleStep(errors, steps, "run", "npm ci", "npm ci");
@@ -112,15 +116,15 @@ export const validateDeletionWorkflow = (workflow) => {
   const auth = singleStep(errors, steps, "uses", "google-github-actions/auth@v3", "Google authentication");
   exactly(errors, auth?.id, "auth", "Google authentication step id");
   exactly(errors, auth?.with?.credentials_json, secretReference, "Google authentication secret");
-  const processor = singleStep(errors, steps, "run", "npm run admin-deletion:process", "deletion processor command");
+  const processor = singleStep(errors, steps, "run", "npm run deletion-processors:process", "deletion processor command");
   exactly(errors, processor?.env?.GCLOUD_PROJECT, "anonchatlogin", "deletion processor project");
   exactly(errors, processor?.env?.GOOGLE_APPLICATION_CREDENTIALS, credentialPathReference, "deletion processor credential path");
   validateStep(errors, steps[0], { uses: "actions/checkout@v4" }, "deletion checkout step");
   validateStep(errors, node, { uses: "actions/setup-node@v4", with: { "node-version": "20" } }, "deletion Node step");
   validateStep(errors, install, { run: "npm ci" }, "deletion install step");
   validateStep(errors, auth, { id: "auth", uses: "google-github-actions/auth@v3", with: { credentials_json: secretReference } }, "deletion authentication step");
-  validateStep(errors, processor, { run: "npm run admin-deletion:process", env: { GCLOUD_PROJECT: "anonchatlogin", GOOGLE_APPLICATION_CREDENTIALS: credentialPathReference } }, "deletion processor step");
-  if (steps.some((step) => typeof step?.run === "string" && !["npm ci", "npm run admin-deletion:process"].includes(step.run))) errors.push("deletion workflow may not run logging or unrelated commands");
+  validateStep(errors, processor, { run: "npm run deletion-processors:process", env: { GCLOUD_PROJECT: "anonchatlogin", GOOGLE_APPLICATION_CREDENTIALS: credentialPathReference } }, "deletion processor step");
+  if (steps.some((step) => typeof step?.run === "string" && !["npm ci", "npm run deletion-processors:process"].includes(step.run))) errors.push("deletion workflow may not run logging or unrelated commands");
   return errors;
 };
 
@@ -151,7 +155,9 @@ export const validateDeployWorkflow = (workflow) => {
   exactlyOrderedSteps(errors, steps, [
     "uses:actions/checkout@v4",
     "uses:actions/setup-node@v4",
+    "run:npm ci",
     "uses:google-github-actions/auth@v3",
+    `run:${productionMigrationsCommand}`,
     `run:${deployCommand}`
   ], "deploy workflow steps");
   validateStep(errors, steps[0], {
@@ -164,11 +170,21 @@ export const validateDeployWorkflow = (workflow) => {
     with: { "node-version": "20" }
   }, "deploy Node step");
   validateStep(errors, steps[2], {
+    name: "Install pinned dependencies",
+    run: "npm ci"
+  }, "deploy install step");
+  validateStep(errors, steps[3], {
     name: "Authenticate to Google Cloud",
+    id: "auth",
     uses: "google-github-actions/auth@v3",
     with: { credentials_json: secretReference }
   }, "deploy authentication step");
-  validateStep(errors, steps[3], {
+  validateStep(errors, steps[4], {
+    name: "Migrate and verify production data",
+    run: productionMigrationsCommand,
+    env: { GCLOUD_PROJECT: "anonchatlogin", GOOGLE_APPLICATION_CREDENTIALS: credentialPathReference }
+  }, "deploy migration step");
+  validateStep(errors, steps[5], {
     name: "Deploy Firebase production",
     run: deployCommand
   }, "deploy command step");
@@ -217,6 +233,14 @@ export const validatePackageScripts = (packageJson) => {
   if (packageJson.devDependencies?.["firebase-tools"] !== "13.35.1") errors.push("firebase-tools must remain pinned to 13.35.1");
   exactly(errors, packageJson.scripts?.["test:workflow-policy"], "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs", "workflow policy package script");
   exactly(errors, packageJson.scripts?.["test:notification"], notificationTestCommand, "notification test package script");
+  exactly(errors, packageJson.scripts?.["test:moderation-deletion"], moderationDeletionTestCommand, "moderation deletion test package script");
+  exactly(errors, packageJson.scripts?.["moderation-deletion:process"], "node scripts/moderation-deletion-processor.mjs", "moderation deletion processor package script");
+  exactly(errors, packageJson.scripts?.["test:vote-schema"], voteSchemaTestCommand, "vote schema test package script");
+  exactly(errors, packageJson.scripts?.["vote-schema:backfill"], "node scripts/backfill-vote-schema.mjs", "vote schema backfill package script");
+  exactly(errors, packageJson.scripts?.["test:production-migrations-cli"], "node scripts/test-production-migrations-cli.mjs", "production migration test script");
+  exactly(errors, packageJson.scripts?.["production-migrations:apply"], "node scripts/production-migrations.mjs", "production migration command");
+  exactly(errors, packageJson.scripts?.["test:deletion-processors-cli"], "node scripts/test-deletion-processors-cli.mjs", "deletion processor aggregate test script");
+  exactly(errors, packageJson.scripts?.["deletion-processors:process"], deletionProcessorsCommand, "deletion processor aggregate command");
   exactly(errors, packageJson.scripts?.["test:firestore-ci"], firestoreCiCommand, "Firestore CI package script");
   return errors;
 };
@@ -224,9 +248,13 @@ export const validatePackageScripts = (packageJson) => {
 export const workflowPolicy = {
   deletionCron,
   deployCommand,
+  productionMigrationsCommand,
   rulesPaths,
   firestoreCiCommand,
   notificationTestCommand,
+  moderationDeletionTestCommand,
+  voteSchemaTestCommand,
+  deletionProcessorsCommand,
   secretReference,
   credentialPathReference
 };

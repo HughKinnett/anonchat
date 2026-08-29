@@ -51,12 +51,12 @@ const contentWrites = (firestore, target) => {
     () => setDoc(doc(firestore, "follows", `member_${uid}`), { followerId: "member", followingId: uid, createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "directMessages", `message_${suffix}`), { participants: ["member", uid], senderId: "member", text: "hello", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "reveals", `member_${uid}`), { fromId: "member", toId: uid, fields: { interests: true }, status: "pending", createdAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "posts", `repost_member_${post}`), { type: "repost", authorId: "member", username: "member", originalPostId: post, originalAuthorId: uid, originalUsername: uid, content: `${uid} post`, imageData: "", createdAt: serverTimestamp() }),
+    () => setDoc(doc(firestore, "posts", `repost_member_${post}`), { type: "repost", authorId: "member", username: "member", originalPostId: post, originalAuthorId: uid, originalUsername: uid, content: `${uid} post`, imageData: "", moderationStatus: "active", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "posts", post, "comments", `comment_${suffix}`), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "posts", post, "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "communityVotes", `${post}_member`), { postId: post, uid: "member", option: 0, createdAt: serverTimestamp() }),
+    () => setDoc(doc(firestore, "communityVotes", `posts_${post}_member`), { postCollection: "posts", postId: post, uid: "member", option: 0, createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "circleMembers", `${circle}_member`), { circleId: circle, uid: "member", createdAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "communityPosts", `community_${suffix}`), { authorId: "member", username: "member", content: "community", category: "Question", circleId: circle, options: [], createdAt: serverTimestamp() }),
+    () => setDoc(doc(firestore, "communityPosts", `community_${suffix}`), { authorId: "member", username: "member", content: "community", category: "Question", circleId: circle, options: [], moderationStatus: "active", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "roomMembers", `${room}_member`), { roomId: room, uid: "member", joinedAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "roomMessages", `room_${suffix}`), { roomId: room, senderId: "member", tempName: "Member", text: "hello", createdAt: serverTimestamp() })
   ];
@@ -74,17 +74,17 @@ const rename = (firestore, uid, from, to) => {
   return batch.commit();
 };
 const threePrincipalWrites = (firestore) => [
-  ["original-repost", () => setDoc(doc(firestore, "posts", "repost_member_three-original"), { type: "repost", authorId: "member", username: "member", originalPostId: "three-original", originalAuthorId: "post_author", originalUsername: "post_author", content: "three original", imageData: "", createdAt: serverTimestamp() })],
+  ["original-repost", () => setDoc(doc(firestore, "posts", "repost_member_three-original"), { type: "repost", authorId: "member", username: "member", originalPostId: "three-original", originalAuthorId: "post_author", originalUsername: "post_author", content: "three original", imageData: "", moderationStatus: "active", createdAt: serverTimestamp() })],
   ["community-comment", () => setDoc(doc(firestore, "communityPosts", "three-community", "comments", "member"), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() })],
   ["community-reaction", () => setDoc(doc(firestore, "communityPosts", "three-community", "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() })],
-  ["community-vote", () => setDoc(doc(firestore, "communityVotes", "three-community_member"), { postId: "three-community", uid: "member", option: 0, createdAt: serverTimestamp() })],
+  ["community-vote", () => setDoc(doc(firestore, "communityVotes", "communityPosts_three-community_member"), { postCollection: "communityPosts", postId: "three-community", uid: "member", option: 0, createdAt: serverTimestamp() })],
   ["room-comment", () => setDoc(doc(firestore, "roomMessages", "three-room-message", "comments", "member"), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() })],
   ["room-reaction", () => setDoc(doc(firestore, "roomMessages", "three-room-message", "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() })]
 ];
 const topLevelOwnerWrites = (firestore) => [
   ["repost", threePrincipalWrites(firestore)[0][1]],
   ["circle-membership", () => setDoc(doc(firestore, "circleMembers", "three-circle_member"), { circleId: "three-circle", uid: "member", createdAt: serverTimestamp() })],
-  ["community-post", () => setDoc(doc(firestore, "communityPosts", "missing-circle-owner"), { authorId: "member", username: "member", content: "missing owner", category: "Question", circleId: "three-circle", options: [], createdAt: serverTimestamp() })],
+  ["community-post", () => setDoc(doc(firestore, "communityPosts", "missing-circle-owner"), { authorId: "member", username: "member", content: "missing owner", category: "Question", circleId: "three-circle", options: [], moderationStatus: "active", createdAt: serverTimestamp() })],
   ["room-membership", () => setDoc(doc(firestore, "roomMembers", "three-room_member"), { roomId: "three-room", uid: "member", joinedAt: serverTimestamp() })],
   ["room-message", () => setDoc(doc(firestore, "roomMessages", "missing-room-owner"), { roomId: "three-room", senderId: "member", tempName: "Member", text: "missing owner", createdAt: serverTimestamp() })]
 ];
@@ -135,7 +135,7 @@ try {
 
   const circleOrphanRace = writeBatch(other);
   circleOrphanRace.delete(doc(other, "circles", "other-circle"));
-  circleOrphanRace.set(doc(other, "communityPosts", "orphan-circle-post"), { authorId: "other", username: "other", content: "orphan", category: "Question", circleId: "other-circle", options: [], createdAt: serverTimestamp() });
+  circleOrphanRace.set(doc(other, "communityPosts", "orphan-circle-post"), { authorId: "other", username: "other", content: "orphan", category: "Question", circleId: "other-circle", options: [], moderationStatus: "active", createdAt: serverTimestamp() });
   await assertFails(circleOrphanRace.commit());
   const circleMemberOrphanRace = writeBatch(other);
   circleMemberOrphanRace.delete(doc(other, "circles", "other-circle"));
@@ -166,7 +166,7 @@ try {
     await assertFails(setDoc(doc(member, ...parentPath, "comments", `blocked_${parentPath[1]}`), { uid: "member", username: "member", text: "blocked", createdAt: serverTimestamp() }));
     await assertFails(setDoc(doc(member, ...parentPath, "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() }));
   }
-  await assertFails(setDoc(doc(member, "communityVotes", "other-repost-target_member"), { postId: "other-repost-target", uid: "member", option: 0, createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(member, "communityVotes", "posts_other-repost-target_member"), { postCollection: "posts", postId: "other-repost-target", uid: "member", option: 0, createdAt: serverTimestamp() }));
   await assertSucceeds(deleteDoc(doc(member, "messageRequests", "member_target")));
   await assertFails(setDoc(doc(member, "messageRequests", "member_target"), { fromId: "member", toId: "target", status: "pending", createdAt: serverTimestamp() }));
   await assertFails(setDoc(doc(target, "posts", "target-new"), { type: "original", authorId: "target", username: "target", content: "new", imageData: "", category: "Post", options: [], createdAt: serverTimestamp() }));

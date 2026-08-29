@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v38";
+const CACHE_NAME = "anonchat-v39";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -32,6 +32,11 @@ const APP_SHELL = [
   "./push-exit.js",
   "./notification-storage.mjs",
   "./notification-ui-policy.mjs",
+  "./moderation-policy.mjs",
+  "./post-report-ui-policy.mjs",
+  "./room-report-ui-policy.mjs",
+  "./vote-schema-policy.mjs",
+  "./block-integration.mjs",
   "./account-deletion-push.mjs",
   "./nav-menu.js",
   "./profile.js",

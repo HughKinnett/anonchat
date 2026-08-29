@@ -1,3 +1,5 @@
+import { roomState } from "./moderation-policy.mjs";
+
 const TEXT = Object.freeze({
   reaction: "Someone reacted to your post.",
   comment: "Someone commented on your post.",
@@ -49,6 +51,7 @@ export const buildInAppNotifications = ({
   reactions = [],
   comments = [],
   messageRequests = [],
+  rooms = [],
   roomMessages = [],
   roomMemberships = [],
   reveals = [],
@@ -60,6 +63,10 @@ export const buildInAppNotifications = ({
     return data.type !== "repost" && data.authorId === currentUid;
   }).map((post) => post.id));
   const joinedRoomIds = new Set(roomMemberships.map((membership) => dataOf(membership).roomId));
+  const activeRoomIds = new Set(rooms
+    .filter((room) => dataOf(room).moderationStatus === "active"
+      && roomState(dataOf(room), nowMillis) === "active")
+    .map((room) => room.id));
   const items = [];
   reactions.forEach((reaction) => {
     const data = dataOf(reaction);
@@ -77,7 +84,10 @@ export const buildInAppNotifications = ({
   });
   roomMessages.forEach((message) => {
     const data = dataOf(message);
-    if (data.senderId !== currentUid && joinedRoomIds.has(data.roomId) && timestampMillis(data.expiresAt) > nowMillis) {
+    if (data.senderId !== currentUid
+      && joinedRoomIds.has(data.roomId)
+      && activeRoomIds.has(data.roomId)
+      && timestampMillis(data.expiresAt) > nowMillis) {
       items.push(item("room-message", message));
     }
   });

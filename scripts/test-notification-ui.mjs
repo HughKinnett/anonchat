@@ -15,6 +15,7 @@ const items = buildInAppNotifications({
   reactions: [entry(actorUid, `posts/post-a/reactions/${actorUid}`, { uid: actorUid, type: "heart", createdAt: time(10) })],
   comments: [entry("comment-a", "posts/post-a/comments/comment-a", { uid: actorUid, username: "private_name", text: "private comment body", createdAt: time(11) })],
   messageRequests: [entry(`${actorUid}_${currentUid}`, `messageRequests/${actorUid}_${currentUid}`, { fromId: actorUid, toId: currentUid, status: "pending", createdAt: time(12) })],
+  rooms: [entry("room-a", "rooms/room-a", { ownerId: actorUid, moderationStatus: "active" })],
   roomMessages: [entry("room-message-a", "roomMessages/room-message-a", { senderId: actorUid, roomId: "room-a", tempName: "private alias", text: "private room body", createdAt: time(13), expiresAt: time(100) })],
   roomMemberships: [entry("membership", "roomMembers/membership", { uid: currentUid, roomId: "room-a" })],
   reveals: [entry(`${actorUid}_${currentUid}`, `reveals/${actorUid}_${currentUid}`, { fromId: actorUid, toId: currentUid, fields: { region: true }, status: "pending", createdAt: time(14) })],

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { deleteApp, initializeApp } from "firebase-admin/app";
 import { FieldPath, FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { FirestoreNotificationAdapter } from "../notification-firestore-adapter.mjs";
+import { deliverNotificationEvents } from "../notification-processor.mjs";
 import {
   MAX_NOTIFICATION_ATTEMPTS,
   MAX_SUBSCRIPTIONS_PER_RECIPIENT,
@@ -114,17 +115,82 @@ await putMany([
   ["users/admin-deleting-recipient", { uid: "admin-deleting-recipient", banned: true }],
   ["users/self-deleting-recipient", { uid: "self-deleting-recipient", banned: false }],
   ["users/transition-recipient", { uid: "transition-recipient", banned: false }],
+  ["users/member-a", { uid: "member-a", banned: false }],
   ["adminDeletionJobs/admin-deleting-recipient", { status: "queued" }],
   ["accountDeletionRequests/self-deleting-recipient", { status: "queued" }],
   ["posts/post-a", { authorId: "post-owner" }],
+  ["rooms/room-a", { moderationStatus: "active", expiresAt: Timestamp.fromMillis(clock.now + 60_000) }],
+  ["rooms/reported-room", { moderationStatus: "reported", expiresAt: Timestamp.fromMillis(clock.now + 60_000) }],
+  ["rooms/expired-room", { moderationStatus: "active", expiresAt: Timestamp.fromMillis(clock.now - 1) }],
+  ["rooms/room-delivery", { moderationStatus: "active", expiresAt: Timestamp.fromMillis(clock.now + 60 * 60_000) }],
+  ["blocks/member-b_sender", { blockerId: "member-b", blockedId: "sender" }],
   ["roomMembers/room-a_sender", { roomId: "room-a", uid: "sender" }],
   ["roomMembers/room-a_member-b", { roomId: "room-a", uid: "member-b" }],
   ["roomMembers/room-a_member-a", { roomId: "room-a", uid: "member-a" }],
   ["pushSubscriptions/sub-a", { uid: "recipient", endpoint: "https://push.example/a", expirationTime: null, p256dh: "key-a", auth: "auth-a", createdAt: preciseEarly, updatedAt: preciseEarly }],
-  ["pushSubscriptions/sub-other", { uid: "other", endpoint: "https://push.example/other", expirationTime: null, p256dh: "key-other", auth: "auth-other", createdAt: preciseEarly, updatedAt: preciseEarly }]
+  ["pushSubscriptions/sub-other", { uid: "other", endpoint: "https://push.example/other", expirationTime: null, p256dh: "key-other", auth: "auth-other", createdAt: preciseEarly, updatedAt: preciseEarly }],
+  ["pushSubscriptions/sub-room", { uid: "member-a", endpoint: "https://push.example/room", expirationTime: null, p256dh: "key-room", auth: "auth-room", createdAt: preciseEarly, updatedAt: preciseEarly }]
 ]);
 assert.equal(await adapter.postAuthor({ path: "posts/post-a/comments/comment-a" }), "post-owner");
 assert.deepEqual((await adapter.roomMembers({ data: { roomId: "room-a" } })).sort(), ["member-a", "member-b", "sender"]);
+assert.equal(await adapter.roomNotificationAvailable("room-a", "sender", "member-a"), true);
+assert.equal(await adapter.roomNotificationAvailable("room-a", "sender", "member-b"), false,
+  "either-direction blocks suppress room push eligibility");
+assert.equal(await adapter.roomNotificationAvailable("reported-room", "sender", "member-a"), false);
+assert.equal(await adapter.roomNotificationAvailable("expired-room", "sender", "member-a"), false);
+assert.equal(await adapter.roomNotificationAvailable("missing-room", "sender", "member-a"), false);
+
+const claimedRoomEventId = "c".repeat(64);
+const claimedRoomEvent = queuedEvent({
+  type: "room-message",
+  actorUid: "sender",
+  recipientUid: "member-a",
+  roomId: "room-delivery",
+  route: "/community.html#rooms-panel",
+  sourceCreatedAt: Timestamp.fromMillis(clock.now - 1),
+  now: Timestamp.fromMillis(clock.now)
+});
+assert.equal(await adapter.createEvent(claimedRoomEventId, claimedRoomEvent), true);
+const claimedRoom = await adapter.claimEvent(claimedRoomEventId, "room-claim-worker");
+assert.equal(claimedRoom.data.roomId, "room-delivery",
+  "claim serialization preserves the parent needed for production revalidation");
+assert.equal(await adapter.roomNotificationAvailable(
+  claimedRoom.data.roomId,
+  claimedRoom.data.actorUid,
+  claimedRoom.data.recipientUid
+), true);
+await adapter.completeEvent(claimedRoomEventId, claimedRoom.token);
+assert.equal((await db.doc(`notificationEvents/${claimedRoomEventId}`).get()).data().roomId, "room-delivery",
+  "settled room-event serialization preserves the strict parent field");
+
+const retriedRoomEventId = "f".repeat(64);
+assert.equal(await adapter.createEvent(retriedRoomEventId, claimedRoomEvent), true);
+const firstRoomRetryClaim = await adapter.claimEvent(retriedRoomEventId, "room-retry-worker-a");
+assert.equal(await adapter.failEvent(retriedRoomEventId, firstRoomRetryClaim.token, "DELIVERY_TRANSIENT"), "failed");
+const failedRoomEvent = (await db.doc(`notificationEvents/${retriedRoomEventId}`).get()).data();
+assert.equal(failedRoomEvent.roomId, "room-delivery",
+  "failed room-event serialization preserves the strict parent field");
+clock.now = failedRoomEvent.retryAt.toMillis();
+const secondRoomRetryClaim = await adapter.claimEvent(retriedRoomEventId, "room-retry-worker-b");
+assert.equal(secondRoomRetryClaim.data.roomId, "room-delivery",
+  "retry claims preserve the parent needed for production revalidation");
+await adapter.completeEvent(retriedRoomEventId, secondRoomRetryClaim.token);
+
+const deliveredRoomEventId = "d".repeat(64);
+assert.equal(await adapter.createEvent(deliveredRoomEventId, claimedRoomEvent), true);
+let roomPushes = 0;
+const deliveredRoomResult = await deliverNotificationEvents({
+  adapter,
+  ownerId: "room-delivery-worker",
+  sendPush: async () => { roomPushes += 1; },
+  logger: { info() {}, error() {} }
+});
+assert.equal(deliveredRoomResult.delivered, 1);
+assert.equal(roomPushes, 1);
+const deliveredRoomEvent = (await db.doc(`notificationEvents/${deliveredRoomEventId}`).get()).data();
+assert.equal(deliveredRoomEvent.status, "delivered");
+assert.equal(deliveredRoomEvent.roomId, "room-delivery",
+  "real adapter queue-to-push delivery retains roomId through claim and settle");
 assert.equal(await adapter.recipientAvailable("post-owner"), true);
 assert.equal(await adapter.recipientAvailable("missing-user"), false);
 assert.equal(await adapter.recipientAvailable("banned-recipient"), false);
@@ -371,7 +437,7 @@ await adapter.heartbeat("completed");
 assert.equal((await db.doc("system/notificationProcessor").get()).data().status, "completed");
 clock.now += NOTIFICATION_RETENTION_MS + 1;
 const purged = await adapter.purgeTerminalBefore(Timestamp.fromMillis(clock.now - NOTIFICATION_RETENTION_MS));
-assert.equal(purged, 4, "delivered and dead-letter events plus version-specific markers are retained then purged");
+assert.equal(purged, 8, "delivered and dead-letter events plus version-specific markers are retained then purged");
 assert.equal((await db.doc(`notificationEvents/${eventId}`).get()).exists, false);
 assert.equal((await db.doc(`notificationEvents/${exhaustedEventId}`).get()).exists, false);
 assert.equal((await db.doc(`notificationDeliveries/${deliveryId}`).get()).exists, false);

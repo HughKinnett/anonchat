@@ -2,6 +2,9 @@ import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { blockId, canShowActorContent, postIsVisible } from "./moderation-policy.mjs";
+import { postChildBelongsTo, postImagePresentation, postInteractionTarget } from "./post-report-ui-policy.mjs";
+import { createBlockPairLoadGate, loadBlockPairs, profileBlockViewState } from "./block-integration.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -23,6 +26,7 @@ const targetUserId = new URLSearchParams(window.location.search).get("uid");
 const feed = document.getElementById("profile-feed");
 const status = document.getElementById("profile-status");
 const followButton = document.getElementById("profile-follow-button");
+const blockButton = document.getElementById("profile-block-button");
 let currentUser;
 let currentProfileUsername;
 let comments = [];
@@ -31,6 +35,12 @@ let targetProfile;
 let targetPosts = [];
 let targetCommunityPosts = [];
 let users = [];
+let blockPairs = new Set();
+let profileHiddenByBlock = false;
+let blockPairsInitialized = false;
+let blockPairsError;
+const blockPairLoadGate = createBlockPairLoadGate();
+const blockPairsReady = blockPairLoadGate.ready;
 const profileSpotifyCard = document.getElementById("profile-spotify-card");
 const profileSpotifyPlayer = document.getElementById("profile-spotify-player");
 
@@ -68,6 +78,34 @@ const validProfile = (profile, userId) =>
   typeof profile.username === "string" &&
   /^[A-Za-z0-9_]{3,30}$/.test(profile.username);
 
+const actorIsVisible = (uid) => uid === currentUser?.uid || (blockPairsInitialized && canShowActorContent(uid, blockPairs));
+const profileViewState = () => profileBlockViewState({
+  initialized: blockPairsInitialized,
+  error: blockPairsError,
+  currentUid: currentUser?.uid,
+  targetUid: targetUserId,
+  pairs: blockPairs
+});
+const targetIsBlocked = () => !profileViewState().contentVisible;
+const postIsVisibleByBlock = (post) => {
+  const data = post.data();
+  return !targetIsBlocked()
+    && actorIsVisible(data.authorId)
+    && (data.type !== "repost" || actorIsVisible(data.originalAuthorId));
+};
+
+const hideBlockedProfile = () => {
+  const view = profileViewState();
+  profileHiddenByBlock = true;
+  document.querySelector(".view-profile-banner").hidden = true;
+  profileSpotifyCard.hidden = true;
+  feed.replaceChildren();
+  document.getElementById("profile-post-count").textContent = "";
+  document.getElementById("profile-name").textContent = "Unavailable profile";
+  document.getElementById("profile-handle").textContent = "";
+  setStatus(view.status, Boolean(blockPairsError));
+};
+
 const appendLinkedText = (container, value) => {
   String(value || "").split(/(@[A-Za-z0-9_]{3,30})/g).forEach((part) => {
     if (!part.startsWith("@")) {
@@ -75,7 +113,7 @@ const appendLinkedText = (container, value) => {
       return;
     }
     const handle = part.slice(1).toLowerCase();
-    const profile = users.find((entry) => entry.data().username?.toLowerCase() === handle);
+    const profile = users.find((entry) => actorIsVisible(entry.id) && entry.data().username?.toLowerCase() === handle);
     if (!profile) {
       container.append(document.createTextNode(part));
       return;
@@ -124,7 +162,7 @@ const attachMentionAutocomplete = (input) => {
     }
     const queryText = match[1].toLowerCase();
     const matches = users
-      .filter((entry) => entry.data().username?.toLowerCase().startsWith(queryText))
+      .filter((entry) => actorIsVisible(entry.id) && entry.data().username?.toLowerCase().startsWith(queryText))
       .slice(0, 6);
     if (!matches.length) {
       close();
@@ -178,7 +216,7 @@ const renderFollowControl = () => {
   followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
   followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
 
-  if (currentUser.uid === targetUserId) {
+  if (!targetProfile || currentUser.uid === targetUserId || targetIsBlocked()) {
     followButton.hidden = true;
     return;
   }
@@ -189,15 +227,36 @@ const renderFollowControl = () => {
   followButton.disabled = false;
 };
 
-const postComments = (postId) => comments
-  .filter((comment) => comment.ref.parent.parent?.id === postId)
+const renderBlockControl = () => {
+  if (!currentUser || !targetProfile) {
+    blockButton.hidden = true;
+    return;
+  }
+  const control = profileViewState().control;
+  blockButton.hidden = !control.visible;
+  if (!control.visible) return;
+  blockButton.textContent = control.label;
+  blockButton.setAttribute("aria-pressed", String(control.ownBlock));
+  blockButton.disabled = false;
+};
+
+const postComments = (collectionName, postId) => comments
+  .filter((comment) => postChildBelongsTo(
+    { id: postId, collectionName },
+    {
+      postId: comment.ref.parent.parent?.id,
+      collectionName: comment.ref.parent.parent?.parent.id
+    }
+  ) && actorIsVisible(comment.data().uid))
   .sort((a, b) =>
     (a.data().createdAt?.toMillis?.() || 0) - (b.data().createdAt?.toMillis?.() || 0)
   );
 
 const renderPosts = () => {
+  if (targetIsBlocked()) return;
   const sorted = [...targetPosts, ...targetCommunityPosts]
-    .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
+    .filter(postIsVisibleByBlock)
+    .filter((post) => postIsVisible(post.data(), Date.now()))
     .sort((a, b) => {
     const aTime = a.data().createdAt?.toMillis?.() || 0;
     const bTime = b.data().createdAt?.toMillis?.() || 0;
@@ -224,19 +283,30 @@ const renderPosts = () => {
 
     const text = document.createElement("p");
     appendLinkedText(text, post.content);
-    const postImage = post.imageData ? document.createElement("img") : null;
-    if (postImage) {
+    const imagePresentation = postImagePresentation(post.imageData, "Photo attached to this post");
+    const postImage = imagePresentation.kind === "image"
+      ? document.createElement("img")
+      : imagePresentation.kind === "placeholder"
+        ? document.createElement("p")
+        : null;
+    if (imagePresentation.kind === "image") {
       postImage.className = "post-image";
-      postImage.src = post.imageData;
-      postImage.alt = "Photo attached to this post";
+      postImage.src = imagePresentation.src;
+      postImage.alt = imagePresentation.alt;
+      postImage.referrerPolicy = imagePresentation.referrerPolicy;
+    } else if (imagePresentation.kind === "placeholder") {
+      postImage.className = "post-image-placeholder";
+      postImage.textContent = imagePresentation.text;
     }
     const time = document.createElement("small");
-    time.textContent = post.createdAt?.toDate
+    const expiresAt = post.expiresAt?.toMillis?.();
+    const expirationCopy = expiresAt ? `Disappears ${new Date(expiresAt).toLocaleString()}` : "";
+    time.textContent = (post.createdAt?.toDate
       ? post.createdAt.toDate().toLocaleString()
-      : "Posting…";
-    const sourceId = post.type === "repost" ? post.originalPostId : postDoc.id;
+      : "Posting…") + (expirationCopy ? ` · ${expirationCopy}` : "");
     const sourceCollection = postDoc.ref.parent.id === "communityPosts" ? "communityPosts" : "posts";
-    const commentDocs = postComments(sourceId);
+    const interactionPostId = postInteractionTarget({ ...post, id: postDoc.id });
+    const commentDocs = postComments(sourceCollection, interactionPostId);
     const commentsSection = document.createElement("details");
     commentsSection.className = "comments-section";
     const summary = document.createElement("summary");
@@ -305,10 +375,10 @@ const renderPosts = () => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const commentText = input.value.trim();
-      if (!commentText) return;
+      if (!commentText || targetIsBlocked()) return;
       submit.disabled = true;
       try {
-        await addDoc(collection(db, sourceCollection, sourceId, "comments"), {
+        await addDoc(collection(db, sourceCollection, interactionPostId, "comments"), {
           uid: currentUser.uid,
           username: currentProfileUsername,
           text: commentText,
@@ -322,7 +392,7 @@ const renderPosts = () => {
         submit.disabled = false;
       }
     });
-    commentsSection.append(summary, list, form);
+    if (!targetIsBlocked()) commentsSection.append(summary, list, form);
 
     item.append(text);
     if (postImage) item.append(postImage);
@@ -354,6 +424,28 @@ followButton.addEventListener("click", async () => {
   }
 });
 
+blockButton.addEventListener("click", async () => {
+  const ownBlockId = blockId(currentUser.uid, targetUserId);
+  blockButton.disabled = true;
+  try {
+    if (blockPairs.has(ownBlockId)) {
+      await deleteDoc(doc(db, "blocks", ownBlockId));
+      if (!blockPairsInitialized) blockPairs.delete(ownBlockId);
+    } else {
+      await setDoc(doc(db, "blocks", ownBlockId), {
+        blockerId: currentUser.uid,
+        blockedId: targetUserId,
+        createdAt: serverTimestamp()
+      });
+      if (!blockPairsInitialized) blockPairs.add(ownBlockId);
+    }
+    if (!blockPairsInitialized) renderBlockControl();
+  } catch {
+    setStatus("Could not update this block.", true);
+    blockButton.disabled = false;
+  }
+});
+
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     const destination = targetUserId
@@ -369,6 +461,32 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  loadBlockPairs({ db, uid: user.uid, onChange: (pairs) => {
+    blockPairs = pairs;
+    if (!blockPairsInitialized) {
+      blockPairsInitialized = true;
+      blockPairLoadGate.succeed();
+    }
+    if (targetProfile && targetIsBlocked()) {
+      hideBlockedProfile();
+    } else if (profileHiddenByBlock) {
+      window.location.reload();
+      return;
+    }
+    renderBlockControl();
+    renderFollowControl();
+    renderPosts();
+  }, onError: (error) => {
+    blockPairsError = error;
+    blockPairLoadGate.fail(error);
+    setStatus("Could not load block settings.", true);
+  } }).then((unsubscribe) => {
+    if (typeof unsubscribe === "function") window.addEventListener("pagehide", unsubscribe, { once: true });
+  }).catch((error) => {
+    blockPairsError = error;
+    blockPairLoadGate.fail(error);
+    setStatus("Could not load block settings.", true);
+  });
   const currentProfileRef = doc(db, "users", user.uid);
   let currentProfileSnapshot = await getDoc(currentProfileRef);
   if (currentProfileSnapshot.exists() && currentProfileSnapshot.data().banned === true) {
@@ -408,6 +526,12 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   targetProfile = profileSnapshot.data();
+  await blockPairsReady;
+  if (targetIsBlocked()) {
+    hideBlockedProfile();
+    renderBlockControl();
+    return;
+  }
   if (targetProfile.banned === true && currentUser.uid !== targetUserId) {
     document.getElementById("profile-name").textContent = "Unavailable profile";
     setStatus("This account is banned.", true);
@@ -426,6 +550,7 @@ onAuthStateChanged(auth, async (user) => {
   const adminUsernames = ["i_love_you_h", "cybercapone"];
   const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
   document.getElementById("profile-admin-link").hidden = !viewerIsAdmin;
+  renderBlockControl();
   const viewDay = new Date().toISOString().slice(0, 10);
   setDoc(doc(db, "pageViews", viewDay), {
     date: viewDay,
@@ -449,7 +574,11 @@ onAuthStateChanged(auth, async (user) => {
   }, () => setStatus("Could not load follower information.", true));
 
   onSnapshot(
-    query(collection(db, "posts"), where("authorId", "==", targetUserId)),
+    query(
+      collection(db, "posts"),
+      where("authorId", "==", targetUserId),
+      where("moderationStatus", "==", "active")
+    ),
     (snapshot) => {
       targetPosts = snapshot.docs;
       renderPosts();
@@ -458,7 +587,11 @@ onAuthStateChanged(auth, async (user) => {
   );
 
   onSnapshot(
-    query(collection(db, "communityPosts"), where("authorId", "==", targetUserId)),
+    query(
+      collection(db, "communityPosts"),
+      where("authorId", "==", targetUserId),
+      where("moderationStatus", "==", "active")
+    ),
     (snapshot) => {
       targetCommunityPosts = snapshot.docs;
       renderPosts();

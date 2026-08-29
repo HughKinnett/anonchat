@@ -2,19 +2,43 @@ import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { canShowActorContent, reportId, roomReportPayloads, roomState } from "./moderation-policy.mjs";
+import {
+  createAuthoritativeRoomReportTracker,
+  createRoomExpiryController,
+  createRoomReportSubmissionGate,
+  openRoomAfterMembershipWrite,
+  roomMessageView,
+  roomViewState
+} from "./room-report-ui-policy.mjs";
+import { filterAccessibleDirectMessages, isBlockedPair, loadBlockPairs } from "./block-integration.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  addDoc, collection, doc, getDoc, onSnapshot, orderBy, query,
-  serverTimestamp, setDoc, Timestamp, updateDoc, where
+  addDoc, collection, doc, getDoc, onSnapshot, query,
+  serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = (id) => document.getElementById(id);
 const state = {
   user: null, profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
   roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
-  messages: [], reveals: [], preferences: null, activeRoom: ""
+  messages: [], reveals: [], preferences: null, activeRoom: "", blockPairs: new Set(), blockPairsInitialized: false
 };
 const listeners = [];
+const locallyReportedRooms = createAuthoritativeRoomReportTracker();
+const submittedRoomReportIds = new Set();
+const roomReportDialog = $("room-report-dialog");
+const roomReportForm = $("room-report-form");
+const roomReportSubmissionGate = createRoomReportSubmissionGate();
+let dialogRoomReportToken = null;
+let submittingRoomReportToken = null;
+let roomMessageUnsubscribe = null;
+const roomExpiryController = createRoomExpiryController({
+  onExpire: () => {
+    renderRooms();
+    renderRoomMessages();
+  }
+});
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
   $("status").classList.toggle("danger", error);
@@ -28,6 +52,8 @@ const now = () => Date.now();
 const aggressive = /\b(fuck|bitch|kill|hate|stupid|idiot|dumb|worthless|shut up)\b/i;
 const safeToSend = (text) => !state.preferences?.contextCheck || !aggressive.test(text) ||
   window.confirm("This may come across as aggressive. Do you want to send it as written?");
+const actorIsVisible = (uid) => uid === state.user?.uid || (state.blockPairsInitialized && canShowActorContent(uid, state.blockPairs));
+const canInteractWith = (uid) => uid === state.user?.uid || (state.blockPairsInitialized && !isBlockedPair(state.user?.uid, uid, state.blockPairs));
 
 const selectPanel = (panelId) => {
   const chosen = document.getElementById(panelId) ? panelId : "rooms-panel";
@@ -48,7 +74,11 @@ selectPanel(location.hash.slice(1));
 $("sign-out").addEventListener("click", async () => {
   await exitAuthenticatedSession({
     user: state.user,
-    stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+    stopListeners: () => {
+      roomExpiryController.cancel();
+      roomMessageUnsubscribe?.();
+      listeners.forEach((unsubscribe) => unsubscribe());
+    },
     redirect: () => location.replace("index.html")
   });
 });
@@ -80,9 +110,83 @@ const aliasFor = (roomId) => {
 };
 
 const joinedRoom = (roomId) => state.roomMemberships.some((member) => member.id === `${roomId}_${state.user.uid}`);
+const roomDocumentView = (room) => roomViewState({
+  room: room?.data?.(),
+  currentUid: state.user?.uid,
+  now: now(),
+  locallyReported: locallyReportedRooms.isHeld(room?.id)
+});
+
+const scheduleRoomExpiryRefresh = () => {
+  const activeRoom = state.rooms.find((room) => room.id === state.activeRoom)?.data();
+  roomExpiryController.schedule([
+    ...state.rooms.map((room) => room.data().expiresAt?.toMillis?.()),
+    ...state.roomMessages.map((message) => roomMessageView({
+      room: activeRoom,
+      message: message.data(),
+      now: now()
+    }).expirationMillis)
+  ]);
+};
+
+const stopRoomMessages = () => {
+  roomMessageUnsubscribe?.();
+  roomMessageUnsubscribe = null;
+  state.roomMessages = [];
+};
+
+const closeActiveRoom = (message = "") => {
+  roomExpiryController.cancel();
+  const dialog = $("room-dialog");
+  if (dialog.open) dialog.close();
+  state.activeRoom = "";
+  stopRoomMessages();
+  scheduleRoomExpiryRefresh();
+  if (message) setStatus(message, true);
+};
+
+const listenToRoomMessages = (roomId) => {
+  stopRoomMessages();
+  roomMessageUnsubscribe = onSnapshot(
+    query(collection(db, "roomMessages"), where("roomId", "==", roomId)),
+    (snapshot) => {
+      if (state.activeRoom !== roomId) return;
+      state.roomMessages = snapshot.docs;
+      renderRoomMessages();
+    },
+    () => {
+      if (state.activeRoom === roomId) closeActiveRoom("This room is no longer available.");
+    }
+  );
+};
+
+const reconcileRoomAvailability = () => {
+  if (state.activeRoom) {
+    const room = state.rooms.find((entry) => entry.id === state.activeRoom);
+    if (!room || roomState(room.data(), now()) !== "active" || !roomDocumentView(room).canInteract) {
+      closeActiveRoom("This room is no longer available.");
+    }
+  }
+  const pendingRoomId = dialogRoomReportToken?.request.roomId;
+  if (pendingRoomId && !state.rooms.some((entry) =>
+    entry.id === pendingRoomId && roomDocumentView(entry).canReport
+  )) {
+    roomReportSubmissionGate.finish(dialogRoomReportToken);
+    dialogRoomReportToken = null;
+    if (roomReportDialog.open) roomReportDialog.close();
+    setStatus("This room is no longer available.", true);
+  }
+};
+
 const renderRooms = () => {
-  $("room-list").replaceChildren(...state.rooms.map((room) => {
+  const rooms = state.rooms
+    .filter((room) => actorIsVisible(room.data().ownerId) && roomDocumentView(room).visible)
+    .sort((left, right) =>
+      (right.data().createdAt?.toMillis?.() || 0) - (left.data().createdAt?.toMillis?.() || 0)
+    );
+  $("room-list").replaceChildren(...rooms.map((room) => {
     const data = room.data();
+    const view = roomDocumentView(room);
     const card = document.createElement("article");
     card.className = "list-card card-row";
     const copy = document.createElement("div");
@@ -92,41 +196,79 @@ const renderRooms = () => {
     topic.className = "muted";
     topic.textContent = data.topic;
     copy.append(heading, topic);
+    const actions = document.createElement("div");
+    actions.className = "room-actions";
     const enter = document.createElement("button");
     enter.className = "primary";
     enter.textContent = joinedRoom(room.id) ? "Open room" : "Join anonymously";
     enter.addEventListener("click", () => openRoom(room.id, data.name));
-    card.append(copy, enter);
+    actions.append(enter);
+    if (view.canReport) {
+      const report = document.createElement("button");
+      report.className = "report-room-button";
+      report.type = "button";
+      report.textContent = "Report Room";
+      report.addEventListener("click", () => openRoomReportDialog(room, report));
+      actions.append(report);
+    }
+    card.append(copy, actions);
     return card;
   }));
+  reconcileRoomAvailability();
+  scheduleRoomExpiryRefresh();
 };
 
 const openRoom = async (id, name) => {
+  const room = state.rooms.find((entry) => entry.id === id);
+  const view = roomDocumentView(room);
+  if (!room || !view.canInteract || !canInteractWith(room.data().ownerId)) return;
   try {
-    await setDoc(doc(db, "roomMembers", `${id}_${state.user.uid}`), {
-      roomId: id, uid: state.user.uid, joinedAt: serverTimestamp()
-    }, { merge: true });
+    await openRoomAfterMembershipWrite({
+      getRoom: async () => {
+        const latest = await getDoc(doc(db, "rooms", id));
+        return latest.exists() ? latest : null;
+      },
+      canOpen: (latest) => {
+        const latestView = roomDocumentView(latest);
+        return latestView.canInteract && canInteractWith(latest.data().ownerId);
+      },
+      writeMembership: () => setDoc(doc(db, "roomMembers", `${id}_${state.user.uid}`), {
+        roomId: id, uid: state.user.uid, joinedAt: serverTimestamp()
+      }, { merge: true }),
+      onOpen: (latest) => {
+        state.activeRoom = id;
+        $("room-title").textContent = latest.data().name || name;
+        $("room-alias").textContent = `You are ${aliasFor(id)}`;
+        listenToRoomMessages(id);
+        renderRoomMessages();
+        scheduleRoomExpiryRefresh();
+        $("room-dialog").showModal();
+      },
+      onUnavailable: () => setStatus("This room is no longer available.", true)
+    });
   } catch {
     setStatus("Could not join that room.", true);
-    return;
   }
-  state.activeRoom = id;
-  $("room-title").textContent = name;
-  $("room-alias").textContent = `You are ${aliasFor(id)}`;
-  renderRoomMessages();
-  $("room-dialog").showModal();
 };
 
-$("room-dialog").querySelector(".dialog-close").addEventListener("click", () => {
-  $("room-dialog").close();
-  state.activeRoom = "";
+$("room-dialog").querySelector(".dialog-close").addEventListener("click", () => closeActiveRoom());
+$("room-dialog").addEventListener("close", () => {
+  if (state.activeRoom) closeActiveRoom();
 });
 
 const renderRoomMessages = () => {
-  const messages = state.roomMessages.filter((message) =>
-    message.data().roomId === state.activeRoom && message.data().expiresAt?.toMillis?.() > now()
-  );
-  $("room-messages").replaceChildren(...messages.map((message) => {
+  const room = state.rooms.find((entry) => entry.id === state.activeRoom);
+  const messages = state.roomMessages
+    .filter((message) => message.data().roomId === state.activeRoom && actorIsVisible(message.data().senderId))
+    .map((message) => ({
+      message,
+      view: roomMessageView({ room: room?.data(), message: message.data(), now: now() })
+    }))
+    .filter(({ view }) => view.visible)
+    .sort((left, right) =>
+      (left.message.data().createdAt?.toMillis?.() || 0) - (right.message.data().createdAt?.toMillis?.() || 0)
+    );
+  $("room-messages").replaceChildren(...messages.map(({ message, view }) => {
     const data = message.data();
     const item = document.createElement("div");
     item.className = `message${data.senderId === state.user.uid ? " mine" : ""}`;
@@ -134,10 +276,17 @@ const renderRoomMessages = () => {
     sender.textContent = data.tempName;
     const text = document.createElement("span");
     text.textContent = data.text;
-    item.append(sender, text);
+    const expiration = document.createElement("time");
+    expiration.className = "message-expiration";
+    if (Number.isFinite(view.expirationMillis) && !view.retainedForReview) {
+      expiration.dateTime = new Date(view.expirationMillis).toISOString();
+    }
+    expiration.textContent = view.expirationText;
+    item.append(sender, text, expiration);
     return item;
   }));
   $("room-messages").scrollTop = $("room-messages").scrollHeight;
+  scheduleRoomExpiryRefresh();
 };
 
 $("room-form").addEventListener("submit", async (event) => {
@@ -145,7 +294,7 @@ $("room-form").addEventListener("submit", async (event) => {
   try {
     const made = await addDoc(collection(db, "rooms"), {
       name: $("room-name").value.trim(), topic: $("room-topic").value.trim(),
-      ownerId: state.user.uid, createdAt: serverTimestamp()
+      ownerId: state.user.uid, moderationStatus: "active", createdAt: serverTimestamp()
     });
     await setDoc(doc(db, "roomMembers", `${made.id}_${state.user.uid}`), {
       roomId: made.id, uid: state.user.uid, joinedAt: serverTimestamp()
@@ -160,7 +309,10 @@ $("room-form").addEventListener("submit", async (event) => {
 $("room-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = $("room-message").value.trim();
-  if (!text || !safeToSend(text)) return;
+  const room = state.rooms.find((entry) => entry.id === state.activeRoom);
+  const view = roomDocumentView(room);
+  if (!view.canInteract) return;
+  if (!text || !room || !canInteractWith(room.data().ownerId) || !safeToSend(text)) return;
   try {
     await addDoc(collection(db, "roomMessages"), {
       roomId: state.activeRoom, senderId: state.user.uid, tempName: aliasFor(state.activeRoom), text,
@@ -172,12 +324,103 @@ $("room-message-form").addEventListener("submit", async (event) => {
   }
 });
 
+const openRoomReportDialog = (room, button) => {
+  const view = roomDocumentView(room);
+  const reportKey = reportId("room", room.id, state.user.uid);
+  if (roomReportSubmissionGate.isBusy()) {
+    setStatus("Another room report is still being submitted. Please wait.");
+    return;
+  }
+  if (!view.canReport || submittedRoomReportIds.has(reportKey)) {
+    button.disabled = true;
+    return;
+  }
+  dialogRoomReportToken = roomReportSubmissionGate.tryStart({
+    roomId: room.id,
+    ownerId: room.data().ownerId,
+    reportKey,
+    button
+  });
+  if (!dialogRoomReportToken) return;
+  roomReportForm.reset();
+  roomReportDialog.showModal();
+};
+
+$("cancel-room-report").addEventListener("click", () => {
+  if (dialogRoomReportToken) roomReportSubmissionGate.finish(dialogRoomReportToken);
+  dialogRoomReportToken = null;
+  roomReportDialog.close();
+});
+
+roomReportDialog.addEventListener("close", () => {
+  if (dialogRoomReportToken && dialogRoomReportToken !== submittingRoomReportToken) {
+    roomReportSubmissionGate.finish(dialogRoomReportToken);
+    dialogRoomReportToken = null;
+  }
+});
+
+roomReportForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!dialogRoomReportToken || submittingRoomReportToken) return;
+  const reason = new FormData(roomReportForm).get("reason");
+  if (typeof reason !== "string" || !reason) return;
+
+  const token = dialogRoomReportToken;
+  const { roomId, ownerId, reportKey, button } = token.request;
+  const room = state.rooms.find((entry) => entry.id === roomId);
+  if (!room || !roomDocumentView(room).canReport) {
+    roomReportSubmissionGate.finish(token);
+    dialogRoomReportToken = null;
+    roomReportDialog.close();
+    setStatus("This room is no longer available.", true);
+    return;
+  }
+
+  const timestamp = serverTimestamp();
+  const payloads = roomReportPayloads({
+    roomId,
+    reporterId: state.user.uid,
+    ownerId,
+    reason,
+    timestamp
+  });
+  const batch = writeBatch(db);
+  batch.set(doc(db, "reports", reportKey), payloads.report);
+  batch.update(doc(db, "rooms", roomId), payloads.room);
+
+  submittingRoomReportToken = token;
+  dialogRoomReportToken = null;
+  button.disabled = true;
+  button.textContent = "Reported";
+  submittedRoomReportIds.add(reportKey);
+  locallyReportedRooms.start(roomId);
+  roomReportDialog.close();
+  if (state.activeRoom === roomId) closeActiveRoom();
+  renderRooms();
+  try {
+    await batch.commit();
+    locallyReportedRooms.commit(roomId);
+    renderRooms();
+    setStatus("Room reported and suspended. Expiration paused for admin review.");
+  } catch {
+    submittedRoomReportIds.delete(reportKey);
+    locallyReportedRooms.fail(roomId);
+    button.disabled = false;
+    button.textContent = "Report Room";
+    renderRooms();
+    setStatus("Could not report that room. It may already be under review.", true);
+  } finally {
+    roomReportSubmissionGate.finish(token);
+    if (submittingRoomReportToken === token) submittingRoomReportToken = null;
+  }
+});
+
 const requestFor = (other) => state.requests.find((request) =>
   [request.data().fromId, request.data().toId].includes(state.user.uid) &&
   [request.data().fromId, request.data().toId].includes(other)
 );
 const acceptedUsers = () => state.users.filter((user) =>
-  user.id !== state.user.uid && requestFor(user.id)?.data().status === "accepted"
+  user.id !== state.user.uid && actorIsVisible(user.id) && requestFor(user.id)?.data().status === "accepted"
 );
 
 const createMessageRequest = (to) => {
@@ -189,7 +432,7 @@ const createMessageRequest = (to) => {
 
 const renderMessageUsers = () => {
   const selectedUser = $("message-user").value;
-  const others = state.users.filter((user) => user.id !== state.user.uid);
+  const others = state.users.filter((user) => user.id !== state.user.uid && actorIsVisible(user.id));
   $("message-user").replaceChildren(...others.map((user) => new Option(`@${user.data().username}`, user.id)));
   if (others.some((user) => user.id === selectedUser)) $("message-user").value = selectedUser;
   $("conversation-user").replaceChildren(...acceptedUsers().map((user) => new Option(`@${user.data().username}`, user.id)));
@@ -208,7 +451,7 @@ const renderRequestAction = ({ preserveStatus = false } = {}) => {
     setRequestStatus("Checking existing requests…");
     return;
   }
-  if (state.requestBusy) return;
+  if (state.requestBusy || (to && !canInteractWith(to))) return;
   const existing = to ? requestFor(to) : null;
   const view = messageRequestButtonState(existing?.data(), state.user.uid);
   $("request-chat").textContent = view.label;
@@ -222,7 +465,7 @@ $("message-user").addEventListener("change", () => renderRequestAction());
 $("request-chat").addEventListener("click", async () => {
   if (state.requestBusy || !state.requestsLoaded) return;
   const to = $("message-user").value;
-  if (!to) {
+  if (!to || !canInteractWith(to)) {
     setRequestStatus("Choose a user to request a conversation.", true);
     return;
   }
@@ -278,7 +521,7 @@ $("request-chat").addEventListener("click", async () => {
 
 const renderRequests = () => {
   const incoming = state.requests.filter((request) =>
-    request.data().toId === state.user.uid && request.data().status === "pending"
+    request.data().toId === state.user.uid && actorIsVisible(request.data().fromId) && request.data().status === "pending"
   );
   $("request-list").replaceChildren(...incoming.map((request) => {
     const card = document.createElement("div");
@@ -323,7 +566,7 @@ $("conversation-user").addEventListener("change", () => {
 const renderDirectMessages = () => {
   const other = $("conversation-user").value;
   const messages = state.messages.filter((message) =>
-    message.data().participants.includes(state.user.uid) && message.data().participants.includes(other)
+    message.data().participants.includes(state.user.uid) && message.data().participants.includes(other) && actorIsVisible(message.data().senderId) && canInteractWith(other)
   );
   $("direct-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
@@ -343,7 +586,7 @@ $("direct-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const other = $("conversation-user").value;
   const text = $("direct-message").value.trim();
-  if (!other || !text || !safeToSend(text)) return;
+  if (!other || !canInteractWith(other) || !text || !safeToSend(text)) return;
   try {
     await addDoc(collection(db, "directMessages"), {
       participants: [state.user.uid, other].sort(), senderId: state.user.uid, text, createdAt: serverTimestamp()
@@ -356,7 +599,7 @@ $("direct-message-form").addEventListener("submit", async (event) => {
 
 $("send-reveal").addEventListener("click", async () => {
   const to = $("conversation-user").value;
-  if (!to) return;
+  if (!to || !canInteractWith(to)) return;
   const fields = {
     interests: $("reveal-interests").checked,
     region: $("reveal-region").checked,
@@ -378,6 +621,10 @@ $("send-reveal").addEventListener("click", async () => {
 
 const renderReveals = () => {
   const other = $("conversation-user").value;
+  if (!other || !canInteractWith(other)) {
+    $("reveal-status").replaceChildren();
+    return;
+  }
   const incoming = state.reveals.find((entry) => entry.data().fromId === other && entry.data().toId === state.user.uid);
   const outgoing = state.reveals.find((entry) => entry.data().fromId === state.user.uid && entry.data().toId === other);
   const box = $("reveal-status");
@@ -437,7 +684,8 @@ $("download-data").addEventListener("click", () => {
   const data = {
     profile: { username: state.profile.username }, preferences: state.preferences,
     rooms: state.roomMemberships.map((membership) => membership.data()),
-    messages: state.messages.map((message) => message.data())
+    messages: filterAccessibleDirectMessages(state.messages, state.blockPairs, state.blockPairsInitialized)
+      .map((message) => message.data())
   };
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
@@ -453,15 +701,31 @@ const listen = (reference, key, render) => listeners.push(onSnapshot(reference, 
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
+    roomExpiryController.cancel();
+    locallyReportedRooms.clear();
     await exitAfterAuthLoss({ redirect: () => location.replace("index.html") });
     return;
   }
   state.user = user;
+  loadBlockPairs({ db, uid: user.uid, onChange: (pairs) => {
+    state.blockPairs = pairs;
+    state.blockPairsInitialized = true;
+    renderRooms();
+    renderRoomMessages();
+    renderMessageUsers();
+    renderRequests();
+    renderDirectMessages();
+    renderReveals();
+  }, onError: () => setStatus("Could not load block settings.", true) }).then((unsubscribe) => listeners.push(unsubscribe)).catch(() => setStatus("Could not load block settings.", true));
   const profile = await getDoc(doc(db, "users", user.uid));
   if (!profile.exists() || profile.data().banned) {
     await exitAuthenticatedSession({
       user,
-      stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+      stopListeners: () => {
+        roomExpiryController.cancel();
+        roomMessageUnsubscribe?.();
+        listeners.forEach((unsubscribe) => unsubscribe());
+      },
       redirect: () => location.replace("index.html")
     });
     return;
@@ -480,8 +744,21 @@ onAuthStateChanged(auth, async (user) => {
   renderIdentity();
 
   listen(collection(db, "users"), "users", () => { renderMessageUsers(); renderRequests(); });
-  listen(query(collection(db, "rooms"), orderBy("createdAt", "desc")), "rooms", renderRooms);
-  listen(query(collection(db, "roomMessages"), orderBy("createdAt", "asc")), "roomMessages", renderRoomMessages);
+  listeners.push(onSnapshot(
+    query(collection(db, "rooms"), where("moderationStatus", "==", "active")),
+    (snapshot) => {
+      locallyReportedRooms.reconcile(snapshot.docs.map((room) => room.id));
+      state.rooms = snapshot.docs;
+      renderRooms();
+    },
+    () => {
+      locallyReportedRooms.reconcile([]);
+      state.rooms = [];
+      if (state.activeRoom) closeActiveRoom("This room is no longer available.");
+      renderRooms();
+      setStatus("Could not load active rooms.", true);
+    }
+  ));
   listen(query(collection(db, "roomMembers"), where("uid", "==", user.uid)), "roomMemberships", renderRooms);
 
   const mergePrivate = (key, firstQuery, secondQuery, render, onReady) => {

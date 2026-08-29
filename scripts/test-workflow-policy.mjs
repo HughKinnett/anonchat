@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import {
   DELETION_WORKFLOW_URL,
   DELETION_WORKFLOW_PATH,
@@ -24,6 +24,8 @@ const rulesWorkflow = await readWorkflow(RULES_WORKFLOW_PATH);
 const packageJson = JSON.parse(await readFile(new URL("package.json", repositoryRoot), "utf8"));
 const adminHtml = await readFile(new URL("admin.html", repositoryRoot), "utf8");
 assertValid(validateDeletionWorkflow(deletionWorkflow), "trusted deletion workflow");
+await assert.rejects(access(new URL(".github/workflows/process-moderation-deletions.yml", repositoryRoot)),
+  "the duplicate five-minute moderation schedule must be removed");
 assertValid(validateDeployWorkflow(deployWorkflow), "Firebase production deploy workflow");
 assertValid(validateRulesWorkflow(rulesWorkflow), "Firestore rules CI workflow");
 assertValid(validatePackageScripts(packageJson), "workflow package scripts");
@@ -58,6 +60,13 @@ for (const requiredSuite of [
   "test:self-delete",
   "test:legacy-migration",
   "test:admin-dashboard",
+  "test:moderation-policy",
+  "test:moderation-rules",
+  "test:admin-moderation",
+  "test:moderation-deletion",
+  "test:vote-schema",
+  "test:production-migrations-cli",
+  "test:deletion-processors-cli",
   "test:auth-activity"
 ]) {
   const missingSuite = structuredClone(packageJson);
@@ -91,6 +100,17 @@ assertRejected(validateDeletionWorkflow, deletionExtraRun, "extra deletion comma
 const deletionWriteOverride = clone(deletionWorkflow);
 deletionWriteOverride.jobs.process.permissions = { contents: "write" };
 assertRejected(validateDeletionWorkflow, deletionWriteOverride, "deletion job permission escalation");
+
+const changedModerationAggregate = clone(packageJson);
+changedModerationAggregate.scripts["test:moderation-deletion"] = changedModerationAggregate.scripts["test:moderation-deletion"]
+  .replace(" && npm run test:moderation-deletion-firestore-integration", "");
+assert.notDeepEqual(validatePackageScripts(changedModerationAggregate), [],
+  "moderation deletion integration cannot leave its package aggregate");
+
+const changedDeletionProcessorAggregate = clone(packageJson);
+changedDeletionProcessorAggregate.scripts["deletion-processors:process"] = "npm run admin-deletion:process";
+assert.notDeepEqual(validatePackageScripts(changedDeletionProcessorAggregate), [],
+  "the hosted five-minute command must run both deletion processors");
 
 const rulesExtraJob = clone(rulesWorkflow);
 rulesExtraJob.jobs.exfiltrate = { "runs-on": "ubuntu-latest", steps: [{ run: "echo credential" }] };
@@ -153,6 +173,19 @@ deployWithoutIndexes.jobs.deploy.steps.at(-1).run =
   deployWithoutIndexes.jobs.deploy.steps.at(-1).run.replace("firestore:indexes,", "");
 assertRejected(validateDeployWorkflow, deployWithoutIndexes, "deploy without Firestore indexes");
 
+const deployWithoutMigration = clone(deployWorkflow);
+deployWithoutMigration.jobs.deploy.steps.splice(4, 1);
+assertRejected(validateDeployWorkflow, deployWithoutMigration, "deploy without production migrations");
+
+const deployMigrationAfterRules = clone(deployWorkflow);
+[deployMigrationAfterRules.jobs.deploy.steps[4], deployMigrationAfterRules.jobs.deploy.steps[5]] =
+  [deployMigrationAfterRules.jobs.deploy.steps[5], deployMigrationAfterRules.jobs.deploy.steps[4]];
+assertRejected(validateDeployWorkflow, deployMigrationAfterRules, "deploy migrations after strict rules");
+
+const deployMigrationNonBlocking = clone(deployWorkflow);
+deployMigrationNonBlocking.jobs.deploy.steps[4]["continue-on-error"] = true;
+assertRejected(validateDeployWorkflow, deployMigrationNonBlocking, "non-blocking production migrations");
+
 const deployExtraCommand = clone(deployWorkflow);
 deployExtraCommand.jobs.deploy.steps.push({ run: "env" });
 assertRejected(validateDeployWorkflow, deployExtraCommand, "extra deploy command");
@@ -184,11 +217,11 @@ jobs:
         uses: google-github-actions/auth@v3
         with:
           credentials_json: "\${{ secrets.WRONG_SECRET }}"
-      - run: npm run admin-deletion:process
+      - run: npm run deletion-processors:process
         env:
           GCLOUD_PROJECT: anonchatlogin
           GOOGLE_APPLICATION_CREDENTIALS: \${{ steps.auth.outputs.credentials_file_path }}
-      - run: "# npm run admin-deletion:process \${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}"
+      - run: "# npm run deletion-processors:process \${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}"
 `, "wrong deletion fixture");
 assert.ok(validateDeletionWorkflow(wrongDeletionFixture).length > 0, "comments and unrelated steps must not satisfy deletion policy");
 

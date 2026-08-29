@@ -1,4 +1,4 @@
-name: Process administrator account deletions
+name: Process account and moderation deletions
 
 on:
   schedule:
@@ -29,7 +29,7 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
 
-      - run: npm run admin-deletion:process
+      - run: npm run deletion-processors:process
         env:
           GCLOUD_PROJECT: anonchatlogin
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}

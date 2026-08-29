@@ -9,6 +9,7 @@ import {
   canonicalSubscriptionVersion,
   compareSourceCursors,
   isValidQueueEvent,
+  roomNotificationEligible,
   retryDelayMs,
   shouldExhaustNotification,
   TERMINAL_NOTIFICATION_STATUSES,
@@ -154,6 +155,21 @@ export class FirestoreNotificationAdapter {
     return snapshot.docs.map((document) => document.data().uid);
   }
 
+  async roomNotificationAvailable(roomId, actorUid, recipientUid) {
+    const [room, actorBlocksRecipient, recipientBlocksActor] = await this.db.getAll(
+      this.db.collection("rooms").doc(roomId),
+      this.db.collection("blocks").doc(`${actorUid}_${recipientUid}`),
+      this.db.collection("blocks").doc(`${recipientUid}_${actorUid}`)
+    );
+    return roomNotificationEligible({
+      room: room.exists ? room.data() : undefined,
+      actorUid,
+      recipientUid,
+      blocked: actorBlocksRecipient.exists || recipientBlocksActor.exists,
+      nowMillis: this.now()
+    });
+  }
+
   async recipientAvailable(uid) {
     const [profile, adminDeletion, selfDeletion] = await Promise.all([
       this.db.collection("users").doc(uid).get(),
@@ -286,6 +302,7 @@ export class FirestoreNotificationAdapter {
         type: event.type,
         actorUid: event.actorUid,
         recipientUid: event.recipientUid,
+        ...(event.type === "room-message" ? { roomId: event.roomId } : {}),
         route: event.route,
         sourceCreatedAt: event.sourceCreatedAt,
         status: "processing",
@@ -356,6 +373,7 @@ export class FirestoreNotificationAdapter {
       type: event.type,
       actorUid: event.actorUid,
       recipientUid: event.recipientUid,
+      ...(event.type === "room-message" ? { roomId: event.roomId } : {}),
       route: event.route,
       sourceCreatedAt: event.sourceCreatedAt,
       status,

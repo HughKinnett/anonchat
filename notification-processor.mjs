@@ -72,6 +72,14 @@ const recipientsFor = async (adapter, type, source) => {
     .slice(0, ACCOUNT_LIMIT - 1);
 };
 
+const roomRecipientAvailable = (adapter, type, roomId, actorUid, recipientUid) =>
+  type !== "room-message"
+    || adapter.roomNotificationAvailable(roomId, actorUid, recipientUid);
+
+const eventRecipientAvailable = async (adapter, event) =>
+  await adapter.recipientAvailable(event.recipientUid)
+  && await roomRecipientAvailable(adapter, event.type, event.roomId, event.actorUid, event.recipientUid);
+
 export const scanTrustedNotificationSources = async ({ adapter, budget, limits = {} }) => {
   const invocation = budget ?? createInvocationBudget(adapter, limits);
   const result = { bootstrapped: false, scanned: 0, materialized: 0 };
@@ -139,7 +147,15 @@ export const scanTrustedNotificationSources = async ({ adapter, budget, limits =
           markBudgetReached(invocation);
           break sourceScan;
         }
-        if (recipientUid !== actorUid && await adapter.recipientAvailable(recipientUid)) {
+        if (recipientUid !== actorUid
+          && await adapter.recipientAvailable(recipientUid)
+          && await roomRecipientAvailable(
+            adapter,
+            state.type,
+            source.data.roomId,
+            actorUid,
+            recipientUid
+          )) {
           availableRecipients.push(recipientUid);
         }
       }
@@ -166,6 +182,7 @@ export const scanTrustedNotificationSources = async ({ adapter, budget, limits =
           type: state.type,
           actorUid,
           recipientUid,
+          roomId: state.type === "room-message" ? source.data.roomId : undefined,
           route: notificationRoute(state.type),
           sourceCreatedAt: source.data.createdAt,
           now: adapter.timestamp(adapter.now())
@@ -248,7 +265,7 @@ export const deliverNotificationEvents = async ({
           safeLog(logger, "error", "EVENT_EXHAUSTED");
           continue;
         }
-        if (!(await adapter.recipientAvailable(claim.data.recipientUid))) {
+        if (!(await eventRecipientAvailable(adapter, claim.data))) {
           await adapter.suppressEvent(claim.id, claim.token);
           result.suppressed += 1;
           safeLog(logger, "info", "RECIPIENT_UNAVAILABLE");
@@ -281,7 +298,7 @@ export const deliverNotificationEvents = async ({
             result.budgetReached = true;
             break;
           }
-          if (!(await adapter.recipientAvailable(claim.data.recipientUid))) {
+          if (!(await eventRecipientAvailable(adapter, claim.data))) {
             recipientUnavailable = true;
             break;
           }

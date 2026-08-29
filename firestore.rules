@@ -29,6 +29,10 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true;
     }
 
+    function moderationTargetActive(content) {
+      return content.get('moderationStatus', 'active') != 'reported';
+    }
+
     function contentAvailableAfter(documentPath) {
       return existsAfter(/databases/$(database)/documents/$(documentPath))
         && linkedContentAvailableAfter(
@@ -38,6 +42,7 @@ service cloud.firestore {
 
     function linkedContentAvailableAfter(content) {
       return content.keys().hasAny(['authorId', 'originalAuthorId', 'ownerId', 'senderId'])
+        && moderationTargetActive(content)
         && (!content.keys().hasAny(['authorId']) || hasNoDeletionBarrierAfter(content.authorId))
         && (!content.keys().hasAny(['originalAuthorId'])
           || hasNoDeletionBarrierAfter(content.originalAuthorId))
@@ -48,14 +53,13 @@ service cloud.firestore {
     }
 
     function postAvailableAfter(postId) {
-      return (existsAfter(/databases/$(database)/documents/posts/$(postId))
-          && linkedContentAvailableAfter(
-            getAfter(/databases/$(database)/documents/posts/$(postId)).data
-          ))
-        || (existsAfter(/databases/$(database)/documents/communityPosts/$(postId))
-          && linkedContentAvailableAfter(
-            getAfter(/databases/$(database)/documents/communityPosts/$(postId)).data
-          ));
+      let postPath = /databases/$(database)/documents/posts/$(postId);
+      let communityPostPath = /databases/$(database)/documents/communityPosts/$(postId);
+      return (existsAfter(postPath) || existsAfter(communityPostPath))
+        && (!existsAfter(postPath)
+          || linkedContentAvailableAfter(getAfter(postPath).data))
+        && (!existsAfter(communityPostPath)
+          || linkedContentAvailableAfter(getAfter(communityPostPath).data));
     }
 
     function circleAvailableAfter(circleId) {
@@ -65,6 +69,9 @@ service cloud.firestore {
 
     function roomAvailableAfter(roomId) {
       return existsAfter(/databases/$(database)/documents/rooms/$(roomId))
+        && moderationTargetActive(
+          getAfter(/databases/$(database)/documents/rooms/$(roomId)).data
+        )
         && accountAvailableAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId);
     }
 
@@ -75,6 +82,9 @@ service cloud.firestore {
 
     function linkedRoomAvailableAfter(roomId) {
       return existsAfter(/databases/$(database)/documents/rooms/$(roomId))
+        && moderationTargetActive(
+          getAfter(/databases/$(database)/documents/rooms/$(roomId)).data
+        )
         && hasNoDeletionBarrierAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId);
     }
 
@@ -157,6 +167,493 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true;
     }
 
+    function validBlock(blockKey) {
+      return request.resource.data.keys().hasOnly(['blockerId', 'blockedId', 'createdAt'])
+        && request.resource.data.blockerId == request.auth.uid
+        && request.resource.data.blockedId is string
+        && request.resource.data.blockedId != request.auth.uid
+        && blockKey == request.auth.uid + '_' + request.resource.data.blockedId
+        && accountAvailableAfter(request.resource.data.blockedId)
+        && request.resource.data.createdAt == request.time;
+    }
+
+    function matchingPendingReport(reportData, reportKey, targetType, targetId, ownerId) {
+      return reportData.keys().hasOnly([
+          'targetType', 'targetId', 'reporterId', 'reportedUserId',
+          'reason', 'status', 'createdAt'
+        ])
+        && reportKey == targetType + '_' + targetId + '_' + request.auth.uid
+        && reportData.targetType == targetType
+        && reportData.targetId == targetId
+        && reportData.reporterId == request.auth.uid
+        && reportData.reportedUserId == ownerId
+        && reportData.reportedUserId != request.auth.uid
+        && reportData.reason in ['Spam', 'Harassment', 'Threats', 'Sexual content', 'Other']
+        && reportData.status == 'pending'
+        && reportData.createdAt == request.time;
+    }
+
+    function validPostReportCreate(reportData) {
+      let targetPath = /databases/$(database)/documents/posts/$(reportData.targetId);
+      let currentTarget = get(targetPath).data;
+      let heldTarget = getAfter(targetPath).data;
+      return exists(targetPath)
+        && currentTarget.authorId == reportData.reportedUserId
+        && moderationTargetActive(currentTarget)
+        && heldTarget.diff(currentTarget).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt'
+        ])
+        && heldTarget.moderationStatus == 'reported'
+        && heldTarget.reportedAt == request.time;
+    }
+
+    function validCommunityPostReportCreate(reportData) {
+      let targetPath = /databases/$(database)/documents/communityPosts/$(reportData.targetId);
+      let currentTarget = get(targetPath).data;
+      let heldTarget = getAfter(targetPath).data;
+      return exists(targetPath)
+        && currentTarget.authorId == reportData.reportedUserId
+        && moderationTargetActive(currentTarget)
+        && heldTarget.diff(currentTarget).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt'
+        ])
+        && heldTarget.moderationStatus == 'reported'
+        && heldTarget.reportedAt == request.time;
+    }
+
+    function validRoomReportCreate(reportData) {
+      let targetPath = /databases/$(database)/documents/rooms/$(reportData.targetId);
+      let currentTarget = get(targetPath).data;
+      let heldTarget = getAfter(targetPath).data;
+      return exists(targetPath)
+        && currentTarget.ownerId == reportData.reportedUserId
+        && moderationTargetActive(currentTarget)
+        && heldTarget.diff(currentTarget).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt'
+        ])
+        && heldTarget.moderationStatus == 'reported'
+        && heldTarget.reportedAt == request.time;
+    }
+
+    function validReportCreate(reportKey) {
+      return activeUserAfter()
+        && !isAdmin()
+        && request.resource.data.targetType in ['post', 'communityPost', 'room']
+        && matchingPendingReport(
+          request.resource.data,
+          reportKey,
+          request.resource.data.targetType,
+          request.resource.data.targetId,
+          request.resource.data.reportedUserId
+        )
+        && ((request.resource.data.targetType == 'post'
+            && validPostReportCreate(request.resource.data))
+          || (request.resource.data.targetType == 'communityPost'
+            && validCommunityPostReportCreate(request.resource.data))
+          || (request.resource.data.targetType == 'room'
+            && validRoomReportCreate(request.resource.data)));
+    }
+
+    function validPostReportHold(postId) {
+      let reportKey = 'post_' + postId + '_' + request.auth.uid;
+      let reportPath = /databases/$(database)/documents/reports/$(reportKey);
+      return activeUserAfter()
+        && moderationTargetActive(resource.data)
+        && resource.data.authorId != request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt'
+        ])
+        && request.resource.data.moderationStatus == 'reported'
+        && request.resource.data.reportedAt == request.time
+        && !exists(reportPath)
+        && existsAfter(reportPath)
+        && matchingPendingReport(
+          getAfter(reportPath).data,
+          reportKey,
+          'post',
+          postId,
+          resource.data.authorId
+        );
+    }
+
+    function validCommunityPostReportHold(postId) {
+      let reportKey = 'communityPost_' + postId + '_' + request.auth.uid;
+      let reportPath = /databases/$(database)/documents/reports/$(reportKey);
+      return activeUserAfter()
+        && moderationTargetActive(resource.data)
+        && resource.data.authorId != request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt'
+        ])
+        && request.resource.data.moderationStatus == 'reported'
+        && request.resource.data.reportedAt == request.time
+        && !exists(reportPath)
+        && existsAfter(reportPath)
+        && matchingPendingReport(
+          getAfter(reportPath).data,
+          reportKey,
+          'communityPost',
+          postId,
+          resource.data.authorId
+        );
+    }
+
+    function validRoomReportHold(roomId) {
+      let reportKey = 'room_' + roomId + '_' + request.auth.uid;
+      let reportPath = /databases/$(database)/documents/reports/$(reportKey);
+      return activeUserAfter()
+        && moderationTargetActive(resource.data)
+        && resource.data.ownerId != request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt'
+        ])
+        && request.resource.data.moderationStatus == 'reported'
+        && request.resource.data.reportedAt == request.time
+        && !exists(reportPath)
+        && existsAfter(reportPath)
+        && matchingPendingReport(
+          getAfter(reportPath).data,
+          reportKey,
+          'room',
+          roomId,
+          resource.data.ownerId
+        );
+    }
+
+    function matchingResolvedReport(reportData, reportKey, targetType, targetId, action, adminId) {
+      return reportData.keys().hasOnly([
+          'targetType', 'targetId', 'reporterId', 'reportedUserId',
+          'reason', 'status', 'createdAt', 'resolvedBy',
+          'resolutionAction', 'resolvedAt'
+        ])
+        && reportData.targetType == targetType
+        && reportData.targetId == targetId
+        && reportData.status == 'resolved'
+        && reportData.resolvedBy == adminId
+        && reportData.resolutionAction == action
+        && reportData.resolvedAt == request.time
+        && reportKey == targetType + '_' + targetId + '_' + reportData.reporterId;
+    }
+
+    function matchingModerationAction(actionData, actionKey, targetType, targetId, action, adminId) {
+      return actionData.keys().hasOnly([
+          'targetType', 'targetId', 'reportIds', 'reportCount', 'action', 'adminId', 'actedAt'
+        ])
+        && actionKey == targetType + '_' + targetId
+        && actionData.targetType == targetType
+        && actionData.targetId == targetId
+        && actionData.reportIds is list
+        && actionData.reportIds.size() >= 1
+        && actionData.reportIds.size() <= 498
+        && actionData.reportCount == actionData.reportIds.size()
+        && actionData.action == action
+        && actionData.adminId == adminId
+        && actionData.actedAt is timestamp;
+    }
+
+    function moderationDeletionJobPath(targetType, targetId) {
+      return /databases/$(database)/documents/moderationDeletionJobs/$(targetType + '_' + targetId);
+    }
+
+    function noModerationDeletionJobAfter(targetType, targetId) {
+      return !existsAfter(moderationDeletionJobPath(targetType, targetId));
+    }
+
+    function matchingModerationDeletionJob(jobData, jobId) {
+      return jobData.keys().hasOnly([
+          'targetType', 'targetId', 'reportId', 'requesterUid', 'requestedAt', 'status'
+        ])
+        && jobData.targetType in ['post', 'communityPost', 'room']
+        && jobData.targetId is string
+        && jobData.targetId.size() > 0
+        && jobData.reportId is string
+        && jobData.reportId.size() > 0
+        && jobData.requesterUid == request.auth.uid
+        && jobData.requestedAt == request.time
+        && jobData.status == 'queued'
+        && jobId == jobData.targetType + '_' + jobData.targetId;
+    }
+
+    function matchingDeletionAnchor(jobData) {
+      let reportPath = /databases/$(database)/documents/reports/$(jobData.reportId);
+      return exists(reportPath)
+        && get(reportPath).data.status == 'pending'
+        && get(reportPath).data.targetType == jobData.targetType
+        && get(reportPath).data.targetId == jobData.targetId;
+    }
+
+    function validModerationDeletionTarget(jobData) {
+      let postPath = /databases/$(database)/documents/posts/$(jobData.targetId);
+      let communityPostPath = /databases/$(database)/documents/communityPosts/$(jobData.targetId);
+      let roomPath = /databases/$(database)/documents/rooms/$(jobData.targetId);
+      let reportPath = /databases/$(database)/documents/reports/$(jobData.reportId);
+      return (jobData.targetType == 'post'
+          && exists(postPath) && existsAfter(postPath)
+          && get(postPath).data.get('moderationStatus', 'active') == 'reported'
+          && getAfter(postPath).data.get('moderationStatus', 'active') == 'reported'
+          && get(postPath).data.authorId == get(reportPath).data.reportedUserId)
+        || (jobData.targetType == 'communityPost'
+          && exists(communityPostPath) && existsAfter(communityPostPath)
+          && get(communityPostPath).data.get('moderationStatus', 'active') == 'reported'
+          && getAfter(communityPostPath).data.get('moderationStatus', 'active') == 'reported'
+          && get(communityPostPath).data.authorId == get(reportPath).data.reportedUserId)
+        || (jobData.targetType == 'room'
+          && exists(roomPath) && existsAfter(roomPath)
+          && get(roomPath).data.get('moderationStatus', 'active') == 'reported'
+          && getAfter(roomPath).data.get('moderationStatus', 'active') == 'reported'
+          && get(roomPath).data.ownerId == get(reportPath).data.reportedUserId);
+    }
+
+    function validModerationDeletionQueue(jobId) {
+      return isAdmin()
+        && !exists(/databases/$(database)/documents/moderationDeletionJobs/$(jobId))
+        && matchingModerationDeletionJob(request.resource.data, jobId)
+        && matchingDeletionAnchor(request.resource.data)
+        && validModerationDeletionTarget(request.resource.data);
+    }
+
+    function validPostActionState(postId, action) {
+      let targetPath = /databases/$(database)/documents/posts/$(postId);
+      let currentTarget = get(targetPath).data;
+      return exists(targetPath)
+        && currentTarget.get('moderationStatus', 'active') == 'reported'
+        && ((action == 'restore-post'
+            && existsAfter(targetPath)
+            && getAfter(targetPath).data.diff(currentTarget).affectedKeys().hasOnly([
+              'moderationStatus', 'reportedAt'
+            ])
+            && getAfter(targetPath).data.moderationStatus == 'active'
+            && getAfter(targetPath).data.reportedAt == null
+            && noModerationDeletionJobAfter('post', postId)));
+    }
+
+    function validCommunityPostActionState(postId, action) {
+      let targetPath = /databases/$(database)/documents/communityPosts/$(postId);
+      let currentTarget = get(targetPath).data;
+      return exists(targetPath)
+        && currentTarget.get('moderationStatus', 'active') == 'reported'
+        && ((action == 'restore-post'
+            && existsAfter(targetPath)
+            && getAfter(targetPath).data.diff(currentTarget).affectedKeys().hasOnly([
+              'moderationStatus', 'reportedAt'
+            ])
+            && getAfter(targetPath).data.moderationStatus == 'active'
+            && getAfter(targetPath).data.reportedAt == null
+            && noModerationDeletionJobAfter('communityPost', postId)));
+    }
+
+    function validRestoredRoomExpiry(expiresAt) {
+      return expiresAt is timestamp
+        && expiresAt >= request.time + duration.value(86340, 's')
+        && expiresAt <= request.time + duration.value(86460, 's');
+    }
+
+    function validRoomActionState(roomId, action) {
+      let targetPath = /databases/$(database)/documents/rooms/$(roomId);
+      let currentTarget = get(targetPath).data;
+      return exists(targetPath)
+        && currentTarget.get('moderationStatus', 'active') == 'reported'
+        && ((action == 'restore-room'
+            && existsAfter(targetPath)
+            && getAfter(targetPath).data.diff(currentTarget).affectedKeys().hasOnly([
+              'moderationStatus', 'reportedAt', 'resumedAt', 'expiresAt'
+            ])
+            && getAfter(targetPath).data.moderationStatus == 'active'
+            && getAfter(targetPath).data.reportedAt == null
+            && getAfter(targetPath).data.resumedAt == request.time
+            && validRestoredRoomExpiry(getAfter(targetPath).data.expiresAt)
+            && noModerationDeletionJobAfter('room', roomId)));
+    }
+
+    function validActionTargetState(targetType, targetId, action) {
+      return (targetType == 'post'
+          && action in ['restore-post', 'delete-post']
+          && validPostActionState(targetId, action))
+        || (targetType == 'communityPost'
+          && action in ['restore-post', 'delete-post']
+          && validCommunityPostActionState(targetId, action))
+        || (targetType == 'room'
+          && action in ['restore-room', 'delete-room']
+          && validRoomActionState(targetId, action));
+    }
+
+    function validCurrentActionForTarget(targetType, targetId, action) {
+      let actionKey = targetType + '_' + targetId;
+      let actionPath = /databases/$(database)/documents/moderationActions/$(actionKey);
+      let actionData = getAfter(actionPath).data;
+      let reportKey = actionData.reportIds[0];
+      let reportPath = /databases/$(database)/documents/reports/$(reportKey);
+      return existsAfter(actionPath)
+        && matchingModerationAction(
+          actionData,
+          actionKey,
+          targetType,
+          targetId,
+          action,
+          request.auth.uid
+        )
+        && actionData.actedAt == request.time
+        && existsAfter(reportPath)
+        && matchingResolvedReport(
+          getAfter(reportPath).data,
+          reportKey,
+          targetType,
+          targetId,
+          action,
+          request.auth.uid
+        );
+    }
+
+    function validModerationAction(actionKey) {
+      let reportKey = request.resource.data.reportIds[0];
+      let reportPath = /databases/$(database)/documents/reports/$(reportKey);
+      return isAdmin()
+        && matchingModerationAction(
+          request.resource.data,
+          actionKey,
+          request.resource.data.targetType,
+          request.resource.data.targetId,
+          request.resource.data.action,
+          request.auth.uid
+        )
+        && request.resource.data.actedAt == request.time
+        && existsAfter(reportPath)
+        && matchingResolvedReport(
+          getAfter(reportPath).data,
+          reportKey,
+          request.resource.data.targetType,
+          request.resource.data.targetId,
+          request.resource.data.action,
+          request.auth.uid
+        )
+        && validActionTargetState(
+          request.resource.data.targetType,
+          request.resource.data.targetId,
+          request.resource.data.action
+        );
+    }
+
+    function validReportResolution(reportKey) {
+      let actionKey = resource.data.targetType + '_' + resource.data.targetId;
+      let actionPath = /databases/$(database)/documents/moderationActions/$(actionKey);
+      return isAdmin()
+        && resource.data.keys().hasOnly([
+          'targetType', 'targetId', 'reporterId', 'reportedUserId',
+          'reason', 'status', 'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'targetType', 'targetId', 'reporterId', 'reportedUserId',
+          'reason', 'status', 'createdAt', 'resolvedBy',
+          'resolutionAction', 'resolvedAt'
+        ])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'resolvedBy', 'resolutionAction', 'resolvedAt'
+        ])
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'resolved'
+        && request.resource.data.resolvedBy == request.auth.uid
+        && request.resource.data.resolvedAt == request.time
+        && ((resource.data.targetType in ['post', 'communityPost']
+            && request.resource.data.resolutionAction in ['restore-post', 'delete-post'])
+          || (resource.data.targetType == 'room'
+            && request.resource.data.resolutionAction in ['restore-room', 'delete-room']))
+        && existsAfter(actionPath)
+        && matchingModerationAction(
+          getAfter(actionPath).data,
+          actionKey,
+          resource.data.targetType,
+          resource.data.targetId,
+          request.resource.data.resolutionAction,
+          request.auth.uid
+        )
+        && reportKey in getAfter(actionPath).data.reportIds
+        && getAfter(actionPath).data.actedAt == request.time
+        && validActionTargetState(
+          resource.data.targetType,
+          resource.data.targetId,
+          request.resource.data.resolutionAction
+        );
+    }
+
+    function validResolvedReportDelete(reportKey) {
+      let actionKey = resource.data.targetType + '_' + resource.data.targetId;
+      let actionPath = /databases/$(database)/documents/moderationActions/$(actionKey);
+      return isAdmin()
+        && resource.data.status == 'resolved'
+        && exists(actionPath)
+        && matchingModerationAction(
+          get(actionPath).data,
+          actionKey,
+          resource.data.targetType,
+          resource.data.targetId,
+          resource.data.resolutionAction,
+          resource.data.resolvedBy
+        )
+        && reportKey in get(actionPath).data.reportIds;
+    }
+
+    function validPostRestore(postId) {
+      return isAdmin()
+        && resource.data.get('moderationStatus', 'active') == 'reported'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt'
+        ])
+        && request.resource.data.moderationStatus == 'active'
+        && request.resource.data.reportedAt == null
+        && noModerationDeletionJobAfter('post', postId)
+        && validCurrentActionForTarget('post', postId, 'restore-post');
+    }
+
+    function validCommunityPostRestore(postId) {
+      return isAdmin()
+        && resource.data.get('moderationStatus', 'active') == 'reported'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt'
+        ])
+        && request.resource.data.moderationStatus == 'active'
+        && request.resource.data.reportedAt == null
+        && noModerationDeletionJobAfter('communityPost', postId)
+        && validCurrentActionForTarget('communityPost', postId, 'restore-post');
+    }
+
+    function validRoomRestore(roomId) {
+      return isAdmin()
+        && resource.data.get('moderationStatus', 'active') == 'reported'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'moderationStatus', 'reportedAt', 'resumedAt', 'expiresAt'
+        ])
+        && request.resource.data.moderationStatus == 'active'
+        && request.resource.data.reportedAt == null
+        && request.resource.data.resumedAt == request.time
+        && validRestoredRoomExpiry(request.resource.data.expiresAt)
+        && noModerationDeletionJobAfter('room', roomId)
+        && validCurrentActionForTarget('room', roomId, 'restore-room');
+    }
+
+    function validReportedTargetDelete(targetType, targetId) {
+      return resource.data.get('moderationStatus', 'active') == 'reported'
+        && validCurrentActionForTarget(
+          targetType,
+          targetId,
+          targetType == 'room' ? 'delete-room' : 'delete-post'
+        );
+    }
+
+    function roomEvidenceReadable(roomId) {
+      return isAdmin()
+        || (exists(/databases/$(database)/documents/rooms/$(roomId))
+          && moderationTargetActive(
+            get(/databases/$(database)/documents/rooms/$(roomId)).data
+          ));
+    }
+
+    function roomEvidenceMayBeRemoved(roomId) {
+      return !existsAfter(/databases/$(database)/documents/rooms/$(roomId))
+        || moderationTargetActive(
+          getAfter(/databases/$(database)/documents/rooms/$(roomId)).data
+        );
+    }
+
     function activePushUser() {
       return activeUser()
         && !exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
@@ -203,16 +700,25 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username;
     }
 
+    function validPostImage(imageData) {
+      return imageData is string
+        && imageData.size() <= 800000
+        && (imageData.size() == 0
+          || imageData.matches('^data:image/jpeg;base64,[A-Za-z0-9+/]+={0,2}$'));
+    }
+
     function validOriginalPost() {
-      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'imageData', 'category', 'options', 'expiresAt', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'imageData', 'category', 'options', 'moderationStatus', 'expiresAt', 'createdAt'])
+        && request.resource.data.keys().hasAll(['moderationStatus'])
         && request.resource.data.type == 'original'
+        && request.resource.data.moderationStatus == 'active'
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
         && request.resource.data.content is string
         && request.resource.data.content.size() <= 500
         && (request.resource.data.content.size() >= 1
           || request.resource.data.get('imageData', '').size() > 0)
-        && request.resource.data.get('imageData', '').size() <= 800000
+        && validPostImage(request.resource.data.get('imageData', ''))
         && request.resource.data.get('category', 'Post') in ['Post', 'Question', 'Confession', 'Advice', 'Rant', 'Good News', 'Poll']
         && request.resource.data.get('options', []) is list
         && request.resource.data.get('options', []).size() <= 4
@@ -225,20 +731,25 @@ service cloud.firestore {
 
     function validRepost(postId) {
       let original = getAfter(/databases/$(database)/documents/posts/$(request.resource.data.originalPostId));
-      return request.resource.data.keys().hasOnly([
+        return request.resource.data.keys().hasOnly([
           'type', 'authorId', 'username', 'originalPostId',
-          'originalAuthorId', 'originalUsername', 'content', 'imageData', 'createdAt'
+          'originalAuthorId', 'originalUsername', 'content', 'imageData',
+          'moderationStatus', 'createdAt'
         ])
+        && request.resource.data.keys().hasAll(['moderationStatus'])
         && request.resource.data.type == 'repost'
+        && request.resource.data.moderationStatus == 'active'
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
         && postId == 'repost_' + request.auth.uid + '_' + request.resource.data.originalPostId
         && original.data.type == 'original'
+        && moderationTargetActive(original.data)
         && request.resource.data.originalAuthorId == original.data.authorId
         && request.resource.data.originalUsername == original.data.username
         && accountAvailableAfter(original.data.authorId)
         && request.resource.data.content == original.data.content
         && request.resource.data.get('imageData', '') == original.data.get('imageData', '')
+        && validPostImage(request.resource.data.get('imageData', ''))
         && request.resource.data.createdAt == request.time;
     }
 
@@ -285,6 +796,11 @@ service cloud.firestore {
 
     match /system/notificationProcessor {
       allow read, create, update, delete: if false;
+    }
+
+    match /system/moderationDeletionProcessor {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /pageViews/{day} {
@@ -453,6 +969,34 @@ service cloud.firestore {
       allow delete: if signedIn() && request.auth.uid == userId;
     }
 
+    match /blocks/{blockKey} {
+      allow read: if activeUser()
+        && (resource.data.blockerId == request.auth.uid
+          || resource.data.blockedId == request.auth.uid);
+      allow create: if activeUserAfter() && validBlock(blockKey);
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.blockerId == request.auth.uid;
+    }
+
+    match /reports/{reportKey} {
+      allow read: if isAdmin();
+      allow create: if validReportCreate(reportKey);
+      allow update: if validReportResolution(reportKey);
+      allow delete: if validResolvedReportDelete(reportKey);
+    }
+
+    match /moderationActions/{actionKey} {
+      allow read: if isAdmin();
+      allow create, update: if validModerationAction(actionKey);
+      allow delete: if false;
+    }
+
+    match /moderationDeletionJobs/{jobId} {
+      allow read: if isAdmin();
+      allow create: if validModerationDeletionQueue(jobId);
+      allow update, delete: if false;
+    }
+
     match /follows/{followId} {
       allow read: if signedIn();
       allow create: if activeUserAfter()
@@ -596,10 +1140,19 @@ service cloud.firestore {
     }
 
     match /communityPosts/{postId} {
-      allow read: if signedIn();
+      allow get: if signedIn()
+        && (moderationTargetActive(resource.data) || isAdmin());
+      allow list: if signedIn()
+        && (resource.data.moderationStatus == 'active' || isAdmin());
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['authorId', 'username', 'content', 'category', 'circleId', 'options', 'expiresAt', 'createdAt'])
+        && noModerationDeletionJobAfter('communityPost', postId)
+        && request.resource.data.keys().hasOnly([
+          'authorId', 'username', 'content', 'category', 'circleId', 'options',
+          'moderationStatus', 'expiresAt', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll(['moderationStatus'])
         && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.moderationStatus == 'active'
         && request.resource.data.username == currentUsername()
         && request.resource.data.content is string
         && request.resource.data.content.size() >= 1
@@ -610,41 +1163,67 @@ service cloud.firestore {
         && request.resource.data.options is list
         && request.resource.data.options.size() <= 4
         && request.resource.data.createdAt == request.time;
-      allow update: if false;
-      allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);
+      allow update: if validCommunityPostReportHold(postId)
+        || validCommunityPostRestore(postId);
+      allow delete: if (isAdmin()
+          && (moderationTargetActive(resource.data)
+            || validReportedTargetDelete('communityPost', postId)))
+        || (signedIn()
+          && moderationTargetActive(resource.data)
+          && resource.data.authorId == request.auth.uid);
     }
 
     match /communityVotes/{voteId} {
       allow read: if signedIn();
       allow create, update: if activeUserAfter()
-        && postAvailableAfter(request.resource.data.postId)
-        && voteId == request.resource.data.postId + '_' + request.auth.uid
-        && request.resource.data.keys().hasOnly(['postId', 'uid', 'option', 'createdAt'])
+        && request.resource.data.postCollection in ['posts', 'communityPosts']
+        && ((request.resource.data.postCollection == 'posts'
+            && existsAfter(/databases/$(database)/documents/posts/$(request.resource.data.postId))
+            && linkedContentAvailableAfter(getAfter(/databases/$(database)/documents/posts/$(request.resource.data.postId)).data))
+          || (request.resource.data.postCollection == 'communityPosts'
+            && existsAfter(/databases/$(database)/documents/communityPosts/$(request.resource.data.postId))
+            && linkedContentAvailableAfter(getAfter(/databases/$(database)/documents/communityPosts/$(request.resource.data.postId)).data)))
+        && voteId == request.resource.data.postCollection + '_' + request.resource.data.postId + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['postCollection', 'postId', 'uid', 'option', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.option is int
         && request.resource.data.option >= 0
         && request.resource.data.option <= 3
         && request.resource.data.createdAt == request.time;
-      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow delete: if (signedIn() && resource.data.uid == request.auth.uid) || isAdmin();
     }
 
     match /rooms/{roomId} {
-      allow read: if signedIn();
+      allow get: if signedIn()
+        && (moderationTargetActive(resource.data) || isAdmin());
+      allow list: if signedIn()
+        && (resource.data.moderationStatus == 'active' || isAdmin());
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'createdAt'])
+        && noModerationDeletionJobAfter('room', roomId)
+        && request.resource.data.keys().hasOnly([
+          'name', 'topic', 'ownerId', 'moderationStatus', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll(['moderationStatus'])
         && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.moderationStatus == 'active'
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 3
         && request.resource.data.name.size() <= 40
         && request.resource.data.topic is string
         && request.resource.data.topic.size() <= 100
         && request.resource.data.createdAt == request.time;
-      allow update: if false;
-      allow delete: if isAdmin() || (signedIn() && resource.data.ownerId == request.auth.uid);
+      allow update: if validRoomReportHold(roomId) || validRoomRestore(roomId);
+      allow delete: if (isAdmin()
+          && (moderationTargetActive(resource.data)
+            || validReportedTargetDelete('room', roomId)))
+        || (signedIn()
+          && moderationTargetActive(resource.data)
+          && resource.data.ownerId == request.auth.uid);
     }
 
     match /roomMembers/{memberId} {
-      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.uid == request.auth.uid);
       allow create: if activeUserAfter()
         && memberId == request.resource.data.roomId + '_' + request.auth.uid
         && request.resource.data.keys().hasOnly(['roomId', 'uid', 'joinedAt'])
@@ -658,11 +1237,18 @@ service cloud.firestore {
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinedAt'])
         && request.resource.data.joinedAt == request.time;
-      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow delete: if signedIn()
+        && ((resource.data.uid == request.auth.uid
+            && roomEvidenceMayBeRemoved(resource.data.roomId))
+          || (isAdmin()
+            && !existsAfter(/databases/$(database)/documents/rooms/$(resource.data.roomId))
+            && validCurrentActionForTarget(
+              'room', resource.data.roomId, 'delete-room'
+            )));
     }
 
     match /roomMessages/{messageId} {
-      allow read: if signedIn();
+      allow get, list: if signedIn() && roomEvidenceReadable(resource.data.roomId);
       allow create: if activeUserAfter()
         && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'text', 'expiresAt', 'createdAt'])
         && request.resource.data.senderId == request.auth.uid
@@ -674,7 +1260,10 @@ service cloud.firestore {
         && request.resource.data.text.size() <= 280
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if isAdmin() || (signedIn() && resource.data.senderId == request.auth.uid);
+      allow delete: if (isAdmin() && roomEvidenceMayBeRemoved(resource.data.roomId))
+        || (signedIn()
+          && resource.data.senderId == request.auth.uid
+          && roomEvidenceMayBeRemoved(resource.data.roomId));
     }
 
     match /messageRequests/{requestId} {
@@ -778,10 +1367,20 @@ service cloud.firestore {
     }
 
     match /posts/{postId} {
-      allow read: if signedIn();
-      allow create: if activeUserAfter() && (validOriginalPost() || validRepost(postId));
-      allow update: if false;
-      allow delete: if (signedIn() && resource.data.authorId == request.auth.uid) || isAdmin();
+      allow get: if signedIn()
+        && (moderationTargetActive(resource.data) || isAdmin());
+      allow list: if signedIn()
+        && (resource.data.moderationStatus == 'active' || isAdmin());
+      allow create: if activeUserAfter()
+        && noModerationDeletionJobAfter('post', postId)
+        && (validOriginalPost() || validRepost(postId));
+      allow update: if validPostReportHold(postId) || validPostRestore(postId);
+      allow delete: if (isAdmin()
+          && (moderationTargetActive(resource.data)
+            || validReportedTargetDelete('post', postId)))
+        || (signedIn()
+          && moderationTargetActive(resource.data)
+          && resource.data.authorId == request.auth.uid);
     }
   }
 }

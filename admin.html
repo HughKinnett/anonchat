@@ -12,6 +12,14 @@
   <section class="admin-hero"><div><p class="admin-kicker">Admin dashboard</p><h1>Take care of your community</h1><p id="admin-identity">Checking administrator access…</p></div><p id="last-updated">Waiting for live data…</p></section>
   <p id="admin-status" role="status" aria-live="polite"></p>
 
+  <section class="admin-panel reported-panel" aria-labelledby="reported-content-heading">
+    <div class="admin-panel-heading reported-heading"><div><p class="admin-kicker">Needs review</p><h2 id="reported-content-heading">Reported Content</h2><p class="admin-note"><strong id="reported-count">0 pending reports</strong> · Newest reports appear first.</p></div><div class="admin-filters reported-filters" aria-label="Reported content filters"><button data-report-filter="all" aria-pressed="true" type="button">All</button><button data-report-filter="post" aria-pressed="false" type="button">Post</button><button data-report-filter="room" aria-pressed="false" type="button">Temporary Room</button></div></div>
+    <p id="reported-content-status" class="admin-note" role="status" aria-live="polite">Waiting for live reports…</p>
+    <div id="reported-content" class="admin-list reported-list" aria-live="polite"></div>
+    <template id="reported-post-actions"><button class="admin-action restore" data-moderation-action="restore-post" type="button">Restore to Timeline</button><button class="admin-action danger" data-moderation-action="delete-post" type="button">Permanently Delete Post</button></template>
+    <template id="reported-room-actions"><button class="admin-action restore" data-moderation-action="restore-room" type="button">Allow Room to Resume</button><button class="admin-action danger" data-moderation-action="delete-room" type="button">Permanently Delete Room</button></template>
+  </section>
+
   <section class="admin-metrics" aria-label="Community totals">
     <article><strong id="metric-users">0</strong><span>Total Users</span></article>
     <article><strong id="metric-inactive">0</strong><span>Inactive 7+ Days</span></article>
@@ -49,6 +57,7 @@
       <article class="admin-panel"><div class="admin-panel-heading"><h3>Most engaged posts</h3></div><div id="top-posts" class="rank-list"></div></article>
     </div>
     <section class="admin-panel processor-health" aria-labelledby="processor-heading"><div><h3 id="processor-heading">Account deletion service</h3><p id="processor-health" role="status" aria-live="polite">Checking service status…</p></div><a class="admin-action nav-button" href="https://github.com/HughKinnett/anonchat/actions/workflows/process-admin-deletions.yml">Open recovery page</a></section>
+    <section class="admin-panel processor-health" aria-labelledby="moderation-processor-heading"><div><h3 id="moderation-processor-heading">Moderation deletion service</h3><p id="moderation-processor-health" role="status" aria-live="polite">Checking service status…</p></div><a class="admin-action nav-button" href="https://github.com/HughKinnett/anonchat/actions/workflows/process-admin-deletions.yml">Open moderation recovery page</a></section>
     <details class="admin-panel more-details"><summary>More details</summary><div class="details-grid"><div><h3>Data health</h3><div id="data-health" class="health-list"></div></div><div><h3>Daily views</h3><div id="admin-views" class="admin-list compact-list"></div></div></div></details>
   </section>
 </main>

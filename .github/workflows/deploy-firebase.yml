@@ -26,10 +26,20 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Install pinned dependencies
+        run: npm ci
+
       - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
+
+      - name: Migrate and verify production data
+        run: npm run production-migrations:apply
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
 
       - name: Deploy Firebase production
         run: npx --yes firebase-tools@15.28.1 deploy --project anonchatlogin --only "firestore:rules,firestore:indexes,hosting" --non-interactive

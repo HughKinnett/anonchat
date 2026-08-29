@@ -20,6 +20,7 @@ import {
   fixedNotificationErrorCode,
   isValidQueueEvent,
   notificationPayload,
+  roomNotificationEligible,
   queuedEvent,
   retryDelayMs,
   shouldExhaustNotification,
@@ -130,6 +131,29 @@ assert.equal(validateTrustedSource("room-message", { senderId: "actor", roomId: 
 assert.equal(validateTrustedSource("room-message", { senderId: "actor", roomId: "room", createdAt, expiresAt: createdAt }, 1_700_000_000_123), false);
 assert.equal(validateTrustedSource("reveal-request", { fromId: "actor", toId: "recipient", status: "pending", createdAt }, 1_700_000_000_000), true);
 assert.equal(validateTrustedSource("reaction", { uid: "", createdAt }, 1_700_000_000_000), false);
+assert.equal(roomNotificationEligible({
+  room: { moderationStatus: "active", expiresAt: later },
+  actorUid: "actor",
+  recipientUid: "recipient",
+  blocked: false,
+  nowMillis: 1_700_000_000_123
+}), true);
+for (const [label, candidate] of [
+  ["missing parent", undefined],
+  ["missing explicit status", { expiresAt: later }],
+  ["reported parent", { moderationStatus: "reported", expiresAt: later }],
+  ["expired parent", { moderationStatus: "active", expiresAt: createdAt }],
+  ["malformed expiry", { moderationStatus: "active", expiresAt: "not-a-timestamp" }]
+]) {
+  assert.equal(roomNotificationEligible({
+    room: candidate, actorUid: "actor", recipientUid: "recipient", blocked: false,
+    nowMillis: 1_700_000_000_123
+  }), false, label);
+}
+assert.equal(roomNotificationEligible({
+  room: { moderationStatus: "active" }, actorUid: "actor", recipientUid: "recipient",
+  blocked: true, nowMillis: 1_700_000_000_123
+}), false, "either-direction blocking suppresses room delivery");
 
 const event = queuedEvent({
   type: "comment", actorUid: "actor", recipientUid: "recipient", sourceCreatedAt: createdAt,
@@ -170,6 +194,17 @@ assert.equal(isValidQueueEvent({
 for (const forbidden of ["text", "body", "email", "username", "endpoint", "p256dh", "auth", "roomAlias", "sourcePath"]) {
   assert.equal(Object.hasOwn(event, forbidden), false, `${forbidden} is not copied into the queue`);
 }
+const roomEvent = queuedEvent({
+  type: "room-message", actorUid: "actor", recipientUid: "recipient", roomId: "room-a",
+  sourceCreatedAt: createdAt, now: later, route: "/community.html#rooms-panel"
+});
+assert.equal(roomEvent.roomId, "room-a", "the internal queue retains only the parent identifier needed for revalidation");
+assert.equal(isValidQueueEvent(roomEvent), true);
+const { roomId: _roomId, ...roomEventWithoutRoomId } = roomEvent;
+assert.equal(isValidQueueEvent(roomEventWithoutRoomId), false,
+  "room events fail closed without a parent identifier");
+assert.equal(isValidQueueEvent({ ...event, roomId: "room-a" }), false,
+  "non-room events cannot smuggle a room identifier into the strict queue schema");
 assert.equal(NOTIFICATION_RETENTION_MS, 30 * 24 * 60 * 60 * 1000);
 assert.equal(shouldExhaustNotification({
   ...event,

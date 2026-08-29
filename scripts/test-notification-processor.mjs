@@ -40,6 +40,7 @@ class ScanAdapter {
   async postAuthor(source) { return source.postAuthorUid; }
   async roomMembers(source) { return source.memberUids; }
   async recipientAvailable(uid) { return this.available.has(uid); }
+  async roomNotificationAvailable(_roomId, _actorUid, _recipientUid) { return true; }
   async createEvent(id, data) {
     if (this.events.has(id)) return false;
     this.events.set(id, { ...data });
@@ -88,6 +89,30 @@ class ScanAdapter {
   }
   const roomEvents = [...adapter.events.values()].filter((event) => event.type === "room-message");
   assert.deepEqual(roomEvents.map((event) => event.recipientUid).sort(), ["room-a", "room-b"]);
+  assert.equal(roomEvents.every((event) => event.roomId === "room-1"), true,
+    "room events retain the parent id required for delivery-time moderation checks");
+}
+
+{
+  const adapter = new ScanAdapter();
+  adapter.roomNotificationAvailable = async (roomId, _actorUid, recipientUid) =>
+    roomId === "active-room" && recipientUid === "allowed-member";
+  adapter.pages.set("room-message", [
+    document("roomMessages/reported", {
+      senderId: "sender", roomId: "reported-room", createdAt: time(10), expiresAt: time(3_000)
+    }, { memberUids: ["suppressed-member"] }),
+    document("roomMessages/active", {
+      senderId: "sender", roomId: "active-room", createdAt: time(11), expiresAt: time(3_000)
+    }, { memberUids: ["blocked-member", "allowed-member"] })
+  ]);
+  adapter.available.add("allowed-member");
+  adapter.available.add("blocked-member");
+  adapter.available.add("suppressed-member");
+  const result = await scanTrustedNotificationSources({ adapter });
+  const roomEvents = [...adapter.events.values()].filter((event) => event.type === "room-message");
+  assert.equal(result.materialized, 1);
+  assert.deepEqual(roomEvents.map((event) => event.recipientUid), ["allowed-member"],
+    "reported parents and either-direction blocked recipients are excluded before queueing");
 }
 
 {
@@ -114,6 +139,7 @@ class DeliveryAdapter {
     this.advanceBeforeList = 0;
     this.trace = [];
     this.availabilitySequence = [];
+    this.roomAvailabilitySequence = [];
   }
   now() { return this.clock; }
   timestamp(value) { return time(value); }
@@ -133,6 +159,9 @@ class DeliveryAdapter {
   async recipientAvailable() {
     this.trace.push("availability");
     return this.availabilitySequence.length ? this.availabilitySequence.shift() : true;
+  }
+  async roomNotificationAvailable() {
+    return this.roomAvailabilitySequence.length ? this.roomAvailabilitySequence.shift() : true;
   }
   async listSubscriptions(uid) {
     this.clock += this.advanceBeforeList;
@@ -205,7 +234,18 @@ const subscription = (uid, idValue, overrides = {}) => ({
 
 const queued = (id, type, recipientUid) => ({
   id,
-  data: { type, actorUid: "actor", recipientUid, route: notificationPayload(type, id).url, sourceCreatedAt: time(1), status: "pending", attempts: 0, createdAt: time(1), updatedAt: time(1) }
+  data: {
+    type,
+    actorUid: "actor",
+    recipientUid,
+    ...(type === "room-message" ? { roomId: "room-a" } : {}),
+    route: notificationPayload(type, id).url,
+    sourceCreatedAt: time(1),
+    status: "pending",
+    attempts: 0,
+    createdAt: time(1),
+    updatedAt: time(1)
+  }
 });
 const id = (digit) => digit.repeat(64);
 
@@ -254,6 +294,27 @@ const id = (digit) => digit.repeat(64);
   assert.equal(adapter.events.get(id("d")).status, "failed");
   await deliverNotificationEvents({ adapter, ownerId: "worker-b", sendPush, logger: { info() {}, error() {} } });
   assert.deepEqual(tags, [`anonchat-${id("d")}`, `anonchat-${id("d")}`], "crash retry keeps the stable collapse tag");
+}
+
+for (const [label, roomAvailabilitySequence] of [
+  ["reported after queueing", [false]],
+  ["blocked immediately before send", [true, false]]
+]) {
+  const event = queued(id(label.startsWith("reported") ? "e" : "f"), "room-message", `held-${label}`);
+  const adapter = new DeliveryAdapter([event], new Map([
+    [`held-${label}`, [subscription(`held-${label}`, `device-${label}`)]]
+  ]));
+  adapter.roomAvailabilitySequence = [...roomAvailabilitySequence];
+  let sends = 0;
+  const result = await deliverNotificationEvents({
+    adapter,
+    ownerId: `worker-${label}`,
+    sendPush: async () => { sends += 1; },
+    logger: { info() {}, error() {} }
+  });
+  assert.equal(sends, 0, `${label} suppresses an already-materialized room event`);
+  assert.equal(adapter.events.get(event.id).status, "suppressed");
+  assert.equal(result.suppressed, 1);
 }
 
 {

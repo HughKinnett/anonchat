@@ -7,6 +7,25 @@ import { applyPushAlertState } from "./push-alert-ui.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { markNotificationsSeen, readSeenNotificationIds } from "./notification-storage.mjs";
 import { buildInAppNotifications, notificationUiId } from "./notification-ui-policy.mjs";
+import { createRoomMessageListenerRegistry } from "./room-report-ui-policy.mjs";
+import {
+  canShowActorContent,
+  communityPostReportPayloads,
+  postIsVisible,
+  postReportPayloads,
+  reportId
+} from "./moderation-policy.mjs";
+import {
+  createReportSubmissionGate,
+  postDocumentKey,
+  postExpirySelection,
+  postExpiryTimestamp,
+  postImagePresentation,
+  postInteractionTarget,
+  postReportTarget
+} from "./post-report-ui-policy.mjs";
+import { voteBelongsToTarget, voteDocumentPlan } from "./vote-schema-policy.mjs";
+import { isBlockedPair, loadBlockPairs } from "./block-integration.mjs";
 import { onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -25,6 +44,7 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
+  writeBatch,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -49,6 +69,8 @@ let roomMessages = [];
 let roomMemberships = [];
 let rooms = [];
 let reveals = [];
+let blockPairs = new Set();
+let blockPairsInitialized = false;
 let showingProfile = false;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -60,7 +82,10 @@ const searchResults = document.getElementById("search-results");
 let currentNotificationIds = [];
 let seenNotificationIds = new Set();
 let pendingPostImage = "";
+const locallyReportedPostIds = new Set();
+const submittedReportIds = new Set();
 const postImageInput = document.getElementById("post-image-upload");
+const postImageButton = document.getElementById("post-image-button");
 const postImagePreviewWrap = document.getElementById("post-image-preview-wrap");
 const postImagePreview = document.getElementById("post-image-preview");
 const alertsButton = document.getElementById("enable-alerts");
@@ -75,11 +100,54 @@ const spotifyRemove = document.getElementById("spotify-song-remove");
 const spotifyStatus = document.getElementById("spotify-song-status");
 const postCategory = document.getElementById("post-category");
 const postExpiry = document.getElementById("post-expiry");
+const postExpiryPreview = document.getElementById("post-expiry-preview");
 const pollOptions = document.getElementById("poll-options");
+const postReportDialog = document.getElementById("post-report-dialog");
+const postReportForm = document.getElementById("post-report-form");
+const cancelPostReport = document.getElementById("cancel-post-report");
+const reportSubmissionGate = createReportSubmissionGate();
+let dialogReportToken = null;
+let submittingReportToken = null;
+let selectedPostExpiryMillis = postExpirySelection(postExpiry.value, Date.now());
+
+const notificationRoomMessageListeners = createRoomMessageListenerRegistry({
+  subscribe: (roomId, next, error) => onSnapshot(
+      query(collection(db, "roomMessages"), where("roomId", "==", roomId)),
+      (snapshot) => next(snapshot.docs),
+      error
+    ),
+  onMessages: (messages) => {
+    roomMessages = messages;
+    renderNotifications();
+  },
+  onError: () => setStatus("Could not load room-message notifications.", true)
+});
+
+const syncNotificationRoomMessageListeners = () => {
+  notificationRoomMessageListeners.sync({ rooms, memberships: roomMemberships, currentUid: currentUser?.uid });
+};
+
+const stopTimelineListeners = () => {
+  listeners.forEach((unsubscribe) => unsubscribe());
+  notificationRoomMessageListeners.stop();
+};
 
 postCategory?.addEventListener("change", () => {
   pollOptions.hidden = postCategory.value !== "Poll";
 });
+
+const renderExpiryPreview = () => {
+  postExpiryPreview.textContent = selectedPostExpiryMillis
+    ? `Disappears ${new Date(selectedPostExpiryMillis).toLocaleString()}`
+    : "This post will not disappear automatically.";
+};
+
+const updateExpirySelection = () => {
+  selectedPostExpiryMillis = postExpirySelection(postExpiry.value, Date.now());
+  renderExpiryPreview();
+};
+
+postExpiry.addEventListener("change", updateExpirySelection);
 
 const spotifyTrackId = (value) => {
   try {
@@ -255,6 +323,8 @@ const compressPostImage = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+postImageButton.addEventListener("click", () => postImageInput.click());
+
 postImageInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -305,9 +375,10 @@ const renderSearchResults = () => {
   }
 
   const matchedUsers = users
-    .filter((profile) => profile.data().username?.toLowerCase().includes(term))
+    .filter((profile) => actorIsVisible(profile.id) && profile.data().username?.toLowerCase().includes(term))
     .slice(0, 5);
   const matchedPosts = allTimelinePosts()
+    .filter(postIsVisibleByBlock)
     .filter((post) =>
       post.data().content?.toLowerCase().includes(term) ||
       post.data().username?.toLowerCase().includes(term)
@@ -469,25 +540,39 @@ const mentionsCurrentUser = (value) => {
 };
 
 const allTimelinePosts = () => [...postDocs, ...communityPostDocs];
+const actorIsVisible = (uid) => uid === currentUser?.uid || (blockPairsInitialized && canShowActorContent(uid, blockPairs));
+const canInteractWith = (uid) => uid === currentUser?.uid || (blockPairsInitialized && !isBlockedPair(currentUser?.uid, uid, blockPairs));
+const timelinePostKey = (post) => postDocumentKey({
+  id: post.id,
+  collectionName: post.ref.parent.id
+});
+const postIsVisibleByBlock = (post) => {
+  const data = post.data();
+  return !locallyReportedPostIds.has(timelinePostKey(post))
+    && postIsVisible(data, Date.now())
+    && actorIsVisible(data.authorId)
+    && (data.type !== "repost" || actorIsVisible(data.originalAuthorId));
+};
 
 const renderNotifications = () => {
   if (!currentUser) return;
   const readIds = new Set(notificationReads.map((read) => read.data().eventId ?? read.data().reactionId));
   const notificationItems = buildInAppNotifications({
     currentUid: currentUser.uid,
-    posts: allTimelinePosts(),
-    reactions,
-    comments,
-    messageRequests,
-    roomMessages,
+    posts: allTimelinePosts().filter(postIsVisibleByBlock),
+    reactions: reactions.filter((reaction) => actorIsVisible(reaction.data().uid)),
+    comments: comments.filter((comment) => actorIsVisible(comment.data().uid)),
+    messageRequests: messageRequests.filter((request) => actorIsVisible(request.data().fromId)),
+    rooms,
+    roomMessages: roomMessages.filter((message) => actorIsVisible(message.data().senderId)),
     roomMemberships,
-    reveals
+    reveals: reveals.filter((reveal) => actorIsVisible(reveal.data().fromId))
   });
 
   const ownedPostIds = new Set(allTimelinePosts()
     .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
     .map((post) => post.id));
-  comments.forEach((comment) => {
+  comments.filter((comment) => actorIsVisible(comment.data().uid)).forEach((comment) => {
     const data = comment.data();
     const postId = comment.ref.parent.parent?.id;
     if (data.uid === currentUser.uid || ownedPostIds.has(postId) || !mentionsCurrentUser(data.text)) return;
@@ -499,7 +584,7 @@ const renderNotifications = () => {
     });
   });
 
-  allTimelinePosts().forEach((postDoc) => {
+  allTimelinePosts().filter(postIsVisibleByBlock).forEach((postDoc) => {
     const post = postDoc.data();
     if (
       post.type === "repost" ||
@@ -601,15 +686,116 @@ const setStatus = (message, isError = false) => {
   status.style.color = isError ? "#fca5a5" : "inherit";
 };
 
+const canInteractWithPost = (postKey, targetUid) =>
+  !locallyReportedPostIds.has(postKey) && canInteractWith(targetUid);
+
+const openPostReportDialog = (postDoc, button) => {
+  const post = postDoc.data();
+  const target = postReportTarget({
+    id: postDoc.id,
+    collectionName: postDoc.ref.parent.id,
+    post
+  });
+  const reportKey = reportId(target.targetType, target.id, currentUser.uid);
+  const moderationKey = postDocumentKey(target);
+  if (reportSubmissionGate.isBusy()) {
+    setStatus("Another report is still being submitted. Please wait.");
+    return;
+  }
+  if (
+    target.authorId === currentUser.uid ||
+    submittedReportIds.has(reportKey) ||
+    locallyReportedPostIds.has(moderationKey)
+  ) {
+    button.disabled = true;
+    return;
+  }
+  dialogReportToken = reportSubmissionGate.tryStart({
+    target,
+    button,
+    reportKey,
+    moderationKey
+  });
+  if (!dialogReportToken) return;
+  postReportForm.reset();
+  postReportDialog.showModal();
+};
+
+cancelPostReport.addEventListener("click", () => {
+  if (dialogReportToken) reportSubmissionGate.finish(dialogReportToken);
+  dialogReportToken = null;
+  postReportDialog.close();
+});
+
+postReportDialog.addEventListener("close", () => {
+  if (dialogReportToken && dialogReportToken !== submittingReportToken) {
+    reportSubmissionGate.finish(dialogReportToken);
+    dialogReportToken = null;
+  }
+});
+
+postReportForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!dialogReportToken || submittingReportToken) return;
+  const reason = new FormData(postReportForm).get("reason");
+  if (typeof reason !== "string" || !reason) return;
+
+  const token = dialogReportToken;
+  const { target, button, reportKey, moderationKey } = token.request;
+  const timestamp = serverTimestamp();
+  const buildPayloads = target.targetType === "communityPost"
+    ? communityPostReportPayloads
+    : postReportPayloads;
+  const payloads = buildPayloads({
+    targetId: target.id,
+    reporterId: currentUser.uid,
+    authorId: target.authorId,
+    reason,
+    timestamp
+  });
+  const batch = writeBatch(db);
+  batch.set(doc(db, "reports", reportKey), payloads.report);
+  batch.update(doc(db, target.collectionName, target.id), payloads[target.targetKey]);
+
+  submittingReportToken = token;
+  dialogReportToken = null;
+  button.disabled = true;
+  button.textContent = "Reported";
+  submittedReportIds.add(reportKey);
+  locallyReportedPostIds.add(moderationKey);
+  postReportDialog.close();
+  renderFeed();
+  renderSearchResults();
+  try {
+    await batch.commit();
+    setStatus("Post reported. Expiration is paused for admin review.");
+  } catch {
+    submittedReportIds.delete(reportKey);
+    locallyReportedPostIds.delete(moderationKey);
+    button.disabled = false;
+    button.textContent = "Report";
+    renderFeed();
+    renderSearchResults();
+    setStatus("Could not report that post. It may already be under review.", true);
+  } finally {
+    reportSubmissionGate.finish(token);
+    if (submittingReportToken === token) submittingReportToken = null;
+  }
+});
+
 const originalPostId = (postDoc) =>
   postDoc.data().type === "repost" ? postDoc.data().originalPostId : postDoc.id;
 
-const postReactions = (postId) => reactions.filter((reaction) =>
+const postReactions = (collectionName, postId) => reactions.filter((reaction) =>
   reaction.ref.parent.parent?.id === postId
+  && reaction.ref.parent.parent?.parent.id === collectionName
+  && actorIsVisible(reaction.data().uid)
 );
 
-const postComments = (postId) => comments
-  .filter((comment) => comment.ref.parent.parent?.id === postId)
+const postComments = (collectionName, postId) => comments
+  .filter((comment) => comment.ref.parent.parent?.id === postId
+    && comment.ref.parent.parent?.parent.id === collectionName
+    && actorIsVisible(comment.data().uid))
   .sort((a, b) =>
     (a.data().createdAt?.toMillis?.() || 0) - (b.data().createdAt?.toMillis?.() || 0)
   );
@@ -667,8 +853,10 @@ const createFollowControl = (userId) => {
   return wrapper;
 };
 
-const toggleReaction = async (postId, type, currentType) => {
-  const reactionRef = doc(db, "posts", postId, "reactions", currentUser.uid);
+const toggleReaction = async (collectionName, postId, postKey, type, currentType, targetUid) => {
+  if (!canInteractWith(targetUid)) return;
+  if (!canInteractWithPost(postKey, targetUid)) return;
+  const reactionRef = doc(db, collectionName, postId, "reactions", currentUser.uid);
   if (currentType === type) {
     await deleteDoc(reactionRef);
     return;
@@ -680,7 +868,7 @@ const toggleReaction = async (postId, type, currentType) => {
   });
 };
 
-const reactionButton = (postId, type, emoji, reactionDocs) => {
+const reactionButton = (collectionName, postId, postKey, type, emoji, reactionDocs, targetUid) => {
   const count = reactionDocs.filter((reaction) => reaction.data().type === type).length;
   const myReaction = reactionDocs.find((reaction) => reaction.data().uid === currentUser.uid);
   const currentType = myReaction?.data().type;
@@ -698,7 +886,7 @@ const reactionButton = (postId, type, emoji, reactionDocs) => {
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await toggleReaction(postId, type, currentType);
+      await toggleReaction(collectionName, postId, postKey, type, currentType, targetUid);
     } catch {
       setStatus("Could not update your reaction.", true);
       button.disabled = false;
@@ -711,6 +899,7 @@ const sharePost = async (postDoc) => {
   const post = postDoc.data();
   const sourceId = originalPostId(postDoc);
   const sourceAuthorId = post.type === "repost" ? post.originalAuthorId : post.authorId;
+  if (!canInteractWithPost(timelinePostKey(postDoc), sourceAuthorId)) return;
   const sourceUsername = post.type === "repost" ? post.originalUsername : post.username;
   const repostRef = doc(db, "posts", `repost_${currentUser.uid}_${sourceId}`);
 
@@ -723,6 +912,7 @@ const sharePost = async (postDoc) => {
     originalUsername: sourceUsername,
     content: post.content,
     imageData: post.imageData || "",
+    moderationStatus: "active",
     createdAt: serverTimestamp()
   });
 };
@@ -732,6 +922,8 @@ const renderPost = (postDoc) => {
   const sourceId = originalPostId(postDoc);
   const collectionName = postDoc.ref.parent.id;
   const sourceCollection = collectionName === "communityPosts" ? "communityPosts" : "posts";
+  const interactionPostId = postInteractionTarget({ ...post, id: postDoc.id });
+  const interactionPostKey = postDocumentKey({ id: interactionPostId, collectionName: sourceCollection });
   const item = document.createElement("li");
   item.className = "feed-item";
   item.id = `post-${sourceCollection}-${postDoc.id}`;
@@ -744,6 +936,7 @@ const renderPost = (postDoc) => {
   }
 
   const displayedAuthorId = post.type === "repost" ? post.originalAuthorId : post.authorId;
+  if (!postIsVisibleByBlock(postDoc) || !actorIsVisible(displayedAuthorId)) return document.createDocumentFragment();
   const displayedUsername = post.type === "repost" ? post.originalUsername : post.username;
   const authorRow = document.createElement("div");
   authorRow.className = "post-author-row";
@@ -754,17 +947,27 @@ const renderPost = (postDoc) => {
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
   appendLinkedText(text, post.content);
-  const postImage = post.imageData ? document.createElement("img") : null;
-  if (postImage) {
+  const imagePresentation = postImagePresentation(post.imageData, "Photo attached to this post");
+  const postImage = imagePresentation.kind === "image"
+    ? document.createElement("img")
+    : imagePresentation.kind === "placeholder"
+      ? document.createElement("p")
+      : null;
+  if (imagePresentation.kind === "image") {
     postImage.className = "post-image";
-    postImage.src = post.imageData;
-    postImage.alt = "Photo attached to this post";
+    postImage.src = imagePresentation.src;
+    postImage.alt = imagePresentation.alt;
+    postImage.referrerPolicy = imagePresentation.referrerPolicy;
+  } else if (imagePresentation.kind === "placeholder") {
+    postImage.className = "post-image-placeholder";
+    postImage.textContent = imagePresentation.text;
   }
   const time = document.createElement("small");
   const expiresAt = post.expiresAt?.toMillis?.();
+  const expirationCopy = expiresAt ? `Disappears ${new Date(expiresAt).toLocaleString()}` : "";
   time.textContent = (post.createdAt?.toDate
     ? post.createdAt.toDate().toLocaleString()
-    : "Posting…") + (expiresAt ? ` · Disappears ${new Date(expiresAt).toLocaleString()}` : "");
+    : "Posting…") + (expirationCopy ? ` · ${expirationCopy}` : "");
 
   if (post.category && post.category !== "Post") {
     const category = document.createElement("span");
@@ -773,22 +976,27 @@ const renderPost = (postDoc) => {
     item.append(category);
   }
 
-  const reactionDocs = postReactions(sourceId);
+  const reactionDocs = postReactions(sourceCollection, interactionPostId);
   const reactionsBar = document.createElement("div");
   reactionsBar.className = "reactions";
   if (sourceCollection === "posts") {
     reactionsBar.append(
-      reactionButton(sourceId, "heart", "❤️", reactionDocs),
-      reactionButton(sourceId, "middle_finger", "🖕", reactionDocs),
-      reactionButton(sourceId, "laugh", "😂", reactionDocs),
-      reactionButton(sourceId, "sad", "😢", reactionDocs)
+      reactionButton(sourceCollection, interactionPostId, interactionPostKey, "heart", "❤️", reactionDocs, displayedAuthorId),
+      reactionButton(sourceCollection, interactionPostId, interactionPostKey, "middle_finger", "🖕", reactionDocs, displayedAuthorId),
+      reactionButton(sourceCollection, interactionPostId, interactionPostKey, "laugh", "😂", reactionDocs, displayedAuthorId),
+      reactionButton(sourceCollection, interactionPostId, interactionPostKey, "sad", "😢", reactionDocs, displayedAuthorId)
     );
   }
 
   const poll = document.createElement("div");
   poll.className = "timeline-poll";
   if (post.category === "Poll" && Array.isArray(post.options)) {
-    const votes = pollVotes.filter((vote) => vote.data().postId === sourceId);
+    const knownTargets = {
+      postIds: new Set(postDocs.map(document => document.id)),
+      communityPostIds: new Set(communityPostDocs.map(document => document.id))
+    };
+    const voteTarget = { postCollection: sourceCollection, postId: interactionPostId };
+    const votes = pollVotes.filter(vote => voteBelongsToTarget(vote.data(), voteTarget, knownTargets));
     const mine = votes.find((vote) => vote.data().uid === currentUser.uid);
     post.options.forEach((option, index) => {
       const count = votes.filter((vote) => vote.data().option === index).length;
@@ -801,11 +1009,24 @@ const renderPost = (postDoc) => {
       total.textContent = `${count} vote${count === 1 ? "" : "s"}`;
       button.append(label, total);
       button.addEventListener("click", async () => {
+        if (!canInteractWithPost(interactionPostKey, displayedAuthorId)) return;
         button.disabled = true;
-        const voteRef = doc(db, "communityVotes", `${sourceId}_${currentUser.uid}`);
+        const plan = voteDocumentPlan({
+          postCollection: sourceCollection,
+          postId: interactionPostId,
+          uid: currentUser.uid,
+          option: index,
+          createdAt: serverTimestamp()
+        });
+        const voteRef = doc(db, "communityVotes", plan.id);
         try {
-          if (mine?.data().option === index) await deleteDoc(voteRef);
-          else await setDoc(voteRef, { postId: sourceId, uid: currentUser.uid, option: index, createdAt: serverTimestamp() });
+          const batch = writeBatch(db);
+          if (mine?.data().option === index) batch.delete(mine.ref);
+          else {
+            if (mine && mine.id !== plan.id) batch.delete(mine.ref);
+            batch.set(voteRef, plan.data);
+          }
+          await batch.commit();
         } catch {
           setStatus("Could not update your vote.", true);
           button.disabled = false;
@@ -815,7 +1036,7 @@ const renderPost = (postDoc) => {
     });
   }
 
-  const commentDocs = postComments(sourceId);
+  const commentDocs = postComments(sourceCollection, interactionPostId);
   const commentsSection = document.createElement("details");
   commentsSection.className = "comments-section";
   const commentsSummary = document.createElement("summary");
@@ -849,7 +1070,7 @@ const renderPost = (postDoc) => {
       commentInput.setSelectionRange(commentInput.value.length, commentInput.value.length);
     });
     commentActions.append(reply);
-    if (comment.uid === currentUser.uid || displayedAuthorId === currentUser.uid) {
+    if (comment.uid === currentUser.uid || post.authorId === currentUser.uid) {
       const removeComment = document.createElement("button");
       removeComment.type = "button";
       removeComment.className = "delete-comment-button";
@@ -885,10 +1106,10 @@ const renderPost = (postDoc) => {
   commentForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = commentInput.value.trim();
-    if (!text) return;
+    if (!text || !canInteractWithPost(interactionPostKey, displayedAuthorId)) return;
     commentSubmit.disabled = true;
     try {
-      await addDoc(collection(db, sourceCollection, sourceId, "comments"), {
+      await addDoc(collection(db, sourceCollection, interactionPostId, "comments"), {
         uid: currentUser.uid,
         username: profileUsername,
         text,
@@ -928,6 +1149,18 @@ const renderPost = (postDoc) => {
     actions.append(share);
   }
 
+  if (post.authorId !== currentUser.uid) {
+    const report = document.createElement("button");
+    const target = postReportTarget({ id: postDoc.id, collectionName: sourceCollection, post });
+    const reportKey = reportId(target.targetType, target.id, currentUser.uid);
+    report.className = "report-button";
+    report.type = "button";
+    report.textContent = submittedReportIds.has(reportKey) ? "Reported" : "Report";
+    report.disabled = submittedReportIds.has(reportKey);
+    report.addEventListener("click", () => openPostReportDialog(postDoc, report));
+    actions.append(report);
+  }
+
   if (post.authorId === currentUser.uid) {
     const remove = document.createElement("button");
     remove.className = "delete-button";
@@ -956,7 +1189,7 @@ const renderPost = (postDoc) => {
 
 const renderFeed = () => {
   const unexpiredPosts = allTimelinePosts()
-    .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
+    .filter(postIsVisibleByBlock)
     .sort((a, b) => (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0));
   const visiblePosts = showingProfile
     ? unexpiredPosts.filter((post) => post.data().authorId === currentUser.uid)
@@ -984,6 +1217,7 @@ profilePostsButton.addEventListener("click", () => setFeedView(true));
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
+    stopTimelineListeners();
     await exitAfterAuthLoss({
       redirect: () => window.location.replace("index.html")
     });
@@ -991,6 +1225,12 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  loadBlockPairs({ db, uid: user.uid, onChange: (pairs) => {
+    blockPairs = pairs;
+    blockPairsInitialized = true;
+    renderFeed();
+    renderSearchResults();
+  }, onError: () => setStatus("Could not load block settings.", true) }).then((unsubscribe) => listeners.push(unsubscribe)).catch(() => setStatus("Could not load block settings.", true));
   seenNotificationIds = readSeenNotificationIds({ getStorage: () => window.localStorage, uid: user.uid });
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
@@ -998,7 +1238,7 @@ onAuthStateChanged(auth, async (user) => {
     setStatus("This account has been banned.", true);
     await exitAuthenticatedSession({
       user,
-      stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+      stopListeners: stopTimelineListeners,
       redirect: () => window.location.replace("index.html")
     });
     return;
@@ -1040,7 +1280,12 @@ onAuthStateChanged(auth, async (user) => {
   }, { merge: true }).catch(() => {});
 
   listeners.push(onSnapshot(
-    query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(100)),
+    query(
+      collection(db, "posts"),
+      where("moderationStatus", "==", "active"),
+      orderBy("createdAt", "desc"),
+      limit(100)
+    ),
     (snapshot) => {
       postDocs = snapshot.docs;
       renderFeed();
@@ -1050,7 +1295,12 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(onSnapshot(
-    query(collection(db, "communityPosts"), orderBy("createdAt", "desc"), limit(100)),
+    query(
+      collection(db, "communityPosts"),
+      where("moderationStatus", "==", "active"),
+      orderBy("createdAt", "desc"),
+      limit(100)
+    ),
     (snapshot) => {
       communityPostDocs = snapshot.docs;
       renderFeed();
@@ -1126,20 +1376,23 @@ onAuthStateChanged(auth, async (user) => {
     query(collection(db, "roomMembers"), where("uid", "==", user.uid)),
     (snapshot) => {
       roomMemberships = snapshot.docs;
-      renderNotifications();
+      syncNotificationRoomMessageListeners();
     },
     () => setStatus("Could not load room memberships.", true)
   ));
 
-  listeners.push(onSnapshot(collection(db, "rooms"), (snapshot) => {
-    rooms = snapshot.docs;
-    renderNotifications();
-  }));
-
-  listeners.push(onSnapshot(collection(db, "roomMessages"), (snapshot) => {
-    roomMessages = snapshot.docs;
-    renderNotifications();
-  }));
+  listeners.push(onSnapshot(
+    query(collection(db, "rooms"), where("moderationStatus", "==", "active")),
+    (snapshot) => {
+      rooms = snapshot.docs;
+      syncNotificationRoomMessageListeners();
+    },
+    () => {
+      rooms = [];
+      syncNotificationRoomMessageListeners();
+      setStatus("Could not load active rooms for notifications.", true);
+    }
+  ));
 
   listeners.push(onSnapshot(
     query(collection(db, "reveals"), where("toId", "==", user.uid)),
@@ -1164,8 +1417,6 @@ form.addEventListener("submit", async (event) => {
     setStatus("Add at least two poll choices.", true);
     return;
   }
-  const expiryHours = Number(postExpiry.value);
-
   const submit = form.querySelector("button[type='submit']");
   submit.disabled = true;
   try {
@@ -1177,7 +1428,8 @@ form.addEventListener("submit", async (event) => {
       imageData: pendingPostImage,
       category,
       options: category === "Poll" ? options : [],
-      expiresAt: expiryHours ? Timestamp.fromMillis(Date.now() + expiryHours * 3600000) : null,
+      moderationStatus: "active",
+      expiresAt: postExpiryTimestamp(selectedPostExpiryMillis, (millis) => Timestamp.fromMillis(millis)),
       createdAt: serverTimestamp()
     });
     content.value = "";
@@ -1186,6 +1438,7 @@ form.addEventListener("submit", async (event) => {
     postImagePreviewWrap.hidden = true;
     postCategory.value = "Post";
     postExpiry.value = "0";
+    updateExpirySelection();
     pollOptions.hidden = true;
   } catch {
     setStatus("Could not publish your post.", true);
@@ -1197,7 +1450,7 @@ form.addEventListener("submit", async (event) => {
 document.getElementById("sign-out").addEventListener("click", async () => {
   await exitAuthenticatedSession({
     user: currentUser,
-    stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+    stopListeners: stopTimelineListeners,
     redirect: () => window.location.replace("index.html")
   });
 });
