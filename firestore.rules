@@ -1212,7 +1212,7 @@ service cloud.firestore {
     match /directMessages/{messageId} {
       allow read: if activeUser() && request.auth.uid in resource.data.participants;
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['participants', 'senderId', 'text', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['participants', 'senderId', 'text', 'createdAt', 'expiresAt'])
         && request.resource.data.participants is list
         && request.resource.data.participants.size() == 2
         && accountAvailableAfter(request.resource.data.participants[0])
@@ -1225,7 +1225,13 @@ service cloud.firestore {
         && request.resource.data.text is string
         && request.resource.data.text.size() >= 1
         && request.resource.data.text.size() <= 500
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && (!request.resource.data.keys().hasAny(['expiresAt'])
+          || (request.resource.data.expiresAt is timestamp
+            && request.resource.data.expiresAt >= request.time + duration.value(23, 'h')
+              + duration.value(55, 'm')
+            && request.resource.data.expiresAt <= request.time + duration.value(24, 'h')
+              + duration.value(5, 'm')));
       allow update: if false;
       allow delete: if signedIn() && request.auth.uid in resource.data.participants;
     }

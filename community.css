@@ -94,3 +94,29 @@
 .mention-suggestion + .mention-suggestion { margin-top: 5px; }
 .mention-suggestion:hover,
 .mention-suggestion:focus-visible { background: rgba(139, 92, 246, .38) !important; }
+
+
+.message-expiry-option {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: .78rem;
+  white-space: nowrap;
+}
+.message-expiry-option input { width: auto; min-height: auto; }
+.private-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+}
+.private-message-delete {
+  min-height: 30px !important;
+  padding: 0 10px !important;
+  border-radius: 999px !important;
+  background: rgba(139, 92, 246, .16) !important;
+  color: #ddd6fe !important;
+  font-size: .74rem !important;
+}

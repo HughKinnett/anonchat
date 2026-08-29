@@ -26,6 +26,7 @@ const listeners = [];
 const sessionGeneration = createSessionGeneration();
 let activeCommunitySession = 0;
 let clearRoomExpiryTimer = () => {};
+let clearDirectMessageExpiryTimer = () => {};
 let stopRoomMessageListener = () => {};
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
@@ -381,11 +382,14 @@ $("room-message-form").addEventListener("submit", async (event) => {
   }
 });
 
-const requestFor = (other) => state.requests.find((request) =>
-  !isBlockedUid(other) &&
-  [request.data().fromId, request.data().toId].includes(state.user.uid) &&
-  [request.data().fromId, request.data().toId].includes(other)
-);
+const requestFor = (other) => {
+  if (isBlockedUid(other)) return undefined;
+  const pair = state.requests.filter((request) =>
+    [request.data().fromId, request.data().toId].includes(state.user.uid)
+    && [request.data().fromId, request.data().toId].includes(other)
+  );
+  return pair.find((request) => request.data().status === "accepted") || pair[0];
+};
 const acceptedUsers = () => state.users.filter((user) =>
   user.id !== state.user.uid && !isBlockedUid(user.id) && requestFor(user.id)?.data().status === "accepted"
 );
@@ -409,7 +413,10 @@ const renderMessageUsers = () => {
   }
   const selectedUser = $("message-user").value;
   const selectedConversation = $("conversation-user").value;
-  const others = state.users.filter((user) => user.id !== state.user.uid && !isBlockedUid(user.id));
+  const others = state.users.filter((user) =>
+    user.id !== state.user.uid && !isBlockedUid(user.id)
+    && requestFor(user.id)?.data().status !== "accepted"
+  );
   const accepted = acceptedUsers();
   $("message-user").replaceChildren(...others.map((user) => new Option(`@${user.data().username}`, user.id)));
   if (others.some((user) => user.id === selectedUser)) $("message-user").value = selectedUser;
@@ -554,14 +561,18 @@ $("conversation-user").addEventListener("change", () => {
 });
 
 const renderDirectMessages = () => {
+  clearDirectMessageExpiryTimer();
+  clearDirectMessageExpiryTimer = () => {};
   if (!state.viewerBlocks.ready) {
     $("direct-messages").replaceChildren();
     return;
   }
   const other = $("conversation-user").value;
+  const currentTime = now();
   const messages = state.messages.filter((message) =>
     message.data().participants.includes(state.user.uid) && message.data().participants.includes(other)
     && !isBlockedUid(message.data().senderId)
+    && (!message.data().expiresAt?.toMillis || message.data().expiresAt.toMillis() > currentTime)
   ).sort(compareOldestFirst);
   $("direct-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
@@ -571,10 +582,38 @@ const renderDirectMessages = () => {
     sender.textContent = `@${userName(data.senderId)}`;
     const text = document.createElement("span");
     text.textContent = data.text;
-    item.append(sender, text);
+    const actions = document.createElement("span");
+    actions.className = "private-message-actions";
+    if (data.expiresAt?.toDate) {
+      const expiry = document.createElement("small");
+      expiry.textContent = `Disappears ${data.expiresAt.toDate().toLocaleString()}`;
+      actions.append(expiry);
+    }
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "private-message-delete";
+    remove.textContent = "Delete for everyone";
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      try {
+        await deleteDoc(message.ref);
+      } catch {
+        remove.disabled = false;
+        setStatus("Could not delete that private message.", true);
+      }
+    });
+    actions.append(remove);
+    item.append(sender, text, actions);
     return item;
   }));
   $("direct-messages").scrollTop = $("direct-messages").scrollHeight;
+  const nextExpiry = messages.map((message) => message.data().expiresAt?.toMillis?.())
+    .filter((value) => Number.isFinite(value) && value > currentTime)
+    .sort((left, right) => left - right)[0];
+  if (nextExpiry) {
+    const timer = window.setTimeout(renderDirectMessages, Math.min(nextExpiry - currentTime + 50, 2147483647));
+    clearDirectMessageExpiryTimer = () => window.clearTimeout(timer);
+  }
 };
 
 $("direct-message-form").addEventListener("submit", async (event) => {
@@ -587,8 +626,13 @@ $("direct-message-form").addEventListener("submit", async (event) => {
     return;
   }
   try {
+    const disappear = $("direct-message-disappear").checked;
     await addDoc(collection(db, "directMessages"), {
-      participants: [state.user.uid, other].sort(), senderId: state.user.uid, text, createdAt: serverTimestamp()
+      participants: [state.user.uid, other].sort(),
+      senderId: state.user.uid,
+      text,
+      createdAt: serverTimestamp(),
+      ...(disappear ? { expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) } : {})
     });
     event.target.reset();
   } catch {
