@@ -7,7 +7,7 @@
     "❤️", "💜", "🔥", "🎉", "✨", "💯",
     "🖕", "🤝", "👀", "🤷", "😴", "🤯"
   ];
-  const targets = ["#post-content", "#room-message", "#direct-message"];
+  const targets = ["#room-message"];
 
   const closeAll = (except) => {
     document.querySelectorAll(".emoji-picker-panel").forEach((panel) => {

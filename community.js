@@ -616,6 +616,39 @@ const renderDirectMessages = () => {
   }
 };
 
+$("delete-chat").addEventListener("click", async () => {
+  const other = $("conversation-user").value;
+  if (!other) {
+    setStatus("Choose an accepted conversation first.", true);
+    return;
+  }
+  const chatMessages = state.messages.filter((message) =>
+    message.data().participants.includes(state.user.uid)
+    && message.data().participants.includes(other)
+  );
+  if (!chatMessages.length) {
+    setStatus("This chat has no messages to delete.");
+    return;
+  }
+  if (!window.confirm("Delete every message in this chat for both users? This cannot be undone.")) return;
+  const control = $("delete-chat");
+  control.disabled = true;
+  control.textContent = "Deleting chat…";
+  try {
+    for (let offset = 0; offset < chatMessages.length; offset += 400) {
+      const batch = writeBatch(db);
+      chatMessages.slice(offset, offset + 400).forEach((message) => batch.delete(message.ref));
+      await batch.commit();
+    }
+    setStatus("Chat deleted. The accepted conversation remains available.");
+  } catch {
+    setStatus("Could not delete the entire chat.", true);
+  } finally {
+    control.disabled = false;
+    control.textContent = "Delete chat";
+  }
+});
+
 $("direct-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const other = $("conversation-user").value;

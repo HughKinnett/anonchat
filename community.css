@@ -120,3 +120,31 @@
   color: #ddd6fe !important;
   font-size: .74rem !important;
 }
+
+
+.direct-message-composer {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.direct-message-entry-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.direct-message-entry-row input { width: 100%; }
+.direct-message-composer .message-expiry-option {
+  width: fit-content;
+  margin: 0;
+}
+.chat-management-row {
+  display: flex;
+  justify-content: flex-start;
+  margin: 12px 0 4px;
+}
+#delete-chat { position: static; }
+@media (max-width: 520px) {
+  .direct-message-entry-row { grid-template-columns: 1fr; }
+  .direct-message-entry-row button { width: 100%; }
+}

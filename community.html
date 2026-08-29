@@ -63,7 +63,11 @@
           <h2>Accepted conversations</h2>
           <label>Conversation<select id="conversation-user"></select></label>
           <div id="direct-messages" class="message-stream"></div>
-          <form id="direct-message-form" class="inline-form"><input id="direct-message" maxlength="500" required placeholder="Private message"><label class="message-expiry-option"><input id="direct-message-disappear" type="checkbox"> Disappear after 24 hours</label><button class="primary">Send</button></form>
+          <form id="direct-message-form" class="direct-message-composer">
+            <div class="direct-message-entry-row"><input id="direct-message" maxlength="500" required placeholder="Private message"><button class="primary">Send</button></div>
+            <label class="message-expiry-option"><input id="direct-message-disappear" type="checkbox"> Disappear after 24 hours</label>
+          </form>
+          <div class="chat-management-row"><button id="delete-chat" class="secondary danger" type="button">Delete chat</button></div>
           <hr>
           <h3>Controlled reveal</h3>
           <p class="muted">Share selected details only with the chosen accepted conversation.</p>
