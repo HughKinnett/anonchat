@@ -66,3 +66,5 @@ assert.deepEqual(
 );
 
 console.log("message request and connections regressions passed");
+
+await import("./test-timeline-moderation-ui.mjs");

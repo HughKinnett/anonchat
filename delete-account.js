@@ -1,19 +1,18 @@
 import { auth, db } from "./firebase-config.js";
 import { recordPageActivity } from "./activity-integration.mjs";
-import { preparePushForAccountDeletion } from "./account-deletion-push.mjs";
+import { preparePushForAccountDeletion, selfDeletionQueuePayloads } from "./account-deletion-push.mjs";
 import { createPushAlertsClient } from "./push-client.mjs";
 import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
-import { deleteUser, EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, runTransaction,
+  collection, deleteDoc, doc, getDoc, getDocs, query, setDoc,
   serverTimestamp, updateDoc, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const form=document.getElementById("delete-account-form"),status=document.getElementById("delete-status"),button=document.getElementById("delete-account-button");
 let currentUser=null,profile=null;
 const setStatus=(text)=>{status.textContent=text;};
-const uniqueDocs=docs=>[...new Map(docs.map(x=>[x.ref.path,x])).values()];
 const queryDocs=async(ref)=>[...(await getDocs(ref)).docs];
 const serviceWorkerSupported="serviceWorker" in navigator,pushSupported="PushManager" in window;
 
@@ -35,45 +34,6 @@ const deletionPushClient=createPushAlertsClient({
   persist:async()=>{},
   remove:({id})=>deleteDoc(doc(db,"pushSubscriptions",id))
 });
-
-const gatherOwnedData=async(uid)=>{
-  const [
-    posts,communityPosts,comments,reactions,followsOut,followsIn,members,roomMessages,votes,
-    requestsOut,requestsIn,messages,revealsOut,revealsIn,reads,circles,rooms
-  ]=await Promise.all([
-    queryDocs(query(collection(db,"posts"),where("authorId","==",uid))),
-    queryDocs(query(collection(db,"communityPosts"),where("authorId","==",uid))),
-    queryDocs(query(collectionGroup(db,"comments"),where("uid","==",uid))),
-    queryDocs(query(collectionGroup(db,"reactions"),where("uid","==",uid))),
-    queryDocs(query(collection(db,"follows"),where("followerId","==",uid))),
-    queryDocs(query(collection(db,"follows"),where("followingId","==",uid))),
-    queryDocs(query(collection(db,"circleMembers"),where("uid","==",uid))),
-    queryDocs(query(collection(db,"roomMessages"),where("senderId","==",uid))),
-    queryDocs(query(collection(db,"communityVotes"),where("uid","==",uid))),
-    queryDocs(query(collection(db,"messageRequests"),where("fromId","==",uid))),
-    queryDocs(query(collection(db,"messageRequests"),where("toId","==",uid))),
-    queryDocs(query(collection(db,"directMessages"),where("participants","array-contains",uid))),
-    queryDocs(query(collection(db,"reveals"),where("fromId","==",uid))),
-    queryDocs(query(collection(db,"reveals"),where("toId","==",uid))),
-    queryDocs(query(collection(db,"notificationReads"),where("uid","==",uid))),
-    queryDocs(query(collection(db,"circles"),where("ownerId","==",uid))),
-    queryDocs(query(collection(db,"rooms"),where("ownerId","==",uid)))
-  ]);
-
-  const nested=[];
-  for(const post of posts){
-    const [postComments,postReactions]=await Promise.all([
-      queryDocs(collection(db,"posts",post.id,"comments")),
-      queryDocs(collection(db,"posts",post.id,"reactions"))
-    ]);
-    nested.push(...postComments,...postReactions);
-  }
-  return uniqueDocs([
-    ...nested,...comments,...reactions,...followsOut,...followsIn,...members,...roomMessages,...votes,
-    ...requestsOut,...requestsIn,...messages,...revealsOut,...revealsIn,...reads,
-    ...communityPosts,...posts,...circles,...rooms
-  ]).map(x=>x.ref);
-};
 
 onAuthStateChanged(auth,async user=>{
   if(!user){await exitAfterAuthLoss({redirect:()=>location.replace("index.html")});return;}
@@ -109,32 +69,26 @@ form.addEventListener("submit",async event=>{
     const requestRef=doc(db,"accountDeletionRequests",currentUser.uid);
     await preparePushForAccountDeletion({
       uid:currentUser.uid,
-      ensureDeletionRequest:()=>runTransaction(db,async transaction=>{
-        if(!(await transaction.get(requestRef)).exists()){
-          transaction.set(requestRef,{uid:currentUser.uid,username:profile.username,createdAt:serverTimestamp()});
+      ensureDeletionRequest:async()=>{
+        const jobRef=doc(db,"adminDeletionJobs",currentUser.uid);
+        const [requestSnapshot,jobSnapshot]=await Promise.all([getDoc(requestRef),getDoc(jobRef)]);
+        if(requestSnapshot.exists()&&jobSnapshot.exists())return;
+        if(requestSnapshot.exists()&&!jobSnapshot.exists()){
+          const payloads=selfDeletionQueuePayloads({uid:currentUser.uid,username:profile.username,timestamp:requestSnapshot.data().createdAt});
+          await setDoc(jobRef,payloads.job);return;
         }
-      }),
+        if(jobSnapshot.exists())return;
+        const timestamp=serverTimestamp(),payloads=selfDeletionQueuePayloads({uid:currentUser.uid,username:profile.username,timestamp});
+        const batch=writeBatch(db);batch.set(requestRef,payloads.request);batch.set(jobRef,payloads.job);await batch.commit();
+      },
       listSubscriptionRefs:async uid=>(await queryDocs(query(collection(db,"pushSubscriptions"),where("uid","==",uid)))).map(snapshot=>snapshot.ref),
       deleteSubscriptionRefs:deleteInChunks,
       unsubscribeCurrent:async()=>{
         if(!(await deletionPushClient.cleanupForSignOut(currentUser,{removeDocument:false})))throw new Error("push-unsubscribe-failed");
       }
     });
-    setStatus("Removing your posts and account activity…");
-    const refs=await gatherOwnedData(currentUser.uid);
-    refs.push(doc(db,"userPreferences",currentUser.uid),doc(db,"userPrivate",currentUser.uid));
-    await deleteInChunks(refs);
-    setStatus("Releasing your username and profile…");
-    await runTransaction(db,async transaction=>{
-      const statsRef=doc(db,"system","accountStats"),stats=await transaction.get(statsRef);
-      transaction.delete(doc(db,"usernames",String(profile.username).toLowerCase()));
-      transaction.delete(doc(db,"users",currentUser.uid));
-      if(stats.exists())transaction.update(statsRef,{count:Math.max(0,(stats.data().count||1)-1),limit:500,updatedAt:serverTimestamp()});
-      transaction.delete(requestRef);
-    });
-    setStatus("Deleting your sign-in…");
-    await deleteUser(currentUser);
-    localStorage.clear();sessionStorage.clear();location.replace("index.html?accountDeleted=1");
+    setStatus("Account locked. Permanent deletion is queued and will continue automatically.");
+    await exitAuthenticatedSession({user:currentUser,redirect:()=>{localStorage.clear();sessionStorage.clear();location.replace("index.html?accountDeletionQueued=1");}});
   }catch(error){
     console.error(error);
     let message="Account deletion could not be completed. Your account may remain in deletion mode; please retry to continue cleanup.";

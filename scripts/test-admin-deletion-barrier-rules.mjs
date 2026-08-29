@@ -10,6 +10,7 @@ const profile = (uid, username = uid) => ({ uid, username, createdAt: new Date(0
 const queuedProfile = { ...profile("target"), banned: true, adminDeletionRequestedAt: new Date(1), adminDeletionRequestedBy: "admin", adminDeletionStatus: "queued" };
 const queuedJob = { targetUid: "target", requesterUid: "admin", requestedAt: new Date(1), status: "queued" };
 const completedMarker = { status: "completed", completedAt: new Date(1_000), purgeAfter: new Date(7_201_000) };
+const roomExpiry = new Date(Date.now() + 86_400_000);
 const seed = async ({ targetJob = null, targetProfile = profile("target"), principalBarriers = [] } = {}) => testEnv.withSecurityRulesDisabled(async (context) => {
   const firestore = context.firestore();
   const writes = [
@@ -21,21 +22,21 @@ const seed = async ({ targetJob = null, targetProfile = profile("target"), princ
     setDoc(doc(firestore, "usernames", "member"), { uid: "member", username: "member", createdAt: new Date(0) }),
     setDoc(doc(firestore, "usernames", "other"), { uid: "other", username: "other", createdAt: new Date(0) }),
     setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) }),
-    setDoc(doc(firestore, "posts", "target-post"), { type: "original", authorId: "target", username: "target", content: "target post", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
-    setDoc(doc(firestore, "posts", "other-post"), { type: "original", authorId: "other", username: "other", content: "other post", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
-    setDoc(doc(firestore, "posts", "other-repost-target"), { type: "repost", authorId: "other", username: "other", originalPostId: "target-post", originalAuthorId: "target", originalUsername: "target", content: "target post", imageData: "", createdAt: new Date(0) }),
-    setDoc(doc(firestore, "posts", "three-original"), { type: "original", authorId: "post_author", username: "post_author", content: "three original", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
-    setDoc(doc(firestore, "communityPosts", "target-community"), { authorId: "target", username: "target", content: "target community", category: "Question", circleId: "target-circle", options: [], createdAt: new Date(0) }),
-    setDoc(doc(firestore, "communityPosts", "other-in-target-circle"), { authorId: "other", username: "other", content: "other in target circle", category: "Question", circleId: "target-circle", options: [], createdAt: new Date(0) }),
+    setDoc(doc(firestore, "posts", "target-post"), { type: "original", authorId: "target", username: "target", content: "target post", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "posts", "other-post"), { type: "original", authorId: "other", username: "other", content: "other post", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "posts", "other-repost-target"), { type: "repost", authorId: "other", username: "other", sourceCollection: "posts", originalPostId: "target-post", originalAuthorId: "target", originalUsername: "target", content: "target post", imageData: "", moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "posts", "three-original"), { type: "original", authorId: "post_author", username: "post_author", content: "three original", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "communityPosts", "target-community"), { authorId: "target", username: "target", content: "target community", category: "Question", circleId: "target-circle", options: [], moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "communityPosts", "other-in-target-circle"), { authorId: "other", username: "other", content: "other in target circle", category: "Question", circleId: "target-circle", options: [], moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(firestore, "circles", "target-circle"), { name: "Target circle", description: "", ownerId: "target", createdAt: new Date(0) }),
     setDoc(doc(firestore, "circles", "other-circle"), { name: "Other circle", description: "", ownerId: "other", createdAt: new Date(0) }),
     setDoc(doc(firestore, "circles", "three-circle"), { name: "Three circle", description: "", ownerId: "circle_owner", createdAt: new Date(0) }),
-    setDoc(doc(firestore, "communityPosts", "three-community"), { authorId: "post_author", username: "post_author", content: "three principals", category: "Question", circleId: "three-circle", options: [], createdAt: new Date(0) }),
-    setDoc(doc(firestore, "rooms", "target-room"), { name: "Target room", topic: "topic", ownerId: "target", createdAt: new Date(0) }),
-    setDoc(doc(firestore, "rooms", "other-room"), { name: "Other room", topic: "topic", ownerId: "other", createdAt: new Date(0) }),
-    setDoc(doc(firestore, "rooms", "three-room"), { name: "Three room", topic: "topic", ownerId: "room_owner", createdAt: new Date(0) }),
-    setDoc(doc(firestore, "roomMessages", "three-room-message"), { roomId: "three-room", senderId: "message_author", tempName: "Author", text: "message", createdAt: new Date(0) }),
-    setDoc(doc(firestore, "roomMessages", "other-in-target-room"), { roomId: "target-room", senderId: "other", tempName: "Other", text: "message", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "communityPosts", "three-community"), { authorId: "post_author", username: "post_author", content: "three principals", category: "Question", circleId: "three-circle", options: [], moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "rooms", "target-room"), { name: "Target room", topic: "topic", ownerId: "target", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "rooms", "other-room"), { name: "Other room", topic: "topic", ownerId: "other", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "rooms", "three-room"), { name: "Three room", topic: "topic", ownerId: "room_owner", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "roomMessages", "three-room-message"), { roomId: "three-room", senderId: "message_author", tempName: "Author", text: "message", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(firestore, "roomMessages", "other-in-target-room"), { roomId: "target-room", senderId: "other", tempName: "Other", text: "message", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(firestore, "messageRequests", "member_target"), { fromId: "member", toId: "target", status: "accepted", createdAt: new Date(0) }),
     setDoc(doc(firestore, "messageRequests", "member_other"), { fromId: "member", toId: "other", status: "accepted", createdAt: new Date(0) })
   ];
@@ -51,14 +52,14 @@ const contentWrites = (firestore, target) => {
     () => setDoc(doc(firestore, "follows", `member_${uid}`), { followerId: "member", followingId: uid, createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "directMessages", `message_${suffix}`), { participants: ["member", uid], senderId: "member", text: "hello", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "reveals", `member_${uid}`), { fromId: "member", toId: uid, fields: { interests: true }, status: "pending", createdAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "posts", `repost_member_${post}`), { type: "repost", authorId: "member", username: "member", originalPostId: post, originalAuthorId: uid, originalUsername: uid, content: `${uid} post`, imageData: "", createdAt: serverTimestamp() }),
+    () => setDoc(doc(firestore, "posts", `repost_member_${post}`), { type: "repost", authorId: "member", username: "member", sourceCollection: "posts", originalPostId: post, originalAuthorId: uid, originalUsername: uid, content: `${uid} post`, imageData: "", moderationState: "visible", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "posts", post, "comments", `comment_${suffix}`), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "posts", post, "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "communityVotes", `${post}_member`), { postId: post, uid: "member", option: 0, createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "circleMembers", `${circle}_member`), { circleId: circle, uid: "member", createdAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "communityPosts", `community_${suffix}`), { authorId: "member", username: "member", content: "community", category: "Question", circleId: circle, options: [], createdAt: serverTimestamp() }),
+    () => setDoc(doc(firestore, "communityPosts", `community_${suffix}`), { authorId: "member", username: "member", content: "community", category: "Question", circleId: circle, options: [], moderationState: "visible", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "roomMembers", `${room}_member`), { roomId: room, uid: "member", joinedAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "roomMessages", `room_${suffix}`), { roomId: room, senderId: "member", tempName: "Member", text: "hello", createdAt: serverTimestamp() })
+    () => setDoc(doc(firestore, "roomMessages", `room_${suffix}`), { roomId: room, senderId: "member", tempName: "Member", text: "hello", expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() })
   ];
 };
 const signup = (firestore, uid) => {
@@ -74,7 +75,7 @@ const rename = (firestore, uid, from, to) => {
   return batch.commit();
 };
 const threePrincipalWrites = (firestore) => [
-  ["original-repost", () => setDoc(doc(firestore, "posts", "repost_member_three-original"), { type: "repost", authorId: "member", username: "member", originalPostId: "three-original", originalAuthorId: "post_author", originalUsername: "post_author", content: "three original", imageData: "", createdAt: serverTimestamp() })],
+  ["original-repost", () => setDoc(doc(firestore, "posts", "repost_member_three-original"), { type: "repost", authorId: "member", username: "member", sourceCollection: "posts", originalPostId: "three-original", originalAuthorId: "post_author", originalUsername: "post_author", content: "three original", imageData: "", moderationState: "visible", createdAt: serverTimestamp() })],
   ["community-comment", () => setDoc(doc(firestore, "communityPosts", "three-community", "comments", "member"), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() })],
   ["community-reaction", () => setDoc(doc(firestore, "communityPosts", "three-community", "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() })],
   ["community-vote", () => setDoc(doc(firestore, "communityVotes", "three-community_member"), { postId: "three-community", uid: "member", option: 0, createdAt: serverTimestamp() })],
@@ -84,9 +85,9 @@ const threePrincipalWrites = (firestore) => [
 const topLevelOwnerWrites = (firestore) => [
   ["repost", threePrincipalWrites(firestore)[0][1]],
   ["circle-membership", () => setDoc(doc(firestore, "circleMembers", "three-circle_member"), { circleId: "three-circle", uid: "member", createdAt: serverTimestamp() })],
-  ["community-post", () => setDoc(doc(firestore, "communityPosts", "missing-circle-owner"), { authorId: "member", username: "member", content: "missing owner", category: "Question", circleId: "three-circle", options: [], createdAt: serverTimestamp() })],
+  ["community-post", () => setDoc(doc(firestore, "communityPosts", "missing-circle-owner"), { authorId: "member", username: "member", content: "missing owner", category: "Question", circleId: "three-circle", options: [], moderationState: "visible", createdAt: serverTimestamp() })],
   ["room-membership", () => setDoc(doc(firestore, "roomMembers", "three-room_member"), { roomId: "three-room", uid: "member", joinedAt: serverTimestamp() })],
-  ["room-message", () => setDoc(doc(firestore, "roomMessages", "missing-room-owner"), { roomId: "three-room", senderId: "member", tempName: "Member", text: "missing owner", createdAt: serverTimestamp() })]
+  ["room-message", () => setDoc(doc(firestore, "roomMessages", "missing-room-owner"), { roomId: "three-room", senderId: "member", tempName: "Member", text: "missing owner", expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() })]
 ];
 const assertBarrierDenial = async (operation, label) => {
   try {
@@ -135,7 +136,7 @@ try {
 
   const circleOrphanRace = writeBatch(other);
   circleOrphanRace.delete(doc(other, "circles", "other-circle"));
-  circleOrphanRace.set(doc(other, "communityPosts", "orphan-circle-post"), { authorId: "other", username: "other", content: "orphan", category: "Question", circleId: "other-circle", options: [], createdAt: serverTimestamp() });
+  circleOrphanRace.set(doc(other, "communityPosts", "orphan-circle-post"), { authorId: "other", username: "other", content: "orphan", category: "Question", circleId: "other-circle", options: [], moderationState: "visible", createdAt: serverTimestamp() });
   await assertFails(circleOrphanRace.commit());
   const circleMemberOrphanRace = writeBatch(other);
   circleMemberOrphanRace.delete(doc(other, "circles", "other-circle"));
@@ -145,7 +146,7 @@ try {
   assert.equal((await getDoc(doc(other, "circleMembers", "other-circle_other"))).exists(), false);
   const roomOrphanRace = writeBatch(other);
   roomOrphanRace.delete(doc(other, "rooms", "other-room"));
-  roomOrphanRace.set(doc(other, "roomMessages", "orphan-room-message"), { roomId: "other-room", senderId: "other", tempName: "Other", text: "orphan", createdAt: serverTimestamp() });
+  roomOrphanRace.set(doc(other, "roomMessages", "orphan-room-message"), { roomId: "other-room", senderId: "other", tempName: "Other", text: "orphan", expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() });
   await assertFails(roomOrphanRace.commit());
   const roomMemberOrphanRace = writeBatch(other);
   roomMemberOrphanRace.delete(doc(other, "rooms", "other-room"));
@@ -169,7 +170,7 @@ try {
   await assertFails(setDoc(doc(member, "communityVotes", "other-repost-target_member"), { postId: "other-repost-target", uid: "member", option: 0, createdAt: serverTimestamp() }));
   await assertSucceeds(deleteDoc(doc(member, "messageRequests", "member_target")));
   await assertFails(setDoc(doc(member, "messageRequests", "member_target"), { fromId: "member", toId: "target", status: "pending", createdAt: serverTimestamp() }));
-  await assertFails(setDoc(doc(target, "posts", "target-new"), { type: "original", authorId: "target", username: "target", content: "new", imageData: "", category: "Post", options: [], createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(target, "posts", "target-new"), { type: "original", authorId: "target", username: "target", content: "new", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: serverTimestamp() }));
   await assertFails(setDoc(doc(target, "userPreferences", "target"), { uid: "target", mutedKeywords: [], contextCheck: false, updatedAt: serverTimestamp() }));
   await assertFails(setDoc(doc(target, "userPrivate", "target"), { uid: "target", interests: "", region: "", ageRange: "", updatedAt: serverTimestamp() }));
   await assertFails(setDoc(doc(target, "notificationReads", "target_notice"), { uid: "target", reactionId: "notice", readAt: serverTimestamp() }));

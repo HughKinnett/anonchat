@@ -1,7 +1,7 @@
 {
   "name": "AnonChat",
   "short_name": "AnonChat",
-  "description": "A pseudonymous social timeline for anonymous posts and reactions.",
+  "description": "A pseudonymous social timeline for posts and reactions.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

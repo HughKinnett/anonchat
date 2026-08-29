@@ -1,5 +1,18 @@
 import assert from "node:assert/strict";
-import { preparePushForAccountDeletion } from "../account-deletion-push.mjs";
+import { readFile } from "node:fs/promises";
+import { preparePushForAccountDeletion, selfDeletionQueuePayloads } from "../account-deletion-push.mjs";
+
+const timestamp = { sentinel: "server-time" };
+assert.deepEqual(selfDeletionQueuePayloads({ uid: "user-a", username: "User_A", timestamp }), {
+  request: { uid: "user-a", username: "User_A", createdAt: timestamp },
+  job: { targetUid: "user-a", requesterUid: "user-a", requestedAt: timestamp, requestType: "self", status: "queued" }
+});
+assert.throws(() => selfDeletionQueuePayloads({ uid: "", username: "User_A", timestamp }), /account/);
+const clientSource = await readFile(new URL("../delete-account.js", import.meta.url), "utf8");
+assert.doesNotMatch(clientSource, /collectionGroup|\bdeleteUser\s*\(|gatherOwnedData/, "the public page cannot enumerate or directly delete account data/Auth");
+assert.match(clientSource, /batch\.set\(requestRef,payloads\.request\);batch\.set\(jobRef,payloads\.job\)/, "self deletion atomically establishes both trusted queue records");
+assert.match(clientSource, /requestSnapshot\.exists\(\)&&!jobSnapshot\.exists\(\)/, "a stranded legacy request takes the job-only repair path");
+assert.match(clientSource, /Account locked\. Permanent deletion is queued/);
 
 {
   const events = [];

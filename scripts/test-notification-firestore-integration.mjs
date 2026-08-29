@@ -128,6 +128,19 @@ assert.deepEqual((await adapter.roomMembers({ data: { roomId: "room-a" } })).sor
 assert.equal(await adapter.recipientAvailable("post-owner"), true);
 assert.equal(await adapter.recipientAvailable("missing-user"), false);
 assert.equal(await adapter.recipientAvailable("banned-recipient"), false);
+assert.equal(await adapter.pairBlocked("actor", "recipient"), false);
+await db.doc("blocks/actor_recipient").set({ blockerUid: "actor", blockedUid: "recipient" });
+assert.equal(await adapter.pairBlocked("actor", "recipient"), true,
+  "trusted filtering finds an actor-to-recipient block with two deterministic reads");
+assert.deepEqual(await adapter.unblockedRecipients("actor", ["recipient", "post-owner"]), ["post-owner"],
+  "one bounded actor block snapshot filters an entire recipient batch");
+await db.doc("blocks/actor_recipient").delete();
+await db.doc("blocks/recipient_actor").set({ blockerUid: "recipient", blockedUid: "actor" });
+assert.equal(await adapter.pairBlocked("actor", "recipient"), true,
+  "trusted filtering finds the reverse block direction");
+assert.deepEqual(await adapter.unblockedRecipients("actor", ["recipient", "post-owner"]), ["post-owner"],
+  "recipient-created blocks are included in the bounded actor snapshot");
+await db.doc("blocks/recipient_actor").delete();
 assert.equal(await adapter.recipientAvailable("admin-deleting-recipient"), false);
 assert.equal(await adapter.recipientAvailable("self-deleting-recipient"), false);
 assert.equal(await adapter.recipientAvailable("transition-recipient"), true);

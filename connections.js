@@ -1,7 +1,10 @@
 import { auth, db } from "./firebase-config.js";
 import { resolveConnectionsTarget } from "./connections-target.mjs";
+import { clearConnectionsProtectedMetadata } from "./protected-metadata-policy.mjs";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { createViewerBlockTracker, isBlockedActor, visibleRecords } from "./viewer-block-policy.mjs";
+import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection,
@@ -11,7 +14,9 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
-  updateDoc
+  updateDoc,
+  query,
+  where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 let targetUserId = new URLSearchParams(location.search).get("uid");
@@ -21,14 +26,25 @@ const followingList = document.getElementById("following-list");
 let currentUser;
 let users = [];
 let follows = [];
+let blockTracker = createViewerBlockTracker();
+let viewerBlocks = blockTracker.current();
+const listeners = [];
+const sessionGeneration = createSessionGeneration();
+let activeConnectionsSession = 0;
 
 const setStatus = (message, isError = false) => {
   status.textContent = message;
   status.style.color = isError ? "#fca5a5" : "inherit";
 };
 
+const clearProtectedConnectionsMetadata = (message) => {
+  clearConnectionsProtectedMetadata({ document, followersList, followingList }, message);
+};
+
 const profileFor = (uid) => users.find((entry) => entry.id === uid);
-const viewerFollows = (uid) => follows.some((entry) => {
+const blockedUid = (uid) => isBlockedActor(uid, viewerBlocks);
+const visibleFollows = () => visibleRecords(follows, viewerBlocks, ["followerId", "followingId"]);
+const viewerFollows = (uid) => visibleFollows().some((entry) => {
   const data = entry.data();
   return data.followerId === currentUser.uid && data.followingId === uid;
 });
@@ -48,7 +64,7 @@ const toggleFollow = async (uid) => {
 
 const personCard = (uid) => {
   const profile = profileFor(uid);
-  if (!profile || profile.data().banned === true) return null;
+  if (!profile || profile.data().banned === true || blockedUid(uid)) return null;
   const data = profile.data();
   const row = document.createElement("article");
   row.className = "connection-card";
@@ -86,15 +102,29 @@ const personCard = (uid) => {
 
 const render = () => {
   if (!currentUser || !targetUserId) return;
+  if (!viewerBlocks.ready) {
+    clearProtectedConnectionsMetadata("Loading connections…");
+    setStatus("Loading privacy choices…");
+    return;
+  }
+  if (targetUserId !== currentUser.uid && blockedUid(targetUserId)) {
+    document.getElementById("connections-title").textContent = "Connections unavailable";
+    document.getElementById("followers-count").textContent = "0";
+    document.getElementById("following-count").textContent = "0";
+    followersList.replaceChildren();
+    followingList.replaceChildren();
+    setStatus("These connections are unavailable because of a block.");
+    return;
+  }
   const target = profileFor(targetUserId);
   if (target) {
     document.getElementById("connections-title").textContent =
       `@${target.data().username || "anonymous"}’s connections`;
   }
-  const followerIds = follows
+  const followerIds = visibleFollows()
     .filter((entry) => entry.data().followingId === targetUserId)
     .map((entry) => entry.data().followerId);
-  const followingIds = follows
+  const followingIds = visibleFollows()
     .filter((entry) => entry.data().followerId === targetUserId)
     .map((entry) => entry.data().followingId);
   document.getElementById("followers-count").textContent = followerIds.length;
@@ -114,12 +144,33 @@ const render = () => {
 document.getElementById("connections-sign-out").addEventListener("click", async () => {
   await exitAuthenticatedSession({
     user: currentUser,
+    stopListeners: invalidateConnectionsSession,
     redirect: () => location.replace("index.html")
   });
 });
 
+const stopConnectionsListeners = () => {
+  listeners.splice(0).forEach((unsubscribe) => unsubscribe());
+  users = [];
+  follows = [];
+  blockTracker.reset(currentUser?.uid);
+  viewerBlocks = blockTracker.current();
+  clearProtectedConnectionsMetadata("Loading connections…");
+  render();
+};
+
+const invalidateConnectionsSession = () => {
+  sessionGeneration.invalidate();
+  stopConnectionsListeners();
+};
+
 onAuthStateChanged(auth, async (user) => {
+  activeConnectionsSession = sessionGeneration.begin(user?.uid);
+  const session = activeConnectionsSession;
+  const sessionIsCurrent = () => sessionGeneration.isCurrent(session, user?.uid);
+  stopConnectionsListeners();
   if (!user) {
+    currentUser = null;
     await exitAfterAuthLoss({ redirect: () => location.replace("index.html") });
     return;
   }
@@ -129,7 +180,10 @@ onAuthStateChanged(auth, async (user) => {
     history.replaceState(null, "", `${location.pathname}${target.canonicalSearch}${location.hash}`);
   }
   currentUser = user;
+  blockTracker = createViewerBlockTracker(user.uid);
+  viewerBlocks = blockTracker.current();
   const profile = await getDoc(doc(db, "users", user.uid));
+  if (!sessionIsCurrent()) return;
   void recordPageActivity({
     surface: "connections",
     profile: profile.exists() ? profile.data() : null,
@@ -139,12 +193,39 @@ onAuthStateChanged(auth, async (user) => {
   });
   document.getElementById("back-to-profile").href =
     `profile.html?uid=${encodeURIComponent(targetUserId)}`;
-  onSnapshot(collection(db, "users"), (snapshot) => {
+  const listenForSession = (reference, next, failed) => listeners.push(onSnapshot(
+    reference,
+    (snapshot) => { if (sessionIsCurrent()) next(snapshot); },
+    (error) => { if (sessionIsCurrent()) failed?.(error); }
+  ));
+  listenForSession(collection(db, "users"), (snapshot) => {
     users = snapshot.docs;
     render();
   }, () => setStatus("Could not load users.", true));
-  onSnapshot(collection(db, "follows"), (snapshot) => {
+  listenForSession(collection(db, "follows"), (snapshot) => {
     follows = snapshot.docs;
     render();
   }, () => setStatus("Could not load connections.", true));
+  const refreshBlocks = () => {
+    viewerBlocks = blockTracker.current();
+    render();
+  };
+  listenForSession(query(collection(db, "blocks"), where("blockerUid", "==", user.uid)), (snapshot) => {
+    viewerBlocks = blockTracker.update("outgoing", snapshot.docs);
+    refreshBlocks();
+  }, () => {
+    viewerBlocks = blockTracker.fail("outgoing");
+    refreshBlocks();
+    setStatus("Could not load block preferences.", true);
+  });
+  listenForSession(query(collection(db, "blocks"), where("blockedUid", "==", user.uid)), (snapshot) => {
+    viewerBlocks = blockTracker.update("incoming", snapshot.docs);
+    refreshBlocks();
+  }, () => {
+    viewerBlocks = blockTracker.fail("incoming");
+    refreshBlocks();
+    setStatus("Could not load block preferences.", true);
+  });
 });
+
+addEventListener("pagehide", invalidateConnectionsSession);

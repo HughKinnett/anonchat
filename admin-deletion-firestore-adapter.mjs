@@ -1,8 +1,9 @@
 import {
   BATCH_LIMIT, LEASE_MS, PAGE_LIMIT, cleanupQueries, isClaimableJob, isExactCompletionMarker,
-  isExactQueuedJob, isProtectedAdministrator, isTrustedRequester, isValidAccountStats,
+  isExactQueuedJob, isExactSelfQueuedJob, isProtectedAdministrator, isTrustedRequester, isValidAccountStats,
   normalizeAdministrator, timestampToMillis
 } from "./admin-deletion-processor-policy.mjs";
+import { FirestoreModerationAdapter } from "./moderation-firestore-adapter.mjs";
 
 const PROCESSOR_VERSION = 1;
 const PHASES = new Set(["claimed", "first-sweep", "profile-barrier", "second-sweep", "auth-deleting", "auth-deleted"]);
@@ -12,11 +13,12 @@ const exactKeys = (value, keys) => value && Object.keys(value).sort().join("\u00
 const codedError = (code) => Object.assign(new Error(code), { code });
 const sameTimestamp = (left, right) => timestampToMillis(left) === timestampToMillis(right);
 const validInternalJob = (job, targetUid) => {
-  const keys = job?.status === "processing" ? PROCESSING_KEYS : RETRY_KEYS;
+  const keys = [...(job?.status === "processing" ? PROCESSING_KEYS : RETRY_KEYS), ...(job?.requestType === "self" ? ["requestType"] : [])];
   return ["processing", "failed"].includes(job?.status) && exactKeys(job, keys)
     && job.processorVersion === PROCESSOR_VERSION && job.targetUid === targetUid
     && typeof job.requesterUid === "string" && typeof job.targetUsername === "string"
     && Number.isInteger(job.attempts) && job.attempts >= 1 && PHASES.has(job.phase)
+    && (!Object.hasOwn(job, "requestType") || job.requestType === "self")
     && (job.status !== "processing" || (typeof job.leaseOwner === "string" && typeof job.leaseToken === "string"
       && Number.isFinite(timestampToMillis(job.leaseExpiresAt))))
     && (job.status !== "failed" || /^[A-Z0-9_]+$/.test(job.errorCode));
@@ -45,10 +47,13 @@ export const boundedDeleteQuery = async ({ fetchPage, deleteRefs, renewLease, be
 };
 
 export class FirestoreDeletionAdapter {
-  constructor({ db, auth, Timestamp, FieldPath, clock = () => Date.now(), tokenFactory, authRenewIntervalMs }) {
+  constructor({ db, auth, Timestamp, FieldPath, clock = () => Date.now(), tokenFactory, authRenewIntervalMs, beforeRoomCleanupClaim, beforeRoomMessageCleanupClaim, roomLifecycleAdapter }) {
     this.db = db; this.auth = auth; this.Timestamp = Timestamp; this.FieldPath = FieldPath;
     this.clock = clock; this.tokenFactory = tokenFactory ?? (() => crypto.randomUUID());
     this.authRenewIntervalMs = authRenewIntervalMs ?? Math.floor(LEASE_MS / 3);
+    this.roomLifecycleAdapter = roomLifecycleAdapter ?? new FirestoreModerationAdapter({
+      db, Timestamp, FieldPath, clock, tokenFactory: this.tokenFactory, beforeRoomCleanupClaim, beforeRoomMessageCleanupClaim
+    });
   }
   now() { return this.clock(); }
   timestamp(milliseconds) { return this.Timestamp.fromMillis(milliseconds); }
@@ -88,22 +93,27 @@ export class FirestoreDeletionAdapter {
   async validateTrust(targetUid, job, { transaction, allowBarrier = false } = {}) {
     const read = (reference) => transaction ? transaction.get(reference) : reference.get();
     const initial = isExactQueuedJob(job, targetUid);
-    if (!initial && !validInternalJob(job, targetUid)) throw codedError("invalid-job");
-    const requesterSnapshot = await read(this.db.collection("users").doc(job.requesterUid));
-    if (!requesterSnapshot.exists) throw codedError("untrusted-requester");
-    const requester = requesterSnapshot.data();
-    const reservationSnapshot = await read(this.db.collection("usernames").doc(normalizeAdministrator(requester.username)));
-    if (!reservationSnapshot.exists || !isTrustedRequester(job.requesterUid, requester, reservationSnapshot.data())) throw codedError("untrusted-requester");
+    const initialSelf = isExactSelfQueuedJob(job, targetUid);
+    if (!initial && !initialSelf && !validInternalJob(job, targetUid)) throw codedError("invalid-job");
+    const selfRequested = initialSelf || job.requestType === "self";
+    if (selfRequested && job.requesterUid !== targetUid) throw codedError("invalid-job");
+    if (!selfRequested) {
+      const requesterSnapshot = await read(this.db.collection("users").doc(job.requesterUid));
+      if (!requesterSnapshot.exists) throw codedError("untrusted-requester");
+      const requester = requesterSnapshot.data();
+      const reservationSnapshot = await read(this.db.collection("usernames").doc(normalizeAdministrator(requester.username)));
+      if (!reservationSnapshot.exists || !isTrustedRequester(job.requesterUid, requester, reservationSnapshot.data())) throw codedError("untrusted-requester");
+    }
     const targetSnapshot = await read(this.db.collection("users").doc(targetUid));
     if (!targetSnapshot.exists) {
-      if (initial || (!allowBarrier && !["profile-barrier", "second-sweep", "auth-deleting", "auth-deleted"].includes(job.phase))) throw codedError("invalid-job");
+      if (initial || initialSelf || (!allowBarrier && !["profile-barrier", "second-sweep", "auth-deleting", "auth-deleted"].includes(job.phase))) throw codedError("invalid-job");
       return { username: job.targetUsername, profileExists: false };
     }
     const target = targetSnapshot.data();
     if (isProtectedAdministrator(target.username)) throw codedError("protected-target");
     if (!initial && ["profile-barrier", "second-sweep", "auth-deleting", "auth-deleted"].includes(job.phase)) throw codedError("profile-recreated");
-    if (target.banned !== true || target.adminDeletionStatus !== "queued" || target.adminDeletionRequestedBy !== job.requesterUid
-      || !sameTimestamp(target.adminDeletionRequestedAt, job.requestedAt)) throw codedError("invalid-job");
+    if (!selfRequested && (target.banned !== true || target.adminDeletionStatus !== "queued" || target.adminDeletionRequestedBy !== job.requesterUid
+      || !sameTimestamp(target.adminDeletionRequestedAt, job.requestedAt))) throw codedError("invalid-job");
     return { username: target.username, profileExists: true };
   }
   async claim(targetUid, ownerId) {
@@ -119,6 +129,7 @@ export class FirestoreDeletionAdapter {
         attempts: (validInternalJob(job, targetUid) ? job.attempts : 0) + 1, leaseOwner: ownerId,
         leaseToken, leaseExpiresAt: this.timestamp(this.now() + LEASE_MS)
       };
+      if (isExactSelfQueuedJob(job, targetUid) || job.requestType === "self") claimed.requestType = "self";
       transaction.set(reference, claimed); return { targetUid, token: leaseToken, phase: claimed.phase };
     });
   }
@@ -190,21 +201,47 @@ export class FirestoreDeletionAdapter {
     await this.deleteSubtree(targetUid, token, circleRef);
   }
   async deleteRoomCascade(targetUid, token, roomRef) {
-    for (const collectionName of ["roomMessages", "roomMembers"]) {
-      await this.deleteQuery(targetUid, token, this.db.collection(collectionName).where("roomId", "==", roomRef.id).orderBy(this.FieldPath.documentId()));
-    }
+    const removed = await this.roomLifecycleAdapter.cleanupRoomForTrustedDeletion(roomRef.id, {
+      ownerId: `account-deletion:${targetUid}`,
+      onProgress: () => this.renew(targetUid, token)
+    });
+    if (!removed && (await roomRef.get()).exists) throw codedError("lease-lost");
     await this.deleteSubtree(targetUid, token, roomRef);
+  }
+  async deleteRoomMessageCascade(targetUid, token, messageRef) {
+    const removed = await this.roomLifecycleAdapter.cleanupRoomMessageForTrustedDeletion(messageRef.id, {
+      ownerId: `account-deletion:${targetUid}`, onProgress: () => this.renew(targetUid, token)
+    });
+    if (!removed && (await messageRef.get()).exists) throw codedError("lease-lost");
   }
   async sweep(targetUid, token) {
     const jobSnapshot = await this.jobRef(targetUid).get();
     if (!jobSnapshot.exists) throw codedError("lease-lost"); this.assertLeaseData(jobSnapshot.data(), token);
     for (const entry of cleanupQueries(targetUid)) {
-      if (entry.path) { await this.deleteDirect(targetUid, token, entry); continue; }
+      if (entry.path) {
+        const reference = this.db.collection(entry.collection).doc(entry.path);
+        if (entry.cascade === "document") {
+          for (const collectionName of entry.subcollections ?? []) {
+            await this.deleteQuery(targetUid, token, reference.collection(collectionName).orderBy(this.FieldPath.documentId()), async (refs) => {
+              for (const ref of refs) await this.deleteSubtree(targetUid, token, ref);
+            });
+          }
+          await this.deleteSubtree(targetUid, token, reference);
+        }
+        await this.deleteDirect(targetUid, token, entry); continue;
+      }
       const cascade = async (refs) => {
         for (const ref of refs) {
           if (entry.cascade === "post") await this.deletePostCascade(targetUid, token, ref);
           if (entry.cascade === "circle") await this.deleteCircleCascade(targetUid, token, ref);
           if (entry.cascade === "room") await this.deleteRoomCascade(targetUid, token, ref);
+          if (entry.cascade === "roomMessage") await this.deleteRoomMessageCascade(targetUid, token, ref);
+          if (entry.cascade === "document") await this.deleteSubtree(targetUid, token, ref);
+          if (entry.cascade === "moderation-case") {
+            await this.deleteSubtree(targetUid, token, ref);
+            const action = this.db.collection("moderationActions").doc(ref.id);
+            if ((await action.get()).exists) await this.deleteRefs(targetUid, token, [action]);
+          }
         }
       };
       await this.deleteQuery(targetUid, token, this.queryFor(entry), cascade);
@@ -269,18 +306,29 @@ export class FirestoreDeletionAdapter {
     });
   }
   async finalize(targetUid, token, completedAt, purgeAfter) {
-    await this.db.runTransaction(async (transaction) => {
-      const jobRef = this.jobRef(targetUid); const profileRef = this.db.collection("users").doc(targetUid);
-      const jobSnapshot = await transaction.get(jobRef); if (!jobSnapshot.exists) throw codedError("lease-lost");
-      this.assertLeaseData(jobSnapshot.data(), token); if (jobSnapshot.data().phase !== "auth-deleted") throw codedError("invalid-job");
-      const profileSnapshot = await transaction.get(profileRef); if (profileSnapshot.exists) throw codedError("profile-recreated");
-      const reservations = await transaction.get(
-        this.db.collection("usernames").where("uid", "==", targetUid).limit(PAGE_LIMIT + 1)
-      );
-      if (reservations.size > PAGE_LIMIT) throw codedError("cleanup-limit");
-      reservations.docs.forEach((reservation) => transaction.delete(reservation.ref));
-      transaction.set(jobRef, { status: "completed", completedAt, purgeAfter });
-    });
+    while (true) {
+      const completed = await this.db.runTransaction(async (transaction) => {
+        const jobRef = this.jobRef(targetUid); const profileRef = this.db.collection("users").doc(targetUid);
+        const jobSnapshot = await transaction.get(jobRef);
+        if (!jobSnapshot.exists) throw codedError("lease-lost");
+        this.assertLeaseData(jobSnapshot.data(), token);
+        if (jobSnapshot.data().phase !== "auth-deleted") throw codedError("invalid-job");
+        const profileSnapshot = await transaction.get(profileRef);
+        if (profileSnapshot.exists) throw codedError("profile-recreated");
+        const reservations = await transaction.get(
+          this.db.collection("usernames").where("uid", "==", targetUid).limit(PAGE_LIMIT)
+        );
+        if (reservations.empty) {
+          transaction.delete(this.db.collection("accountDeletionRequests").doc(targetUid));
+          transaction.set(jobRef, { status: "completed", completedAt, purgeAfter });
+          return true;
+        }
+        reservations.docs.forEach((reservation) => transaction.delete(reservation.ref));
+        transaction.update(jobRef, { leaseExpiresAt: this.timestamp(this.now() + LEASE_MS) });
+        return false;
+      });
+      if (completed) return;
+    }
   }
   async fail(targetUid, token, errorCode) {
     await this.db.runTransaction(async (transaction) => {
@@ -293,7 +341,7 @@ export class FirestoreDeletionAdapter {
       transaction.set(jobRef, {
         targetUid, requesterUid: job.requesterUid, requestedAt: job.requestedAt, status: "failed",
         processorVersion: PROCESSOR_VERSION, targetUsername: job.targetUsername, phase: job.phase,
-        attempts: job.attempts, errorCode
+        attempts: job.attempts, errorCode, ...(job.requestType === "self" ? { requestType: "self" } : {})
       });
     });
   }

@@ -36,7 +36,36 @@ for (const forbidden of [currentUid, actorUid, "private_name", "private comment 
 assert.equal(notificationUiId("message-request", `${actorUid}_${currentUid}`, time(12)), notificationUiId("message-request", `${actorUid}_${currentUid}`, time(12)));
 assert.notEqual(notificationUiId("message-request", `${actorUid}_${currentUid}`, time(12)), notificationUiId("message-request", `${actorUid}_${currentUid}`, time(13)));
 
+const suppressedRoomItems = buildInAppNotifications({
+  currentUid,
+  roomMessages: [
+    entry("expired", "roomMessages/expired", { senderId: actorUid, roomId: "room-a", createdAt: time(1), expiresAt: time(50) }),
+    entry("blocked", "roomMessages/blocked", { senderId: actorUid, roomId: "room-a", createdAt: time(2), expiresAt: time(100) })
+  ],
+  roomMemberships: [entry("membership", "roomMembers/membership", { uid: currentUid, roomId: "room-a" })],
+  blockedUids: [actorUid],
+  nowMillis: 50
+});
+assert.deepEqual(suppressedRoomItems, [], "expired and blocked room content never creates a notification");
+
+const allBlockedActors = buildInAppNotifications({
+  currentUid,
+  posts: [entry("owned", "posts/owned", { authorId: currentUid, createdAt: time(1) })],
+  reactions: [entry("reaction", "posts/owned/reactions/reaction", { uid: actorUid, createdAt: time(2) })],
+  comments: [entry("comment", "posts/owned/comments/comment", { uid: actorUid, createdAt: time(3) })],
+  messageRequests: [entry("request", "messageRequests/request", { fromId: actorUid, toId: currentUid, status: "pending", createdAt: time(4) })],
+  reveals: [entry("reveal", "reveals/reveal", { fromId: actorUid, toId: currentUid, status: "pending", createdAt: time(5) })],
+  blockedUids: [actorUid]
+});
+assert.deepEqual(allBlockedActors, [], "every in-app notification type suppresses a blocked actor");
+
 const communitySource = await readFile(new URL("../community.js", import.meta.url), "utf8");
 assert.doesNotMatch(communitySource, /\bnew\s+Notification\s*\(/, "page code never creates browser notifications");
+const timelineSource = await readFile(new URL("../timeline.js", import.meta.url), "utf8");
+assert.match(timelineSource, /blockedUids:\s*viewerBlocks\.blockedUids/,
+  "Timeline notifications use the centralized two-direction block snapshot");
+assert.match(timelineSource, /query\(collection\(db, "roomMessages"\), where\("moderationState", "==", "visible"\)\)/);
+assert.match(timelineSource, /scheduleExpiryBoundary\(/, "room notification expiry is boundary-driven");
+assert.match(timelineSource, /pagehide/, "room notification timer is cleaned up with the page");
 
 console.log("In-app notification policy passed");

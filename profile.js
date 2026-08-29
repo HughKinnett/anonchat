@@ -2,20 +2,27 @@ import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { createModerationClient } from "./moderation-client.mjs";
+import { compareNewestFirst } from "./content-ordering.mjs";
+import { blockedProfileStatus, commentsForPost, interactionParentForPost } from "./profile-render-policy.mjs";
+import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
+import { createViewerBlockTracker, didViewerBlock, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
+import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
-  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
   increment,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
-  updateDoc,
+  updateDoc, writeBatch,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -23,6 +30,10 @@ const targetUserId = new URLSearchParams(window.location.search).get("uid");
 const feed = document.getElementById("profile-feed");
 const status = document.getElementById("profile-status");
 const followButton = document.getElementById("profile-follow-button");
+const socialActions = document.getElementById("profile-social-actions");
+const reportButton = document.getElementById("profile-report-button");
+const reportReason = document.getElementById("profile-report-reason");
+const blockButton = document.getElementById("profile-block-button");
 let currentUser;
 let currentProfileUsername;
 let comments = [];
@@ -31,8 +42,53 @@ let targetProfile;
 let targetPosts = [];
 let targetCommunityPosts = [];
 let users = [];
+let moderationClient;
+let targetBlocked = false;
+let targetBlockedByViewer = false;
+let blockTracker = createViewerBlockTracker();
+let viewerBlocks = blockTracker.current();
+let profileContentStarted = false;
+const commentListeners = new Map();
+const reportStateLoads = new Set();
+const reportStateWatches = new Map();
+let profileContentListeners = [];
+const sessionListeners = [];
+const sessionGeneration = createSessionGeneration();
+let activeProfileSession = 0;
+const PROFILE_FEED_LIMIT = 50;
+let postsRenderQueued = false;
+const schedulePostsRender = () => {
+  if (postsRenderQueued) return;
+  postsRenderQueued = true;
+  queueMicrotask(() => { postsRenderQueued = false; renderPosts(); });
+};
 const profileSpotifyCard = document.getElementById("profile-spotify-card");
 const profileSpotifyPlayer = document.getElementById("profile-spotify-player");
+const userReportTarget = () => ({ targetKind: "user", targetCollection: "users", targetId: targetUserId, reportedUserId: targetUserId });
+const postReportTarget = (postDoc, post) => ({
+  targetKind: postDoc.ref.parent.id === "communityPosts" ? "communityPost" : "post",
+  targetCollection: postDoc.ref.parent.id,
+  targetId: postDoc.id,
+  reportedUserId: post.authorId
+});
+const reportTargetKey = (target) => `${target.targetKind}:${target.targetId}`;
+const loadReportedState = (target, onLoaded) => {
+  const key = reportTargetKey(target);
+  if (!reportStateWatches.has(key) && moderationClient) reportStateWatches.set(key, moderationClient.watchReported(target, onLoaded));
+  if (!moderationClient || moderationClient.cachedReported(target) !== undefined) return;
+  if (reportStateLoads.has(key)) return;
+  const client = moderationClient;
+  reportStateLoads.add(key);
+  client.hasReported(target).then(() => {
+    if (client !== moderationClient) return;
+    reportStateLoads.delete(key);
+    onLoaded();
+  }).catch(() => {
+    if (client !== moderationClient) return;
+    reportStateLoads.delete(key);
+    setStatus("Could not verify whether this material was already reported.", true);
+  });
+};
 
 const spotifyTrackId = (value) => {
   try {
@@ -63,6 +119,25 @@ const renderProfileSpotifySong = (url) => {
   profileSpotifyPlayer.append(frame, open);
 };
 
+const clearProtectedProfileMetadata = (message) => {
+  clearProfileProtectedMetadata({ document, renderSpotify: renderProfileSpotifySong }, message);
+};
+
+const renderTargetProfileIdentity = () => {
+  if (!targetProfile || !viewerBlocks.ready) return;
+  renderProfileSpotifySong(targetBlocked ? "" : targetProfile.spotifyTrackUrl || "");
+  document.title = targetBlocked ? "Unavailable profile — AnonChat" : `@${targetProfile.username} — AnonChat`;
+  document.getElementById("profile-name").textContent = targetBlocked ? "Unavailable profile" : targetProfile.username;
+  document.getElementById("profile-handle").textContent = targetBlocked ? "" : `@${targetProfile.username}`;
+  document.getElementById("view-profile-avatar").src = !targetBlocked && targetProfile.profileImage
+    ? targetProfile.profileImage : "Untitled.jpeg";
+  if (!targetBlocked && targetProfile.coverImage) {
+    document.getElementById("view-profile-cover").src = targetProfile.coverImage;
+  } else {
+    document.getElementById("view-profile-cover").src = "Untitled.jpeg";
+  }
+};
+
 const validProfile = (profile, userId) =>
   profile?.uid === userId &&
   typeof profile.username === "string" &&
@@ -75,7 +150,8 @@ const appendLinkedText = (container, value) => {
       return;
     }
     const handle = part.slice(1).toLowerCase();
-    const profile = users.find((entry) => entry.data().username?.toLowerCase() === handle);
+    const profile = visibleRecords(users, viewerBlocks, ["uid"])
+      .find((entry) => entry.data().username?.toLowerCase() === handle);
     if (!profile) {
       container.append(document.createTextNode(part));
       return;
@@ -123,7 +199,7 @@ const attachMentionAutocomplete = (input) => {
       return;
     }
     const queryText = match[1].toLowerCase();
-    const matches = users
+    const matches = visibleRecords(users, viewerBlocks, ["uid"])
       .filter((entry) => entry.data().username?.toLowerCase().startsWith(queryText))
       .slice(0, 6);
     if (!matches.length) {
@@ -158,17 +234,23 @@ const setStatus = (message, isError = false) => {
 };
 
 const followerCount = () =>
-  follows.filter((follow) => follow.data().followingId === targetUserId).length;
+  visibleRecords(follows, viewerBlocks, ["followerId", "followingId"])
+    .filter((follow) => follow.data().followingId === targetUserId).length;
 
 const followingCount = () =>
-  follows.filter((follow) => follow.data().followerId === targetUserId).length;
+  visibleRecords(follows, viewerBlocks, ["followerId", "followingId"])
+    .filter((follow) => follow.data().followerId === targetUserId).length;
 
 const isFollowing = () =>
-  follows.some((follow) =>
+  visibleRecords(follows, viewerBlocks, ["followerId", "followingId"]).some((follow) =>
     follow.data().followerId === currentUser.uid && follow.data().followingId === targetUserId
   );
 
 const renderFollowControl = () => {
+  if (!viewerBlocks.ready) {
+    socialActions.hidden = true;
+    return;
+  }
   const count = followerCount();
   const following = followingCount();
   const followersLink = document.getElementById("profile-followers");
@@ -179,30 +261,101 @@ const renderFollowControl = () => {
   followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
 
   if (currentUser.uid === targetUserId) {
+    socialActions.hidden = true;
     followButton.hidden = true;
     return;
   }
 
-  followButton.hidden = false;
+  socialActions.hidden = targetBlocked && !targetBlockedByViewer;
+  if (targetBlocked && !targetBlockedByViewer) return;
+  followButton.hidden = targetBlocked;
   followButton.setAttribute("aria-pressed", String(isFollowing()));
   followButton.textContent = isFollowing() ? "Following" : "Follow";
   followButton.disabled = false;
+  blockButton.textContent = targetBlocked ? "Unblock user" : "Block user";
+  blockButton.setAttribute("aria-pressed", String(targetBlocked));
+  blockButton.disabled = false;
+  const reported = moderationClient?.cachedReported(userReportTarget());
+  reportButton.hidden = targetBlocked;
+  reportReason.hidden = targetBlocked;
+  reportButton.disabled = targetBlocked || reported !== false;
+  reportReason.disabled = targetBlocked || reported === true;
+  reportButton.textContent = reported === true ? "Reported" : reported === false ? "Report user" : "Checking report…";
+  if (!targetBlocked) loadReportedState(userReportTarget(), renderFollowControl);
 };
 
-const postComments = (postId) => comments
-  .filter((comment) => comment.ref.parent.parent?.id === postId)
-  .sort((a, b) =>
-    (a.data().createdAt?.toMillis?.() || 0) - (b.data().createdAt?.toMillis?.() || 0)
-  );
+const commentParentPath = (comment) => comment.ref.parent.parent?.path || "";
 
+const postComments = (postDoc) => commentsForPost(
+  visibleRecords(comments, viewerBlocks, ["uid"]), postDoc
+);
+
+const syncProfilePostResources = (postDocs) => {
+  const session = activeProfileSession;
+  const uid = currentUser?.uid;
+  const postPaths = new Set(postDocs.map((post) => interactionParentForPost(post).path));
+  commentListeners.forEach((unsubscribe, path) => {
+    if (postPaths.has(path)) return;
+    unsubscribe();
+    commentListeners.delete(path);
+    comments = comments.filter((comment) => commentParentPath(comment) !== path);
+  });
+  const reportKeys = new Set(postDocs.filter((postDoc) => postDoc.data().authorId !== currentUser.uid)
+    .map((postDoc) => reportTargetKey(postReportTarget(postDoc, postDoc.data()))));
+  for (const [key, unsubscribe] of reportStateWatches) if (!key.startsWith("user:") && !reportKeys.has(key)) {
+    unsubscribe(); reportStateWatches.delete(key); reportStateLoads.delete(key);
+  }
+  postDocs.forEach((postDoc) => {
+    const parent = interactionParentForPost(postDoc);
+    if (commentListeners.has(parent.path)) return;
+    const unsubscribe = onSnapshot(
+      collection(db, parent.collection, parent.id, "comments"),
+      (snapshot) => {
+        if (!sessionGeneration.isCurrent(session, uid)) return;
+        comments = [
+          ...comments.filter((comment) => commentParentPath(comment) !== parent.path),
+          ...snapshot.docs
+        ];
+        schedulePostsRender();
+      },
+      () => {
+        if (sessionGeneration.isCurrent(session, uid)) setStatus("Could not load comments.", true);
+      }
+    );
+    commentListeners.set(parent.path, unsubscribe);
+  });
+};
+
+const stopProfileContent = () => {
+  profileContentListeners.forEach((unsubscribe) => unsubscribe());
+  profileContentListeners = [];
+  commentListeners.forEach((unsubscribe) => unsubscribe());
+  commentListeners.clear();
+  comments = [];
+  targetPosts = [];
+  targetCommunityPosts = [];
+  profileContentStarted = false;
+  for (const [key, unsubscribe] of reportStateWatches) if (!key.startsWith("user:")) {
+    unsubscribe(); reportStateWatches.delete(key); reportStateLoads.delete(key);
+  }
+};
 const renderPosts = () => {
+  if (!viewerBlocks.ready) {
+    feed.replaceChildren();
+    document.getElementById("profile-post-count").textContent = "";
+    setStatus("Loading privacy choices…");
+    return;
+  }
+  if (targetBlocked) {
+    feed.replaceChildren();
+    document.getElementById("profile-post-count").textContent = "0 posts";
+    setStatus(targetBlockedByViewer ? blockedProfileStatus() : "This profile is unavailable because of a block.");
+    return;
+  }
   const sorted = [...targetPosts, ...targetCommunityPosts]
     .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
-    .sort((a, b) => {
-    const aTime = a.data().createdAt?.toMillis?.() || 0;
-    const bTime = b.data().createdAt?.toMillis?.() || 0;
-    return bTime - aTime;
-  });
+    .filter((post) => isBlockedPost(post, viewerBlocks))
+    .sort(compareNewestFirst);
 
   feed.replaceChildren(...sorted.map((postDoc) => {
     const post = postDoc.data();
@@ -234,9 +387,9 @@ const renderPosts = () => {
     time.textContent = post.createdAt?.toDate
       ? post.createdAt.toDate().toLocaleString()
       : "Posting…";
-    const sourceId = post.type === "repost" ? post.originalPostId : postDoc.id;
-    const sourceCollection = postDoc.ref.parent.id === "communityPosts" ? "communityPosts" : "posts";
-    const commentDocs = postComments(sourceId);
+    const parent = interactionParentForPost(postDoc);
+    const sourceCollection = postDoc.ref.parent.id;
+    const commentDocs = postComments(postDoc);
     const commentsSection = document.createElement("details");
     commentsSection.className = "comments-section";
     const summary = document.createElement("summary");
@@ -308,7 +461,7 @@ const renderPosts = () => {
       if (!commentText) return;
       submit.disabled = true;
       try {
-        await addDoc(collection(db, sourceCollection, sourceId, "comments"), {
+        await addDoc(collection(db, parent.collection, parent.id, "comments"), {
           uid: currentUser.uid,
           username: currentProfileUsername,
           text: commentText,
@@ -324,9 +477,67 @@ const renderPosts = () => {
     });
     commentsSection.append(summary, list, form);
 
+    const postActions = document.createElement("div");
+    postActions.className = "post-actions";
+    if (post.authorId !== currentUser.uid) {
+      const reportTarget = postReportTarget(postDoc, post);
+      const reported = moderationClient.cachedReported(reportTarget);
+      const postReportReason = document.createElement("select");
+      postReportReason.setAttribute("aria-label", "Reason for reporting this post");
+      [
+        ["harassment", "Harassment"], ["hate-threats", "Hate or threats"],
+        ["sexual-content", "Sexual content"], ["spam-scam", "Spam or scam"],
+        ["privacy-impersonation", "Privacy or impersonation"], ["other", "Other"]
+      ].forEach(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        postReportReason.append(option);
+      });
+      const reportPost = document.createElement("button");
+      reportPost.type = "button";
+      reportPost.textContent = reported === true ? "Reported" : reported === false ? "Report" : "Checking report…";
+      reportPost.disabled = reported !== false;
+      postReportReason.disabled = reported === true;
+      loadReportedState(reportTarget, schedulePostsRender);
+      reportPost.addEventListener("click", async () => {
+        reportPost.disabled = true;
+        try {
+          await moderationClient.report(reportTarget, postReportReason.value);
+          reportPost.textContent = "Reported";
+          postReportReason.disabled = true;
+          setStatus("Report sent. Thank you for helping keep AnonChat safe.");
+        } catch (error) {
+          setStatus(error?.code === "already-reported" ? "You have already reported this post." : "Could not report this post.", true);
+          const duplicate = moderationClient.cachedReported(reportTarget) === true;
+          reportPost.textContent = duplicate ? "Reported" : "Report";
+          postReportReason.disabled = duplicate;
+          reportPost.disabled = duplicate;
+        }
+      });
+      postActions.append(postReportReason, reportPost);
+    }
+    if (post.authorId === currentUser.uid) {
+      const removePost = document.createElement("button");
+      removePost.type = "button";
+      removePost.className = "delete-button";
+      removePost.textContent = "Delete";
+      removePost.addEventListener("click", async () => {
+        if (!window.confirm("Permanently delete this post? This cannot be undone.")) return;
+        removePost.disabled = true;
+        try {
+          await deleteDoc(postDoc.ref);
+        } catch {
+          setStatus("Could not delete that post.", true);
+          removePost.disabled = false;
+        }
+      });
+      postActions.append(removePost);
+    }
+
     item.append(text);
     if (postImage) item.append(postImage);
-    item.append(time, commentsSection);
+    item.append(time, commentsSection, postActions);
     return item;
   }));
 
@@ -354,8 +565,179 @@ followButton.addEventListener("click", async () => {
   }
 });
 
+reportButton.addEventListener("click", async () => {
+  reportButton.disabled = true;
+  try {
+    await moderationClient.report(userReportTarget(), reportReason.value);
+    reportButton.textContent = "Reported";
+    reportReason.disabled = true;
+    setStatus("Report sent. Thank you for helping keep AnonChat safe.");
+  } catch (error) {
+    setStatus(error?.code === "already-reported" ? "You have already reported this user." : "Could not report this user.", true);
+    const duplicate = moderationClient.cachedReported(userReportTarget()) === true;
+    reportButton.textContent = duplicate ? "Reported" : "Report user";
+    reportReason.disabled = duplicate;
+    reportButton.disabled = duplicate;
+  }
+});
+
+const startProfileContent = () => {
+  if (profileContentStarted || targetBlocked) return;
+  const session = activeProfileSession;
+  const uid = currentUser?.uid;
+  const sessionIsCurrent = () => sessionGeneration.isCurrent(session, uid);
+  profileContentStarted = true;
+  profileContentListeners.push(onSnapshot(
+    query(
+      collection(db, "posts"),
+      where("authorId", "==", targetUserId),
+      where("moderationState", "==", "visible"),
+      orderBy("createdAt", "desc"),
+      limit(PROFILE_FEED_LIMIT)
+    ),
+    (snapshot) => {
+      if (!sessionIsCurrent()) return;
+      targetPosts = snapshot.docs;
+      syncProfilePostResources([...targetPosts, ...targetCommunityPosts]);
+      schedulePostsRender();
+    },
+    () => { if (sessionIsCurrent()) setStatus("Could not load this user's posts.", true); }
+  ));
+
+  profileContentListeners.push(onSnapshot(
+    query(
+      collection(db, "communityPosts"),
+      where("authorId", "==", targetUserId),
+      where("moderationState", "==", "visible"),
+      orderBy("createdAt", "desc"),
+      limit(PROFILE_FEED_LIMIT)
+    ),
+    (snapshot) => {
+      if (!sessionIsCurrent()) return;
+      targetCommunityPosts = snapshot.docs;
+      syncProfilePostResources([...targetPosts, ...targetCommunityPosts]);
+      schedulePostsRender();
+    },
+    () => { if (sessionIsCurrent()) setStatus("Could not load this user's earlier posts.", true); }
+  ));
+};
+
+const refreshViewerBlocks = () => {
+  viewerBlocks = blockTracker.current();
+  if (!viewerBlocks.ready) {
+    stopProfileContent();
+    clearProtectedProfileMetadata("Loading privacy choices…");
+    renderFollowControl();
+    renderPosts();
+    return;
+  }
+  targetBlocked = isBlockedActor(targetUserId, viewerBlocks);
+  targetBlockedByViewer = didViewerBlock(targetUserId, viewerBlocks);
+  renderTargetProfileIdentity();
+  if (targetBlocked) stopProfileContent();
+  else startProfileContent();
+  renderFollowControl();
+  renderPosts();
+};
+
+const startViewerBlockListeners = (session, uid) => new Promise((resolve) => {
+  let resolved = false;
+  const sessionIsCurrent = () => sessionGeneration.isCurrent(session, uid);
+  const ready = () => {
+    if (!sessionIsCurrent()) return;
+    refreshViewerBlocks();
+    if (viewerBlocks.ready && !resolved) {
+      resolved = true;
+      resolve();
+    }
+  };
+  sessionListeners.push(onSnapshot(
+    query(collection(db, "blocks"), where("blockerUid", "==", uid)),
+    (snapshot) => {
+      if (!sessionIsCurrent()) return;
+      viewerBlocks = blockTracker.update("outgoing", snapshot.docs);
+      ready();
+    },
+    () => {
+      if (!sessionIsCurrent()) return;
+      viewerBlocks = blockTracker.fail("outgoing");
+      refreshViewerBlocks();
+      setStatus("Could not load this block status.", true);
+    }
+  ));
+  sessionListeners.push(onSnapshot(
+    query(collection(db, "blocks"), where("blockedUid", "==", uid)),
+    (snapshot) => {
+      if (!sessionIsCurrent()) return;
+      viewerBlocks = blockTracker.update("incoming", snapshot.docs);
+      ready();
+    },
+    () => {
+      if (!sessionIsCurrent()) return;
+      viewerBlocks = blockTracker.fail("incoming");
+      refreshViewerBlocks();
+      setStatus("Could not load this block status.", true);
+    }
+  ));
+});
+
+blockButton.addEventListener("click", async () => {
+  blockButton.disabled = true;
+  try {
+    if (targetBlockedByViewer) {
+      await moderationClient.unblock(targetUserId);
+      targetBlocked = false;
+      setStatus("You unblocked this user. Their posts are visible again.");
+      startProfileContent();
+    } else {
+      await moderationClient.block(targetUserId);
+      targetBlocked = true;
+      stopProfileContent();
+      setStatus(blockedProfileStatus());
+    }
+    renderFollowControl();
+    renderPosts();
+  } catch (error) {
+    setStatus(error?.message || "Could not update this block.", true);
+    blockButton.disabled = false;
+  }
+});
+
+const stopProfileResources = () => {
+  moderationClient?.destroy();
+  sessionListeners.splice(0).forEach((unsubscribe) => unsubscribe());
+  stopProfileContent();
+  for (const unsubscribe of reportStateWatches.values()) unsubscribe();
+  reportStateWatches.clear();
+  reportStateLoads.clear();
+  users = [];
+  follows = [];
+  targetProfile = null;
+  moderationClient = null;
+  currentProfileUsername = "";
+  targetBlocked = false;
+  targetBlockedByViewer = false;
+  blockTracker.reset(currentUser?.uid);
+  viewerBlocks = blockTracker.current();
+  socialActions.hidden = true;
+  feed.replaceChildren();
+  document.getElementById("profile-post-count").textContent = "";
+  clearProtectedProfileMetadata("Loading profile…");
+};
+
+const invalidateProfileSession = () => {
+  sessionGeneration.invalidate();
+  stopProfileResources();
+};
+
 onAuthStateChanged(auth, async (user) => {
+  activeProfileSession = sessionGeneration.begin(user?.uid);
+  const session = activeProfileSession;
+  const sessionIsCurrent = () => sessionGeneration.isCurrent(session, user?.uid);
+  stopProfileResources();
   if (!user) {
+    currentUser = null;
+    stopProfileResources();
     const destination = targetUserId
       ? `index.html?next=${encodeURIComponent(`profile.html?uid=${targetUserId}`)}`
       : "index.html";
@@ -369,18 +751,24 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  blockTracker = createViewerBlockTracker(user.uid);
+  viewerBlocks = blockTracker.current();
   const currentProfileRef = doc(db, "users", user.uid);
   let currentProfileSnapshot = await getDoc(currentProfileRef);
+  if (!sessionIsCurrent()) return;
   if (currentProfileSnapshot.exists() && currentProfileSnapshot.data().banned === true) {
     await exitAuthenticatedSession({
       user,
+      stopListeners: stopProfileResources,
       redirect: () => window.location.replace("index.html")
     });
     return;
   }
   if (!currentProfileSnapshot.exists() || !validProfile(currentProfileSnapshot.data(), user.uid)) {
     currentProfileUsername = await ensureUserProfile(user, db);
+    if (!sessionIsCurrent()) return;
     currentProfileSnapshot = await getDoc(currentProfileRef);
+    if (!sessionIsCurrent()) return;
   } else {
     currentProfileUsername = currentProfileSnapshot.data().username;
   }
@@ -394,12 +782,15 @@ onAuthStateChanged(auth, async (user) => {
 
   const targetProfileRef = doc(db, "users", targetUserId);
   let profileSnapshot = await getDoc(targetProfileRef);
+  if (!sessionIsCurrent()) return;
   if (
     targetUserId === user.uid &&
     (!profileSnapshot.exists() || !validProfile(profileSnapshot.data(), user.uid))
   ) {
     await ensureUserProfile(user, db);
+    if (!sessionIsCurrent()) return;
     profileSnapshot = await getDoc(targetProfileRef);
+    if (!sessionIsCurrent()) return;
   }
   if (!profileSnapshot.exists()) {
     document.getElementById("profile-name").textContent = "Profile not found";
@@ -413,16 +804,15 @@ onAuthStateChanged(auth, async (user) => {
     setStatus("This account is banned.", true);
     return;
   }
-  renderProfileSpotifySong(targetProfile.spotifyTrackUrl || "");
-  document.title = `@${targetProfile.username} — AnonChat`;
-  document.getElementById("profile-name").textContent = targetProfile.username;
-  document.getElementById("profile-handle").textContent = `@${targetProfile.username}`;
-  if (targetProfile.profileImage) {
-    document.getElementById("view-profile-avatar").src = targetProfile.profileImage;
-  }
-  if (targetProfile.coverImage) {
-    document.getElementById("view-profile-cover").src = targetProfile.coverImage;
-  }
+  moderationClient = createModerationClient({
+    db,
+    firestore: { doc, getDoc, setDoc, deleteDoc, writeBatch },
+    currentUid: currentUser.uid,
+    timestamp: serverTimestamp
+  });
+  await startViewerBlockListeners(session, user.uid);
+  if (!sessionIsCurrent()) return;
+  renderTargetProfileIdentity();
   const adminUsernames = ["i_love_you_h", "cybercapone"];
   const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
   document.getElementById("profile-admin-link").hidden = !viewerIsAdmin;
@@ -433,36 +823,31 @@ onAuthStateChanged(auth, async (user) => {
     updatedAt: serverTimestamp()
   }, { merge: true }).catch(() => {});
 
-  onSnapshot(collection(db, "users"), (snapshot) => {
+  sessionListeners.push(onSnapshot(collection(db, "users"), (snapshot) => {
+    if (!sessionIsCurrent()) return;
     users = snapshot.docs;
     renderPosts();
-  }, () => setStatus("Could not load user tags.", true));
+  }, () => { if (sessionIsCurrent()) setStatus("Could not load user tags.", true); }));
 
-  onSnapshot(collectionGroup(db, "comments"), (snapshot) => {
-    comments = snapshot.docs;
-    renderPosts();
-  }, () => setStatus("Could not load comments.", true));
-
-  onSnapshot(collection(db, "follows"), (snapshot) => {
+  sessionListeners.push(onSnapshot(collection(db, "follows"), (snapshot) => {
+    if (!sessionIsCurrent()) return;
     follows = snapshot.docs;
     renderFollowControl();
-  }, () => setStatus("Could not load follower information.", true));
+  }, () => { if (sessionIsCurrent()) setStatus("Could not load follower information.", true); }));
 
-  onSnapshot(
-    query(collection(db, "posts"), where("authorId", "==", targetUserId)),
-    (snapshot) => {
-      targetPosts = snapshot.docs;
-      renderPosts();
-    },
-    () => setStatus("Could not load this user's posts.", true)
-  );
+  renderFollowControl();
+  renderPosts();
+  startProfileContent();
+});
 
-  onSnapshot(
-    query(collection(db, "communityPosts"), where("authorId", "==", targetUserId)),
-    (snapshot) => {
-      targetCommunityPosts = snapshot.docs;
-      renderPosts();
-    },
-    () => setStatus("Could not load this user's earlier posts.", true)
-  );
+window.addEventListener("pagehide", (event) => {
+  if (!event.persisted) {
+    sessionGeneration.invalidate();
+    stopProfileResources();
+  }
+});
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted || !moderationClient || !currentUser || !targetProfile) return;
+  moderationClient.invalidateNegative();
+  renderFollowControl(); schedulePostsRender(); startProfileContent();
 });

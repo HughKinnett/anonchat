@@ -30,6 +30,26 @@
     <div id="inactive-users" class="admin-list" aria-live="polite"></div>
   </section>
 
+  <section class="admin-panel" aria-labelledby="reported-material-heading">
+    <div class="admin-panel-heading">
+      <div><h2 id="reported-material-heading">Reported material</h2><p class="admin-note">Review reports and choose what happens next. Protected evidence, including evidence for restored or expired sources, is retained until an administrator chooses permanent deletion.</p></div>
+      <select id="admin-report-status" aria-label="Reported material status">
+        <option value="open">Needs review</option>
+        <option value="restored">Restored history</option>
+        <option value="expiredEvidence">Expired source / retained evidence</option>
+        <option value="all">All reports</option>
+      </select>
+    </div>
+    <div id="admin-reports" class="admin-list" aria-live="polite"></div>
+    <div class="admin-actions"><button id="admin-reports-previous" class="admin-action" type="button" hidden>Newer reports</button><button id="admin-reports-load-more" class="admin-action" type="button" hidden>Older reports</button></div>
+  </section>
+
+  <section class="admin-panel" aria-labelledby="legacy-room-reviews-heading">
+    <div class="admin-panel-heading"><div><h2 id="legacy-room-reviews-heading">Legacy room manual review</h2><p class="admin-note">Rooms that could not be safely cleaned after bounded retries require an audited administrator decision.</p></div></div>
+    <div id="legacy-room-reviews" class="admin-list" aria-live="polite"></div>
+    <div class="admin-actions"><button id="legacy-rooms-newer" class="admin-action" type="button" hidden>Newer reviews</button><button id="legacy-rooms-older" class="admin-action" type="button" hidden>Older reviews</button></div>
+  </section>
+
   <section class="admin-panel" aria-labelledby="content-heading">
     <div class="admin-panel-heading"><div><h2 id="content-heading">Content Moderation</h2><p class="admin-note">Review public timeline and community posts.</p></div><div class="admin-content-tools"><label class="sr-only" for="admin-content-search">Search public content</label><input id="admin-content-search" type="search" placeholder="Search public content"><label class="sr-only" for="admin-content-type">Content type</label><select id="admin-content-type"><option value="all">All content</option><option value="timeline">Timeline</option><option value="community">Community</option></select></div></div>
     <div id="admin-posts" class="admin-list" aria-live="polite"></div>

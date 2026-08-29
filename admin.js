@@ -1,16 +1,22 @@
 import { auth, db } from "./firebase-config.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { adminDeletionQueuePayloads, canAdminSetBanned, canQueueAdminDeletion, isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
-import { canConfirmDeletion, deletionDialogJobTransition, deletionJobRecord, filterUsers, processorHealth, queueFailureDialogTransition, resolveUserFocus, sortInactiveUsers, statusForUser, timestampMillis } from "./admin-dashboard-policy.mjs";
+import { canConfirmDeletion, deletionDialogJobTransition, deletionJobRecord, filterModerationCases, filterUsers, generalContentDeletionPayloads, generalContentDeletionWriteMode, hasDeletionJob, isTerminalModerationAction, legacyRoomActionPayload, moderationActionPayload, moderationActionRetryPayload, moderationActionState, moderationCaseRecord, processorHealth, queueFailureDialogTransition, resolveReportActionFocus, resolveUserFocus, sortInactiveUsers, statusForUser, timestampMillis } from "./admin-dashboard-policy.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { collection, collectionGroup, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { addDoc, collection, collectionGroup, doc, getDoc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = id => document.getElementById(id);
-const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], roomMessages: [], votes: [], jobs: new Map(), processor: null };
+const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], roomMessages: [], votes: [], jobs: new Map(), moderationCases: [], moderationActions: new Map(), legacyRooms: [], processor: null };
 const unsubs = [];
-let adminUid = "", adminUser = null, userFilter = "all", pageActive = true, listenersStarted = false, heartbeatTimer = null;
+let adminUid = "", adminUser = null, userFilter = "all", reportFilter = "open", pageActive = true, listenersStarted = false, heartbeatTimer = null;
 let dialogState = { open: false, targetUid: "", submitting: false }, dialogTarget = null, dialogTrigger = null;
+const pendingModerationActions = new Map();
+const pendingLegacyRoomActions = new Set(), loadedModerationEvidence = new Map(), reportActionUnsubs = new Map();
+const moderationEvidenceEpochs = new Map();
+let reportCasesUnsub = null, legacyRoomsUnsub = null, reportPageLast = null, legacyRoomPageLast = null;
+const reportPageSize = 100, reportPageCursors = [];
+const legacyRoomPageSize = 100, legacyRoomPageCursors = [];
 
 const setStatus = (message, error = false) => { $("admin-status").textContent = message; $("admin-status").style.color = error ? "#fca5a5" : ""; };
 const records = snapshot => snapshot.docs.map(entry => ({ id: entry.id, parentId: entry.ref.parent.parent?.id, ...entry.data() }));
@@ -24,6 +30,12 @@ const userOptions = () => ({ now: Date.now(), deletionJobs: state.jobs });
 const focusKey = (scope, action, uid) => `${scope}-${action}-${uid}`;
 const controlByFocusKey = key => [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === key);
 const currentUserFocusKey = () => document.activeElement?.closest?.("[data-focus-key]")?.dataset.focusKey || "";
+const evictModerationEvidence = (id) => {
+  moderationEvidenceEpochs.set(id, (moderationEvidenceEpochs.get(id) || 0) + 1);
+  const media = loadedModerationEvidence.get(id) || [];
+  media.forEach((item) => { if (item?.objectUrl) URL.revokeObjectURL(item.objectUrl); });
+  loadedModerationEvidence.delete(id);
+};
 
 function activityByUser() {
   const points = new Map(), add = (uid, amount = 1) => { if (uid) points.set(uid, (points.get(uid) || 0) + amount); };
@@ -90,6 +102,217 @@ function renderUsers() {
   restoreUserFocus(activeFocusKey);
 }
 
+const reportTypeLabel = kind => ({ post: "Timeline post", communityPost: "Community post", roomMessage: "Room message", user: "User profile" }[kind] || "Reported material");
+const reportStatusLabel = status => ({ open: "Needs review", restored: "Restored", deleteQueued: "Permanent deletion queued", expiredEvidence: "Source expired — evidence retained" }[status] || "Needs review");
+const reportReasonLabel = item => {
+  const reasons = Object.entries(item.reasonTotals || {}).filter(([, count]) => Number(count) > 0)
+    .map(([reason, count]) => `${String(reason).replaceAll("-", " ")} (${count})`);
+  return reasons.length ? reasons.join(", ") : "Not available";
+};
+const reportUser = item => state.users.find(user => user.id === item.reportedUserId);
+const reportDeletionPending = item => {
+  const user = reportUser(item);
+  return Boolean(user && hasDeletionJob(user, state.jobs));
+};
+const reportAction = item => pendingModerationActions.get(item.id) || state.moderationActions.get(item.id);
+
+const reportFocus = () => {
+  const control = document.activeElement?.closest?.("[data-focus-key]");
+  return control ? { sourceFocusKey: control.dataset.focusKey, reportId: control.dataset.reportId } : {};
+};
+function restoreReportFocus({ sourceFocusKey, reportId } = {}) {
+  if (!sourceFocusKey) return;
+  const controls = [...document.querySelectorAll("[data-focus-key]")];
+  const availableFocusKeys = controls.filter(node => !node.disabled).map(node => node.dataset.focusKey);
+  const sameReportFocusKeys = controls.filter(node => node.dataset.reportId === reportId && !node.disabled).map(node => node.dataset.focusKey);
+  const next = resolveReportActionFocus({ sourceFocusKey, sameReportFocusKeys, availableFocusKeys, fallbackFocusKey: "admin-report-status" });
+  (next === "admin-report-status" ? $("admin-report-status") : controlByFocusKey(next))?.focus();
+}
+
+async function queueModerationAction(item, action, control) {
+  const user = reportUser(item), existingAction = reportAction(item), intendedFocus = { sourceFocusKey: control.dataset.focusKey, reportId: item.id };
+  const actionState = moderationActionState({ caseRecord: item, action: existingAction, deletionPending: reportDeletionPending(item), username: user?.username });
+  if (actionState[action]?.disabled || pendingModerationActions.has(item.id)) return;
+  const pending = { action, status: "queued" };
+  pendingModerationActions.set(item.id, pending); control.disabled = true; renderReports(intendedFocus);
+  try {
+    const requestedAt = serverTimestamp(), terminalRetry = isTerminalModerationAction(existingAction);
+    await setDoc(doc(db, "moderationActions", item.id), terminalRetry
+      ? moderationActionRetryPayload({ caseRecord: item, action, existingAction, requestedAt })
+      : moderationActionPayload({ caseRecord: item, action, requestedBy: adminUid, requestedAt }));
+    if (action === "deleteMaterial") evictModerationEvidence(item.id);
+    setStatus(terminalRetry ? "Material action queued for another attempt." : action === "restore" ? "Restore material queued." : "Permanent material deletion queued.");
+  } catch {
+    pendingModerationActions.delete(item.id);
+    setStatus("Could not queue that material action. No changes were made.", true);
+    renderReports();
+  }
+}
+
+async function banReportedUser(item, control) {
+  const user = reportUser(item);
+  const actionState = moderationActionState({ caseRecord: item, action: reportAction(item), deletionPending: reportDeletionPending(item), username: user?.username });
+  if (!user || actionState.ban.disabled || !canAdminSetBanned({ username: user.username, nextBanned: true, existingJob: reportDeletionPending(item), existingQueueState: reportDeletionPending(item) })) {
+    if (!user) setStatus("That reported account is no longer available.", true);
+    else if (isProtectedAdministrator(user.username)) setStatus("Protected administrator accounts cannot be banned.", true);
+    return;
+  }
+  control.disabled = true;
+  try {
+    await updateDoc(doc(db, "users", user.id), { banned: true });
+    setStatus("User banned.");
+  } catch {
+    setStatus("Could not update that account.", true);
+    renderReports();
+  }
+}
+
+function deleteReportedProfile(item, control) {
+  const user = reportUser(item);
+  const actionState = moderationActionState({ caseRecord: item, action: reportAction(item), deletionPending: reportDeletionPending(item), username: user?.username });
+  if (!user || actionState.deleteProfile.disabled || !canQueueAdminDeletion({ targetUid: user.id, username: user.username, existingJob: reportDeletionPending(item), existingQueueState: reportDeletionPending(item) })) {
+    if (!user) setStatus("That reported account is no longer available.", true);
+    else if (isProtectedAdministrator(user.username)) setStatus("Protected administrator accounts cannot be deleted.", true);
+    return;
+  }
+  openDeletionDialog(user, control);
+}
+
+function renderReportRow(item) {
+  const user = reportUser(item), protectedUser = Boolean(user && isProtectedAdministrator(user.username));
+  const actionState = moderationActionState({ caseRecord: item, action: reportAction(item), deletionPending: reportDeletionPending(item), username: user?.username });
+  const row = create("article", undefined, "admin-row"), info = create("div"), actions = create("div", undefined, "admin-actions");
+  const accountAvailable = Boolean(user);
+  const author = item.snapshot?.authorName || "Unknown user";
+  info.append(
+    create("strong", reportTypeLabel(item.targetKind)),
+    create("small", `Author: @${author}`),
+    create("small", `Reason: ${reportReasonLabel(item)}`),
+    create("small", `Reported: ${formatDate(item.createdAt ?? item.updatedAt)}`),
+    create("small", `Status: ${reportStatusLabel(item.status)}`),
+    create("small", item.preview, "report-preview")
+  );
+  const evidenceHost = create("div", undefined, "report-evidence");
+  const renderEvidence = media => {
+    evidenceHost.replaceChildren();
+    media.forEach(({ dataUrl, label }) => {
+      const image = create("img", undefined, "report-evidence-image");
+      image.src = dataUrl;
+      image.alt = label;
+      image.loading = "lazy";
+      image.decoding = "async";
+      evidenceHost.append(image);
+    });
+  };
+  if (item.snapshot?.mediaKinds?.length || item.snapshot?.media?.length) {
+    const loaded = loadedModerationEvidence.get(item.id);
+    if (loaded) renderEvidence(loaded);
+    else {
+      const loadEvidence = create("button", "Load protected image evidence", "admin-action");
+      loadEvidence.type = "button";
+      loadEvidence.onclick = async () => {
+        loadEvidence.disabled = true;
+        const loadEpoch = moderationEvidenceEpochs.get(item.id) || 0;
+        try {
+          const evidence = await getDoc(doc(db, "moderationCases", item.id, "evidence", "media"));
+          const media = moderationEvidenceMedia(evidence.exists() ? evidence.data() : item);
+          const stillVisible = state.moderationCases.some(entry => entry.id === item.id);
+          if (!listenersStarted || !pageActive || !stillVisible || moderationEvidenceEpochs.get(item.id) !== loadEpoch
+            || pendingModerationActions.get(item.id)?.action === "deleteMaterial") return;
+          loadedModerationEvidence.set(item.id, media); renderEvidence(media);
+          if (!media.length) evidenceHost.append(create("small", "Protected image evidence is unavailable.", "report-feedback"));
+        } catch { loadEvidence.disabled = false; setStatus("Could not load protected image evidence.", true); }
+      };
+      evidenceHost.append(loadEvidence);
+    }
+    info.append(evidenceHost);
+  }
+  if (actionState.feedback) info.append(create("small", actionState.feedback, "report-feedback"));
+  if (!user) info.append(create("small", "Reported account is no longer available.", "report-feedback"));
+  else if (protectedUser) info.append(create("small", "Protected administrator accounts cannot be changed.", "report-feedback"));
+  const restore = create("button", "Restore material", "admin-action restore");
+  restore.type = "button"; restore.dataset.focusKey = focusKey("report", "restore", item.id); restore.dataset.reportId = item.id; restore.disabled = actionState.restore.disabled;
+  restore.onclick = () => queueModerationAction(item, "restore", restore);
+  const removeMaterial = create("button", "Delete material permanently", "admin-action danger");
+  removeMaterial.type = "button"; removeMaterial.dataset.focusKey = focusKey("report", "delete-material", item.id); removeMaterial.dataset.reportId = item.id; removeMaterial.disabled = actionState.deleteMaterial.disabled;
+  removeMaterial.onclick = () => queueModerationAction(item, "deleteMaterial", removeMaterial);
+  const ban = create("button", "Ban user", "admin-action danger");
+  ban.type = "button"; ban.dataset.focusKey = focusKey("report", "ban", item.id); ban.dataset.reportId = item.id; ban.disabled = actionState.ban.disabled || !accountAvailable;
+  ban.onclick = () => banReportedUser(item, ban);
+  const removeProfile = create("button", "Delete user's profile", "admin-action danger");
+  removeProfile.type = "button"; removeProfile.dataset.focusKey = focusKey("report", "delete-profile", item.id); removeProfile.dataset.reportId = item.id; removeProfile.disabled = actionState.deleteProfile.disabled || !accountAvailable;
+  removeProfile.onclick = () => deleteReportedProfile(item, removeProfile);
+  actions.append(restore, removeMaterial, ban, removeProfile); row.append(info, actions); return row;
+}
+
+async function queueLegacyRoomAction(item, action, control) {
+  if (pendingLegacyRoomActions.has(item.id)) return;
+  pendingLegacyRoomActions.add(item.id); control.disabled = true;
+  try {
+    await addDoc(collection(db, "legacyRoomActions"), legacyRoomActionPayload({ roomId: item.id, action, requestedBy: adminUid, requestedAt: serverTimestamp() }));
+    setStatus("Legacy-room review action queued.");
+  } catch { pendingLegacyRoomActions.delete(item.id); control.disabled = false; setStatus("Could not queue the legacy-room action.", true); }
+}
+
+function renderLegacyRooms() {
+  const rows = state.legacyRooms.map(item => {
+    const row = create("article", undefined, "admin-row"), info = create("div"), actions = create("div", undefined, "admin-actions");
+    info.append(create("strong", `Room ${item.id}`), create("small", `Reason: ${item.reason || "invalid lifecycle timestamp"}`), create("small", `Attempts: ${item.attempts ?? 0}`), create("small", "Manual review required before cleanup or release."));
+    for (const [action, label, className] of [["retryCleanup", "Retry cleanup", ""], ["approveCleanup", "Approve cleanup", "danger"], ["release", "Release room", "restore"]]) {
+      const button = create("button", label, `admin-action ${className}`); button.type = "button"; button.disabled = pendingLegacyRoomActions.has(item.id);
+      button.onclick = () => queueLegacyRoomAction(item, action, button); actions.append(button);
+    }
+    row.append(info, actions); return row;
+  });
+  $("legacy-room-reviews").replaceChildren(...(rows.length ? rows : [empty("No legacy rooms require manual review.")]));
+}
+
+const reportStatuses = () => reportFilter === "open" ? ["open", "deleteQueued"] : reportFilter === "all"
+  ? ["open", "deleteQueued", "restored", "expiredEvidence"] : [reportFilter];
+function syncReportActionListeners() {
+  const visible = new Set(state.moderationCases.map(item => item.id));
+  for (const [id, unsubscribe] of reportActionUnsubs) if (!visible.has(id)) { unsubscribe(); reportActionUnsubs.delete(id); state.moderationActions.delete(id); }
+  for (const id of visible) if (!reportActionUnsubs.has(id)) reportActionUnsubs.set(id, onSnapshot(doc(db, "moderationActions", id), snapshot => {
+    if (snapshot.exists()) state.moderationActions.set(id, snapshot.data()); else state.moderationActions.delete(id);
+    if (snapshot.exists()) pendingModerationActions.delete(id); renderReports();
+  }, () => setStatus("Could not load a visible reported-material action.", true)));
+}
+function startReportQueue() {
+  reportCasesUnsub?.();
+  const constraints = [where("status", "in", reportStatuses()), orderBy("updatedAt", "desc")];
+  if (reportPageCursors.length) constraints.push(startAfter(reportPageCursors.at(-1)));
+  constraints.push(limit(reportPageSize));
+  const reportQuery = query(collection(db, "moderationCases"), ...constraints);
+  reportCasesUnsub = onSnapshot(reportQuery, snapshot => {
+    state.moderationCases = snapshot.docs.map(entry => moderationCaseRecord(entry.id, entry.data()));
+    const visibleIds = new Set(state.moderationCases.map(item => item.id));
+    for (const id of loadedModerationEvidence.keys()) if (!visibleIds.has(id)) evictModerationEvidence(id);
+    reportPageLast = snapshot.docs.at(-1) ?? null;
+    syncReportActionListeners(); renderReports();
+    $("admin-reports-load-more").hidden = snapshot.size < reportPageSize;
+    $("admin-reports-previous").hidden = reportPageCursors.length === 0;
+  }, () => setStatus("Could not load the reported-material queue.", true));
+}
+function startLegacyRoomQueue() {
+  legacyRoomsUnsub?.();
+  const constraints = [where("status", "==", "manualReview"), orderBy("terminalAt", "desc")];
+  if (legacyRoomPageCursors.length) constraints.push(startAfter(legacyRoomPageCursors.at(-1)));
+  constraints.push(limit(legacyRoomPageSize));
+  legacyRoomsUnsub = onSnapshot(query(collection(db, "legacyRoomQuarantine"), ...constraints), snapshot => {
+    state.legacyRooms = records(snapshot); legacyRoomPageLast = snapshot.docs.at(-1) ?? null;
+    pendingLegacyRoomActions.clear(); renderLegacyRooms();
+    $("legacy-rooms-older").hidden = snapshot.size < legacyRoomPageSize;
+    $("legacy-rooms-newer").hidden = legacyRoomPageCursors.length === 0;
+  }, () => setStatus("Could not load legacy-room manual reviews.", true));
+}
+
+function renderReports(intendedFocus) {
+  const activeFocus = intendedFocus || reportFocus();
+  const reports = filterModerationCases(state.moderationCases, { filter: reportFilter });
+  $("admin-reports").replaceChildren(...(reports.length ? reports.map(renderReportRow) : [empty("No reported material matches this view.")]));
+  restoreReportFocus(activeFocus);
+}
+
 function renderContent() {
   const needle = $("admin-content-search").value.trim().toLowerCase(), type = $("admin-content-type").value;
   const content = [...state.posts.map(entry => ({ ...entry, type: "timeline" })), ...state.communityPosts.map(entry => ({ ...entry, type: "community" }))]
@@ -99,8 +322,28 @@ function renderContent() {
     const row = create("article", undefined, "admin-row"), info = create("div"), actions = create("div", undefined, "admin-actions");
     info.append(create("strong", `@${entry.username || "Unknown user"} · ${entry.type === "community" ? entry.category || "Community" : "Timeline"}`), create("small", String(entry.content || "Photo post").slice(0, 240)), create("small", formatDate(entry.createdAt)));
     const open = create("a", "View", "admin-action nav-button"); open.href = entry.type === "community" ? "community.html" : `timeline.html#post-${entry.id}`;
-    const remove = create("button", "Delete", "admin-action danger"); remove.type = "button";
-    remove.onclick = async () => { if (!window.confirm("Delete this public content? This cannot be undone.")) return; remove.disabled = true; try { await deleteDoc(doc(db, entry.type === "community" ? "communityPosts" : "posts", entry.id)); setStatus("Content deleted."); } catch { setStatus("Could not delete that content.", true); remove.disabled = false; } };
+    const deletion = generalContentDeletionPayloads({ id: entry.id, type: entry.type, authorId: entry.authorId, requestedBy: adminUid, requestedAt: serverTimestamp() });
+    const existingCase = state.moderationCases.find(item => item.id === deletion.id), existingAction = state.moderationActions.get(deletion.id);
+    const writeMode = generalContentDeletionWriteMode({ caseExists: Boolean(existingCase), actionExists: Boolean(existingAction) });
+    const queued = existingCase?.status === "deleteQueued" || ["queued", "processing", "failed"].includes(existingAction?.status);
+    const remove = create("button", queued ? "Deletion queued" : writeMode === "blocked" ? "Review moderation case" : "Delete", "admin-action danger");
+    remove.type = "button"; remove.disabled = queued || writeMode === "blocked";
+    remove.onclick = async () => {
+      if (!window.confirm("Queue permanent deletion of this public content and all descendants?")) return;
+      remove.disabled = true; remove.textContent = "Queueing deletion…";
+      try {
+        const timestamp = serverTimestamp();
+        const payloads = generalContentDeletionPayloads({ id: entry.id, type: entry.type, authorId: entry.authorId, requestedBy: adminUid, requestedAt: timestamp });
+        if (writeMode === "action-only") await setDoc(doc(db, "moderationActions", payloads.id), payloads.action);
+        else {
+          const batch = writeBatch(db);
+          batch.set(doc(db, "moderationCases", payloads.id), payloads.moderationCase);
+          batch.set(doc(db, "moderationActions", payloads.id), payloads.action);
+          await batch.commit();
+        }
+        remove.textContent = "Deletion queued"; setStatus("Permanent content deletion queued. The trusted processor will remove descendants.");
+      } catch { setStatus("Could not queue that content deletion.", true); remove.textContent = "Delete"; remove.disabled = false; }
+    };
     actions.append(open, remove); row.append(info, actions); return row;
   }) : [empty("No public content matches this search.")]));
 }
@@ -147,7 +390,7 @@ function renderProcessorHealth() {
   $("processor-health").className = `status-${health.kind}`;
 }
 
-function renderAll() { renderMetrics(); renderUsers(); renderContent(); renderAnalytics(); }
+function renderAll() { renderMetrics(); renderUsers(); renderReports(); renderContent(); renderAnalytics(); }
 function updateDialogConfirmation() { $("delete-account-confirm").disabled = !canConfirmDeletion({ typedUsername: $("delete-account-confirmation").value, targetUsername: dialogTarget?.username, blocked: !dialogState.open || dialogState.submitting || state.jobs.has(dialogTarget?.id) }); }
 function openDeletionDialog(user, trigger) {
   if (state.jobs.has(user.id)) { setStatus("That account is already locked for permanent deletion.", true); return; }
@@ -188,7 +431,7 @@ function handleJobSnapshot(snapshot) {
     if (dialogState.submitting && job.hasPendingWrites) $("delete-account-dialog-status").textContent = "Waiting for the deletion request to be confirmed…";
     else closeForConfirmedJob(job);
   }
-  renderMetrics(); renderUsers(); renderAnalytics(); updateDialogConfirmation();
+  renderMetrics(); renderUsers(); renderReports(); renderAnalytics(); updateDialogConfirmation();
 }
 function observe(ref, key, onData, transform = records) {
   unsubs.push(onSnapshot(ref, snapshot => { state[key] = transform(snapshot); onData(); }, () => setStatus("Could not load live dashboard data.", true)));
@@ -196,19 +439,23 @@ function observe(ref, key, onData, transform = records) {
 function startLiveData() {
   if (!pageActive || !adminUid || listenersStarted) return;
   listenersStarted = true;
-  observe(collection(db, "users"), "users", () => { renderMetrics(); renderUsers(); renderAnalytics(); });
+  observe(collection(db, "users"), "users", () => { renderMetrics(); renderUsers(); renderReports(); renderAnalytics(); });
   observe(query(collection(db, "posts"), orderBy("createdAt", "desc")), "posts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
   observe(query(collection(db, "communityPosts"), orderBy("createdAt", "desc")), "communityPosts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
   observe(collection(db, "pageViews"), "views", renderAnalytics); observe(collectionGroup(db, "comments"), "comments", renderAnalytics); observe(collectionGroup(db, "reactions"), "reactions", renderAnalytics);
   observe(collection(db, "follows"), "follows", renderAnalytics); observe(collection(db, "circles"), "circles", renderAnalytics); observe(collection(db, "circleMembers"), "members", renderAnalytics);
   observe(collection(db, "rooms"), "rooms", renderAnalytics); observe(collection(db, "roomMessages"), "roomMessages", renderAnalytics); observe(collection(db, "communityVotes"), "votes", () => { renderMetrics(); renderAnalytics(); });
+  startReportQueue();
+  startLegacyRoomQueue();
   unsubs.push(onSnapshot(collection(db, "adminDeletionJobs"), handleJobSnapshot, () => setStatus("Could not load live deletion status.", true)));
   unsubs.push(onSnapshot(doc(db, "system", "deletionProcessor"), snapshot => { state.processor = snapshot.exists() ? snapshot.data() : null; renderProcessorHealth(); }, () => { state.processor = null; renderProcessorHealth(); }));
   heartbeatTimer = window.setInterval(renderProcessorHealth, 60 * 1000);
 }
-function stopLiveData() { while (unsubs.length) unsubs.pop()(); if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer); heartbeatTimer = null; listenersStarted = false; }
+function stopLiveData() { while (unsubs.length) unsubs.pop()(); reportCasesUnsub?.(); reportCasesUnsub = null; legacyRoomsUnsub?.(); legacyRoomsUnsub = null; for (const unsubscribe of reportActionUnsubs.values()) unsubscribe(); reportActionUnsubs.clear(); for (const id of loadedModerationEvidence.keys()) evictModerationEvidence(id); if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer); heartbeatTimer = null; listenersStarted = false; }
 
-$("admin-user-search").oninput = renderUsers; $("admin-content-search").oninput = renderContent; $("admin-content-type").onchange = renderContent; $("metric-window").onchange = () => { renderMetrics(); renderAnalytics(); };
+$("admin-user-search").oninput = renderUsers; $("admin-report-status").onchange = () => { reportFilter = $("admin-report-status").value; reportPageCursors.length = 0; startReportQueue(); }; $("admin-reports-load-more").onclick = () => { if (reportPageLast) { reportPageCursors.push(reportPageLast); startReportQueue(); } }; $("admin-reports-previous").onclick = () => { reportPageCursors.pop(); startReportQueue(); }; $("admin-content-search").oninput = renderContent; $("admin-content-type").onchange = renderContent; $("metric-window").onchange = () => { renderMetrics(); renderAnalytics(); };
+$("legacy-rooms-older").onclick = () => { if (legacyRoomPageLast) { legacyRoomPageCursors.push(legacyRoomPageLast); startLegacyRoomQueue(); } };
+$("legacy-rooms-newer").onclick = () => { legacyRoomPageCursors.pop(); startLegacyRoomQueue(); };
 document.querySelectorAll("[data-user-filter]").forEach(button => { button.onclick = () => { userFilter = button.dataset.userFilter; document.querySelectorAll("[data-user-filter]").forEach(item => item.setAttribute("aria-pressed", String(item === button))); renderUsers(); }; });
 $("refresh-admin").onclick = () => { renderAll(); setStatus("Dashboard recalculated from live data."); }; $("admin-sign-out").onclick = async () => {
   await exitAuthenticatedSession({
@@ -218,7 +465,7 @@ $("refresh-admin").onclick = () => { renderAll(); setStatus("Dashboard recalcula
   });
 };
 $("delete-account-confirmation").oninput = updateDialogConfirmation; $("delete-account-confirm").onclick = queueDeletion;
-$("delete-account-dialog").addEventListener("close", () => { const fallback = $("admin-user-search"), trigger = dialogTrigger?.node?.isConnected ? dialogTrigger.node : controlByFocusKey(dialogTrigger?.focusKey); (trigger || fallback).focus(); dialogTrigger = null; });
+$("delete-account-dialog").addEventListener("close", () => { const fallback = dialogTrigger?.focusKey?.startsWith("report-") ? $("admin-report-status") : $("admin-user-search"), trigger = dialogTrigger?.node?.isConnected ? dialogTrigger.node : controlByFocusKey(dialogTrigger?.focusKey); (trigger || fallback).focus(); dialogTrigger = null; });
 window.addEventListener("pagehide", () => { pageActive = false; stopLiveData(); }); window.addEventListener("pageshow", () => { pageActive = true; startLiveData(); });
 
 onAuthStateChanged(auth, async user => {

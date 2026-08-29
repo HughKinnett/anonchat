@@ -14,6 +14,7 @@ import {
   TERMINAL_NOTIFICATION_STATUSES,
   timestampMillis
 } from "./notification-policy.mjs";
+import { blockId } from "./moderation-policy.mjs";
 
 const PROCESSOR_PATH = "system/notificationProcessor";
 const SOURCE_COLLECTIONS = Object.freeze({
@@ -161,6 +162,32 @@ export class FirestoreNotificationAdapter {
       this.db.collection("accountDeletionRequests").doc(uid).get()
     ]);
     return profile.exists && profile.data().banned !== true && !adminDeletion.exists && !selfDeletion.exists;
+  }
+
+  async pairBlocked(left, right) {
+    if (typeof left !== "string" || !left || typeof right !== "string" || !right || left === right) return false;
+    const snapshots = await this.db.getAll(
+      this.db.collection("blocks").doc(blockId(left, right)),
+      this.db.collection("blocks").doc(blockId(right, left))
+    );
+    return snapshots.some((snapshot) => snapshot.exists);
+  }
+
+  async unblockedRecipients(actorUid, recipientUids) {
+    const recipients = [...new Set(recipientUids)]
+      .filter((uid) => typeof uid === "string" && uid && uid !== actorUid)
+      .slice(0, ACCOUNT_LIMIT - 1);
+    if (typeof actorUid !== "string" || !actorUid || !recipients.length) return [];
+    const blocks = this.db.collection("blocks");
+    const [outgoing, incoming] = await Promise.all([
+      blocks.where("blockerUid", "==", actorUid).limit(ACCOUNT_LIMIT).get(),
+      blocks.where("blockedUid", "==", actorUid).limit(ACCOUNT_LIMIT).get()
+    ]);
+    const blocked = new Set([
+      ...outgoing.docs.map((document) => document.data().blockedUid),
+      ...incoming.docs.map((document) => document.data().blockerUid)
+    ]);
+    return recipients.filter((uid) => !blocked.has(uid));
   }
 
   async createEvent(eventId, data) {
@@ -378,7 +405,7 @@ export class FirestoreNotificationAdapter {
     });
   }
 
-  async suppressEvent(eventId, token) {
+  async suppressEvent(eventId, token, errorCode = "RECIPIENT_UNAVAILABLE") {
     await this.db.runTransaction(async (transaction) => {
       const reference = this.eventRef(eventId);
       const snapshot = await transaction.get(reference);
@@ -388,7 +415,7 @@ export class FirestoreNotificationAdapter {
         snapshot.data(),
         "suppressed",
         this.timestamp(this.now()),
-        "RECIPIENT_UNAVAILABLE"
+        errorCode
       ));
     });
   }

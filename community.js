@@ -1,20 +1,31 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
+import { createModerationClient } from "./moderation-client.mjs";
+import { isRoomActive, roomExpiry } from "./moderation-policy.mjs";
+import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
+import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
+import { createViewerBlockTracker, isBlockedActor } from "./viewer-block-policy.mjs";
+import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  addDoc, collection, doc, getDoc, onSnapshot, orderBy, query,
-  serverTimestamp, setDoc, Timestamp, updateDoc, where
+  addDoc, collection, deleteDoc, doc, documentId, getDoc, onSnapshot, orderBy, query,
+  serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = (id) => document.getElementById(id);
 const state = {
   user: null, profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
   roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
-  messages: [], reveals: [], preferences: null, activeRoom: ""
+  messages: [], reveals: [], preferences: null, activeRoom: "",
+  blockTracker: createViewerBlockTracker(), viewerBlocks: null, moderation: null
 };
+state.viewerBlocks = state.blockTracker.current();
 const listeners = [];
+const sessionGeneration = createSessionGeneration();
+let activeCommunitySession = 0;
+let clearRoomExpiryTimer = () => {};
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
   $("status").classList.toggle("danger", error);
@@ -23,8 +34,21 @@ const setRequestStatus = (text, error = false) => {
   $("request-status").textContent = text;
   $("request-status").classList.toggle("danger", error);
 };
-const userName = (uid) => state.users.find((entry) => entry.id === uid)?.data().username || "anonymous";
+const userName = (uid) => !isBlockedUid(uid)
+  ? state.users.find((entry) => entry.id === uid)?.data().username || "anonymous"
+  : "anonymous";
 const now = () => Date.now();
+const isBlockedUid = (uid) => isBlockedActor(uid, state.viewerBlocks);
+const activeRoom = (roomId = state.activeRoom) => state.rooms.find((room) => room.id === roomId);
+const roomIsAvailable = (room) => room && isRoomActive(room.data(), now()) && !isBlockedUid(room.data().ownerId);
+const scheduleActiveRoomExpiry = () => {
+  clearRoomExpiryTimer();
+  const room = activeRoom();
+  clearRoomExpiryTimer = scheduleExpiryBoundary({
+    expiries: [room?.data().expiresAt], nowMillis: now(),
+    onBoundary: () => { renderRooms(); renderRoomMessages(); }
+  });
+};
 const aggressive = /\b(fuck|bitch|kill|hate|stupid|idiot|dumb|worthless|shut up)\b/i;
 const safeToSend = (text) => !state.preferences?.contextCheck || !aggressive.test(text) ||
   window.confirm("This may come across as aggressive. Do you want to send it as written?");
@@ -48,7 +72,7 @@ selectPanel(location.hash.slice(1));
 $("sign-out").addEventListener("click", async () => {
   await exitAuthenticatedSession({
     user: state.user,
-    stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+    stopListeners: invalidateCommunitySession,
     redirect: () => location.replace("index.html")
   });
 });
@@ -81,7 +105,12 @@ const aliasFor = (roomId) => {
 
 const joinedRoom = (roomId) => state.roomMemberships.some((member) => member.id === `${roomId}_${state.user.uid}`);
 const renderRooms = () => {
-  $("room-list").replaceChildren(...state.rooms.map((room) => {
+  if (!state.viewerBlocks.ready) {
+    $("room-list").replaceChildren();
+    return;
+  }
+  const rooms = state.rooms.filter((room) => roomIsAvailable(room)).sort(compareNewestFirst);
+  $("room-list").replaceChildren(...rooms.map((room) => {
     const data = room.data();
     const card = document.createElement("article");
     card.className = "list-card card-row";
@@ -102,6 +131,15 @@ const renderRooms = () => {
 };
 
 const openRoom = async (id, name) => {
+  const room = activeRoom(id);
+  if (!room || !isRoomActive(room.data(), now())) {
+    setStatus("Room expired.", true);
+    return;
+  }
+  if (isBlockedUid(room.data().ownerId)) {
+    setStatus("Could not join a blocked room.", true);
+    return;
+  }
   try {
     await setDoc(doc(db, "roomMembers", `${id}_${state.user.uid}`), {
       roomId: id, uid: state.user.uid, joinedAt: serverTimestamp()
@@ -114,18 +152,36 @@ const openRoom = async (id, name) => {
   $("room-title").textContent = name;
   $("room-alias").textContent = `You are ${aliasFor(id)}`;
   renderRoomMessages();
+  scheduleActiveRoomExpiry();
   $("room-dialog").showModal();
 };
 
 $("room-dialog").querySelector(".dialog-close").addEventListener("click", () => {
   $("room-dialog").close();
   state.activeRoom = "";
+  clearRoomExpiryTimer();
+  clearRoomExpiryTimer = () => {};
 });
 
 const renderRoomMessages = () => {
+  if (!state.viewerBlocks.ready) {
+    $("room-message-form").hidden = true;
+    $("room-messages").replaceChildren();
+    return;
+  }
+  const room = activeRoom();
+  const expired = !room || !isRoomActive(room.data(), now());
+  const form = $("room-message-form");
+  form.hidden = expired;
+  if (expired && state.activeRoom) {
+    $("room-title").textContent = "Room expired";
+    $("room-alias").textContent = "This temporary room is no longer active.";
+  }
   const messages = state.roomMessages.filter((message) =>
-    message.data().roomId === state.activeRoom && message.data().expiresAt?.toMillis?.() > now()
-  );
+    message.data().roomId === state.activeRoom
+    && message.data().expiresAt?.toMillis?.() > now()
+    && !isBlockedUid(message.data().senderId)
+  ).sort(compareOldestFirst);
   $("room-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
     const item = document.createElement("div");
@@ -135,9 +191,49 @@ const renderRoomMessages = () => {
     const text = document.createElement("span");
     text.textContent = data.text;
     item.append(sender, text);
+    if (data.senderId !== state.user.uid) item.append(reportRoomMessage(message));
     return item;
   }));
   $("room-messages").scrollTop = $("room-messages").scrollHeight;
+  scheduleActiveRoomExpiry();
+};
+
+const reportRoomMessage = (message) => {
+  const controls = document.createElement("div");
+  controls.className = "message-report";
+  const reason = document.createElement("select");
+  reason.setAttribute("aria-label", "Report reason");
+  ["harassment", "hate-threats", "sexual-content", "spam-scam", "privacy-impersonation", "other"].forEach((value) =>
+    reason.append(new Option(value.replaceAll("-", " "), value))
+  );
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary report-button";
+  button.textContent = "Report";
+  button.setAttribute("aria-label", `Report message by ${message.data().tempName}`);
+  const status = document.createElement("span");
+  status.role = "status";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "Reporting…";
+    const target = {
+      targetKind: "roomMessage", targetCollection: "roomMessages", targetId: message.id,
+      targetPath: `roomMessages/${message.id}`, reportedUserId: message.data().senderId
+    };
+    try {
+      if (await state.moderation.hasReported(target)) throw Object.assign(new Error("already reported"), { code: "already-reported" });
+      await state.moderation.report(target, reason.value);
+      status.textContent = "Reported.";
+      reason.disabled = true;
+      button.textContent = "Reported";
+    } catch (error) {
+      const duplicate = error?.code === "already-reported";
+      status.textContent = duplicate ? "Already reported." : "Could not report. Try again.";
+      button.disabled = duplicate;
+    }
+  });
+  controls.append(reason, button, status);
+  return controls;
 };
 
 $("room-form").addEventListener("submit", async (event) => {
@@ -145,7 +241,8 @@ $("room-form").addEventListener("submit", async (event) => {
   try {
     const made = await addDoc(collection(db, "rooms"), {
       name: $("room-name").value.trim(), topic: $("room-topic").value.trim(),
-      ownerId: state.user.uid, createdAt: serverTimestamp()
+      ownerId: state.user.uid, expiresAt: Timestamp.fromMillis(roomExpiry(now())),
+      moderationState: "visible", createdAt: serverTimestamp()
     });
     await setDoc(doc(db, "roomMembers", `${made.id}_${state.user.uid}`), {
       roomId: made.id, uid: state.user.uid, joinedAt: serverTimestamp()
@@ -161,10 +258,20 @@ $("room-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = $("room-message").value.trim();
   if (!text || !safeToSend(text)) return;
+  const room = activeRoom();
+  if (!room || !isRoomActive(room.data(), now())) {
+    setStatus("Room expired.", true);
+    renderRoomMessages();
+    return;
+  }
+  if (isBlockedUid(room.data().ownerId)) {
+    setStatus("Could not send to a blocked room.", true);
+    return;
+  }
   try {
     await addDoc(collection(db, "roomMessages"), {
       roomId: state.activeRoom, senderId: state.user.uid, tempName: aliasFor(state.activeRoom), text,
-      expiresAt: Timestamp.fromMillis(now() + 86400000), createdAt: serverTimestamp()
+      expiresAt: room.data().expiresAt, moderationState: "visible", createdAt: serverTimestamp()
     });
     event.target.reset();
   } catch {
@@ -173,11 +280,12 @@ $("room-message-form").addEventListener("submit", async (event) => {
 });
 
 const requestFor = (other) => state.requests.find((request) =>
+  !isBlockedUid(other) &&
   [request.data().fromId, request.data().toId].includes(state.user.uid) &&
   [request.data().fromId, request.data().toId].includes(other)
 );
 const acceptedUsers = () => state.users.filter((user) =>
-  user.id !== state.user.uid && requestFor(user.id)?.data().status === "accepted"
+  user.id !== state.user.uid && !isBlockedUid(user.id) && requestFor(user.id)?.data().status === "accepted"
 );
 
 const createMessageRequest = (to) => {
@@ -188,12 +296,25 @@ const createMessageRequest = (to) => {
 };
 
 const renderMessageUsers = () => {
+  if (!state.viewerBlocks.ready) {
+    $("message-user").replaceChildren();
+    $("conversation-user").replaceChildren();
+    $("direct-message-form").hidden = true;
+    renderRequestAction();
+    renderDirectMessages();
+    renderReveals();
+    return;
+  }
   const selectedUser = $("message-user").value;
-  const others = state.users.filter((user) => user.id !== state.user.uid);
+  const selectedConversation = $("conversation-user").value;
+  const others = state.users.filter((user) => user.id !== state.user.uid && !isBlockedUid(user.id));
+  const accepted = acceptedUsers();
   $("message-user").replaceChildren(...others.map((user) => new Option(`@${user.data().username}`, user.id)));
   if (others.some((user) => user.id === selectedUser)) $("message-user").value = selectedUser;
-  $("conversation-user").replaceChildren(...acceptedUsers().map((user) => new Option(`@${user.data().username}`, user.id)));
-  $("direct-message-form").hidden = !acceptedUsers().length;
+  $("conversation-user").replaceChildren(...accepted.map((user) => new Option(`@${user.data().username}`, user.id)));
+  if (accepted.some((user) => user.id === selectedConversation)) $("conversation-user").value = selectedConversation;
+  if (selectedConversation && isBlockedUid(selectedConversation)) setStatus("This conversation is unavailable because of a block.");
+  $("direct-message-form").hidden = !accepted.length;
   renderRequestAction();
   renderDirectMessages();
   renderReveals();
@@ -201,7 +322,7 @@ const renderMessageUsers = () => {
 
 const renderRequestAction = ({ preserveStatus = false } = {}) => {
   const to = $("message-user").value;
-  if (!state.requestsLoaded) {
+  if (!state.viewerBlocks.ready || !state.requestsLoaded) {
     $("request-chat").textContent = "Loading requests…";
     $("request-chat").disabled = true;
     $("request-chat").setAttribute("aria-busy", "true");
@@ -224,6 +345,11 @@ $("request-chat").addEventListener("click", async () => {
   const to = $("message-user").value;
   if (!to) {
     setRequestStatus("Choose a user to request a conversation.", true);
+    return;
+  }
+  if (isBlockedUid(to)) {
+    setRequestStatus("This conversation is unavailable because of a block.", true);
+    renderMessageUsers();
     return;
   }
   const existing = requestFor(to);
@@ -277,8 +403,13 @@ $("request-chat").addEventListener("click", async () => {
 });
 
 const renderRequests = () => {
+  if (!state.viewerBlocks.ready) {
+    $("request-list").replaceChildren();
+    return;
+  }
   const incoming = state.requests.filter((request) =>
     request.data().toId === state.user.uid && request.data().status === "pending"
+    && !isBlockedUid(request.data().fromId)
   );
   $("request-list").replaceChildren(...incoming.map((request) => {
     const card = document.createElement("div");
@@ -321,10 +452,15 @@ $("conversation-user").addEventListener("change", () => {
 });
 
 const renderDirectMessages = () => {
+  if (!state.viewerBlocks.ready) {
+    $("direct-messages").replaceChildren();
+    return;
+  }
   const other = $("conversation-user").value;
   const messages = state.messages.filter((message) =>
     message.data().participants.includes(state.user.uid) && message.data().participants.includes(other)
-  );
+    && !isBlockedUid(message.data().senderId)
+  ).sort(compareOldestFirst);
   $("direct-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
     const item = document.createElement("div");
@@ -344,6 +480,10 @@ $("direct-message-form").addEventListener("submit", async (event) => {
   const other = $("conversation-user").value;
   const text = $("direct-message").value.trim();
   if (!other || !text || !safeToSend(text)) return;
+  if (isBlockedUid(other)) {
+    setStatus("Could not send to a blocked user.", true);
+    return;
+  }
   try {
     await addDoc(collection(db, "directMessages"), {
       participants: [state.user.uid, other].sort(), senderId: state.user.uid, text, createdAt: serverTimestamp()
@@ -356,7 +496,7 @@ $("direct-message-form").addEventListener("submit", async (event) => {
 
 $("send-reveal").addEventListener("click", async () => {
   const to = $("conversation-user").value;
-  if (!to) return;
+  if (!to || isBlockedUid(to)) return;
   const fields = {
     interests: $("reveal-interests").checked,
     region: $("reveal-region").checked,
@@ -378,6 +518,10 @@ $("send-reveal").addEventListener("click", async () => {
 
 const renderReveals = () => {
   const other = $("conversation-user").value;
+  if (!state.viewerBlocks.ready || !other || isBlockedUid(other)) {
+    $("reveal-status").replaceChildren();
+    return;
+  }
   const incoming = state.reveals.find((entry) => entry.data().fromId === other && entry.data().toId === state.user.uid);
   const outgoing = state.reveals.find((entry) => entry.data().fromId === state.user.uid && entry.data().toId === other);
   const box = $("reveal-status");
@@ -433,11 +577,26 @@ const loadPrivacy = () => {
   $("privacy-age").value = state.privateDetails.ageRange || "";
 };
 
+const refreshViewerBlocks = () => {
+  state.viewerBlocks = state.blockTracker.current();
+  if (state.activeRoom && !roomIsAvailable(activeRoom())) {
+    state.activeRoom = "";
+    if ($("room-dialog").open) $("room-dialog").close();
+  }
+  renderRooms();
+  renderRoomMessages();
+  renderMessageUsers();
+  renderRequests();
+  renderReveals();
+};
+
 $("download-data").addEventListener("click", () => {
   const data = {
     profile: { username: state.profile.username }, preferences: state.preferences,
     rooms: state.roomMemberships.map((membership) => membership.data()),
-    messages: state.messages.map((message) => message.data())
+    messages: state.messages.filter((message) =>
+      !isBlockedUid(message.data().participants.find((uid) => uid !== state.user.uid))
+    ).map((message) => message.data())
   };
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
@@ -446,22 +605,62 @@ $("download-data").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(anchor.href), 5000);
 });
 
-const listen = (reference, key, render) => listeners.push(onSnapshot(reference, (snapshot) => {
-  state[key] = snapshot.docs;
-  render?.();
-}, () => setStatus("A community section could not load.", true)));
+const stopCommunityResources = () => {
+  listeners.splice(0).forEach((unsubscribe) => unsubscribe());
+  clearRoomExpiryTimer();
+  clearRoomExpiryTimer = () => {};
+  state.moderation?.destroy();
+  Object.assign(state, {
+    profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
+    roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
+    messages: [], reveals: [], preferences: null, activeRoom: "", moderation: null
+  });
+  state.blockTracker.reset(state.user?.uid);
+  state.viewerBlocks = state.blockTracker.current();
+  if ($("room-dialog").open) $("room-dialog").close();
+  $("identity-card").replaceChildren();
+  loadPrivacy();
+  renderRooms();
+  renderRoomMessages();
+  renderMessageUsers();
+  renderRequests();
+  renderReveals();
+};
+
+const invalidateCommunitySession = () => {
+  sessionGeneration.invalidate();
+  stopCommunityResources();
+};
 
 onAuthStateChanged(auth, async (user) => {
+  activeCommunitySession = sessionGeneration.begin(user?.uid);
+  const session = activeCommunitySession;
+  const sessionIsCurrent = () => sessionGeneration.isCurrent(session, user?.uid);
+  stopCommunityResources();
   if (!user) {
+    state.user = null;
+    stopCommunityResources();
     await exitAfterAuthLoss({ redirect: () => location.replace("index.html") });
     return;
   }
   state.user = user;
+  state.blockTracker = createViewerBlockTracker(user.uid);
+  state.viewerBlocks = state.blockTracker.current();
+  const listenForSession = (reference, next, failed) => listeners.push(onSnapshot(
+    reference,
+    (snapshot) => { if (sessionIsCurrent()) next(snapshot); },
+    (error) => { if (sessionIsCurrent()) failed?.(error); }
+  ));
+  const listen = (reference, key, render) => listenForSession(reference, (snapshot) => {
+    state[key] = snapshot.docs;
+    render?.();
+  }, () => setStatus("A community section could not load.", true));
   const profile = await getDoc(doc(db, "users", user.uid));
+  if (!sessionIsCurrent()) return;
   if (!profile.exists() || profile.data().banned) {
     await exitAuthenticatedSession({
       user,
-      stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+      stopListeners: invalidateCommunitySession,
       redirect: () => location.replace("index.html")
     });
     return;
@@ -475,13 +674,42 @@ onAuthStateChanged(auth, async (user) => {
     firestore: { doc, updateDoc, serverTimestamp }
   });
   const privateSnapshot = await getDoc(doc(db, "userPrivate", user.uid));
+  if (!sessionIsCurrent()) return;
   state.privateDetails = privateSnapshot.exists() ? privateSnapshot.data() : {};
   loadPrivacy();
   renderIdentity();
 
   listen(collection(db, "users"), "users", () => { renderMessageUsers(); renderRequests(); });
-  listen(query(collection(db, "rooms"), orderBy("createdAt", "desc")), "rooms", renderRooms);
-  listen(query(collection(db, "roomMessages"), orderBy("createdAt", "asc")), "roomMessages", renderRoomMessages);
+  state.moderation = createModerationClient({
+    db, currentUid: user.uid, timestamp: serverTimestamp,
+    firestore: { deleteDoc, doc, getDoc, setDoc, writeBatch }
+  });
+  listenForSession(
+    query(collection(db, "blocks"), where("blockerUid", "==", user.uid)),
+    (snapshot) => {
+      state.viewerBlocks = state.blockTracker.update("outgoing", snapshot.docs);
+      refreshViewerBlocks();
+    },
+    () => {
+      state.viewerBlocks = state.blockTracker.fail("outgoing");
+      refreshViewerBlocks();
+      setStatus("Could not load block preferences.", true);
+    }
+  );
+  listenForSession(
+    query(collection(db, "blocks"), where("blockedUid", "==", user.uid)),
+    (snapshot) => {
+      state.viewerBlocks = state.blockTracker.update("incoming", snapshot.docs);
+      refreshViewerBlocks();
+    },
+    () => {
+      state.viewerBlocks = state.blockTracker.fail("incoming");
+      refreshViewerBlocks();
+      setStatus("Could not load block preferences.", true);
+    }
+  );
+  listen(query(collection(db, "rooms"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), orderBy(documentId())), "rooms", renderRooms);
+  listen(query(collection(db, "roomMessages"), where("moderationState", "==", "visible"), orderBy("createdAt", "asc"), orderBy(documentId())), "roomMessages", renderRoomMessages);
   listen(query(collection(db, "roomMembers"), where("uid", "==", user.uid)), "roomMemberships", renderRooms);
 
   const mergePrivate = (key, firstQuery, secondQuery, render, onReady) => {
@@ -494,8 +722,8 @@ onAuthStateChanged(auth, async (user) => {
       render();
       if (firstReady && secondReady) onReady?.();
     };
-    listeners.push(onSnapshot(firstQuery, (snapshot) => { first = snapshot.docs; firstReady = true; merge(); }, () => setStatus("A private section could not load.", true)));
-    listeners.push(onSnapshot(secondQuery, (snapshot) => { second = snapshot.docs; secondReady = true; merge(); }, () => setStatus("A private section could not load.", true)));
+    listenForSession(firstQuery, (snapshot) => { first = snapshot.docs; firstReady = true; merge(); }, () => setStatus("A private section could not load.", true));
+    listenForSession(secondQuery, (snapshot) => { second = snapshot.docs; secondReady = true; merge(); }, () => setStatus("A private section could not load.", true));
   };
   mergePrivate(
     "requests",
@@ -511,8 +739,17 @@ onAuthStateChanged(auth, async (user) => {
     query(collection(db, "reveals"), where("toId", "==", user.uid)),
     renderReveals
   );
-  listeners.push(onSnapshot(doc(db, "userPreferences", user.uid), (snapshot) => {
+  listenForSession(doc(db, "userPreferences", user.uid), (snapshot) => {
     state.preferences = snapshot.exists() ? snapshot.data() : { contextCheck: true, mutedKeywords: [] };
     loadPrivacy();
-  }));
+  });
 });
+
+addEventListener("pagehide", (event) => {
+  clearRoomExpiryTimer();
+  if (!event.persisted) {
+    sessionGeneration.invalidate();
+    stopCommunityResources();
+  }
+});
+addEventListener("pageshow", (event) => { if (event.persisted) scheduleActiveRoomExpiry(); });

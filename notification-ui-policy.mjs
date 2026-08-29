@@ -51,6 +51,7 @@ export const buildInAppNotifications = ({
   messageRequests = [],
   roomMessages = [],
   roomMemberships = [],
+  blockedUids = [],
   reveals = [],
   nowMillis = Date.now()
 }) => {
@@ -60,30 +61,32 @@ export const buildInAppNotifications = ({
     return data.type !== "repost" && data.authorId === currentUid;
   }).map((post) => post.id));
   const joinedRoomIds = new Set(roomMemberships.map((membership) => dataOf(membership).roomId));
+  const blocked = new Set(blockedUids);
   const items = [];
   reactions.forEach((reaction) => {
     const data = dataOf(reaction);
     const postId = sourceParentId(reaction);
-    if (data.uid !== currentUid && ownedPostIds.has(postId)) items.push(item("reaction", reaction, { postId }));
+    if (data.uid !== currentUid && !blocked.has(data.uid) && ownedPostIds.has(postId)) items.push(item("reaction", reaction, { postId }));
   });
   comments.forEach((comment) => {
     const data = dataOf(comment);
     const postId = sourceParentId(comment);
-    if (data.uid !== currentUid && ownedPostIds.has(postId)) items.push(item("comment", comment, { postId }));
+    if (data.uid !== currentUid && !blocked.has(data.uid) && ownedPostIds.has(postId)) items.push(item("comment", comment, { postId }));
   });
   messageRequests.forEach((request) => {
     const data = dataOf(request);
-    if (data.toId === currentUid && data.fromId !== currentUid && data.status === "pending") items.push(item("message-request", request));
+    if (data.toId === currentUid && data.fromId !== currentUid && !blocked.has(data.fromId) && data.status === "pending") items.push(item("message-request", request));
   });
   roomMessages.forEach((message) => {
     const data = dataOf(message);
-    if (data.senderId !== currentUid && joinedRoomIds.has(data.roomId) && timestampMillis(data.expiresAt) > nowMillis) {
+    if (data.senderId !== currentUid && !blocked.has(data.senderId)
+      && joinedRoomIds.has(data.roomId) && timestampMillis(data.expiresAt) > nowMillis) {
       items.push(item("room-message", message));
     }
   });
   reveals.forEach((reveal) => {
     const data = dataOf(reveal);
-    if (data.toId === currentUid && data.fromId !== currentUid && data.status === "pending") items.push(item("reveal-request", reveal));
+    if (data.toId === currentUid && data.fromId !== currentUid && !blocked.has(data.fromId) && data.status === "pending") items.push(item("reveal-request", reveal));
   });
   return items.sort((left, right) => timestampMillis(right.createdAt) - timestampMillis(left.createdAt));
 };

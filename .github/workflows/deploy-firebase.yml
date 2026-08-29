@@ -15,8 +15,9 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy Hosting, Firestore rules, and indexes
+    name: Stage Firebase production rollout
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -26,10 +27,41 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Install trusted dependencies
+        run: npm ci
+
       - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
+          create_credentials_file: true
 
-      - name: Deploy Firebase production
-        run: npx --yes firebase-tools@15.28.1 deploy --project anonchatlogin --only "firestore:rules,firestore:indexes,hosting" --non-interactive
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy Firestore indexes
+        run: npx --no-install firebase deploy --project anonchatlogin --only firestore:indexes --non-interactive
+
+      - name: Wait for required Firestore indexes
+        run: npm run rollout:wait-indexes
+        timeout-minutes: 22
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+          FIRESTORE_INDEX_TIMEOUT_SECONDS: "1200"
+
+      - name: Run moderation processor and backfills
+        run: npm run rollout:process-moderation
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+
+      - name: Verify production rollout gates
+        run: npm run rollout:verify
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+
+      - name: Deploy Firestore rules
+        run: npx --no-install firebase deploy --project anonchatlogin --only firestore:rules --non-interactive
+
+      - name: Deploy Firebase Hosting
+        run: npx --no-install firebase deploy --project anonchatlogin --only hosting --non-interactive

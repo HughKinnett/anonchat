@@ -24,6 +24,8 @@ class ScanAdapter {
     this.pages = new Map();
     this.nextSourceType = "reaction";
     this.available = new Set(["post-owner", "request-to", "room-a", "room-b", "reveal-to"]);
+    this.blockedPairs = new Set();
+    this.blockBatchChecks = 0;
   }
   now() { return 2_000; }
   timestamp(value) { return time(value); }
@@ -40,6 +42,12 @@ class ScanAdapter {
   async postAuthor(source) { return source.postAuthorUid; }
   async roomMembers(source) { return source.memberUids; }
   async recipientAvailable(uid) { return this.available.has(uid); }
+  async unblockedRecipients(actorUid, recipientUids) {
+    this.blockBatchChecks += 1;
+    return recipientUids.filter((recipientUid) =>
+      !this.blockedPairs.has([actorUid, recipientUid].sort().join("/"))
+    );
+  }
   async createEvent(id, data) {
     if (this.events.has(id)) return false;
     this.events.set(id, { ...data });
@@ -54,6 +62,17 @@ class ScanAdapter {
     this.cursors.set(type, cursor);
     if (nextSourceType) this.nextSourceType = nextSourceType;
   }
+}
+
+{
+  const adapter = new ScanAdapter();
+  adapter.pages.set("reaction", [
+    document("posts/blocked/reactions/blocked", { uid: "reaction-actor", createdAt: time(20) }, { postAuthorUid: "post-owner" })
+  ]);
+  adapter.blockedPairs.add("post-owner/reaction-actor");
+  const result = await scanTrustedNotificationSources({ adapter });
+  assert.equal(result.materialized, 0, "blocked pairs are suppressed before event materialization");
+  assert.equal(adapter.blockBatchChecks, 1, "one bounded block snapshot is read for the candidate batch");
 }
 
 {
@@ -114,6 +133,9 @@ class DeliveryAdapter {
     this.advanceBeforeList = 0;
     this.trace = [];
     this.availabilitySequence = [];
+    this.blockedPairs = new Set();
+    this.blockChecks = 0;
+    this.blockSequence = [];
   }
   now() { return this.clock; }
   timestamp(value) { return time(value); }
@@ -133,6 +155,16 @@ class DeliveryAdapter {
   async recipientAvailable() {
     this.trace.push("availability");
     return this.availabilitySequence.length ? this.availabilitySequence.shift() : true;
+  }
+  async pairBlocked(left, right) {
+    this.blockChecks += 1;
+    if (this.blockSequence.length) return this.blockSequence.shift();
+    return this.blockedPairs.has([left, right].sort().join("/"));
+  }
+  async unblockedRecipients(actorUid, recipientUids) {
+    return recipientUids.filter((recipientUid) =>
+      !this.blockedPairs.has([actorUid, recipientUid].sort().join("/"))
+    );
   }
   async listSubscriptions(uid) {
     this.clock += this.advanceBeforeList;
@@ -167,7 +199,7 @@ class DeliveryAdapter {
   }
   async completeEvent(id, token) { assert.equal(this.events.get(id).leaseToken, token); Object.assign(this.events.get(id), { status: "delivered", updatedAt: time(this.clock) }); this.claimed.delete(id); }
   async failEvent(id, token, errorCode) { assert.equal(this.events.get(id).leaseToken, token); Object.assign(this.events.get(id), { status: "failed", errorCode, updatedAt: time(this.clock) }); this.claimed.delete(id); return "failed"; }
-  async suppressEvent(id, token) { assert.equal(this.events.get(id).leaseToken, token); Object.assign(this.events.get(id), { status: "suppressed", errorCode: "RECIPIENT_UNAVAILABLE", updatedAt: time(this.clock) }); this.claimed.delete(id); }
+  async suppressEvent(id, token, errorCode = "RECIPIENT_UNAVAILABLE") { assert.equal(this.events.get(id).leaseToken, token); Object.assign(this.events.get(id), { status: "suppressed", errorCode, updatedAt: time(this.clock) }); this.claimed.delete(id); }
   async deferEvent(id, token) {
     const event = this.events.get(id);
     assert.equal(event.leaseToken, token);
@@ -208,6 +240,65 @@ const queued = (id, type, recipientUid) => ({
   data: { type, actorUid: "actor", recipientUid, route: notificationPayload(type, id).url, sourceCreatedAt: time(1), status: "pending", attempts: 0, createdAt: time(1), updatedAt: time(1) }
 });
 const id = (digit) => digit.repeat(64);
+
+{
+  const event = queued(id("0"), "comment", "blocked-recipient");
+  const adapter = new DeliveryAdapter([event], new Map([
+    ["blocked-recipient", [subscription("blocked-recipient", "blocked-device")]]
+  ]));
+  adapter.blockedPairs.add("actor/blocked-recipient");
+  let sends = 0;
+  const result = await deliverNotificationEvents({
+    adapter,
+    ownerId: "worker",
+    sendPush: async () => { sends += 1; },
+    logger: { info() {}, error() {} }
+  });
+  assert.equal(sends, 0, "a block created before delivery prevents push transmission");
+  assert.equal(result.suppressed, 1);
+  assert.equal(adapter.events.get(event.id).errorCode, "BLOCKED_PAIR");
+  assert.equal(adapter.blockChecks, 1, "delivery uses a bounded direct pair check");
+}
+
+{
+  const event = queued(id("9"), "comment", "mid-block-recipient");
+  const adapter = new DeliveryAdapter([event], new Map([
+    ["mid-block-recipient", [
+      subscription("mid-block-recipient", "first-device"),
+      subscription("mid-block-recipient", "second-device")
+    ]]
+  ]));
+  adapter.blockSequence = [false, true];
+  const sent = [];
+  const result = await deliverNotificationEvents({
+    adapter,
+    ownerId: "worker",
+    sendPush: async (entry) => sent.push(entry.id),
+    logger: { info() {}, error() {} }
+  });
+  assert.deepEqual(sent, ["first-device"], "a mid-delivery block prevents every later unsent subscription");
+  assert.equal(result.suppressed, 1);
+  assert.equal(adapter.events.get(event.id).errorCode, "BLOCKED_PAIR");
+}
+
+{
+  const event = queued(id("8"), "reaction", "completion-block-recipient");
+  const adapter = new DeliveryAdapter([event], new Map([
+    ["completion-block-recipient", [subscription("completion-block-recipient", "only-device")]]
+  ]));
+  adapter.blockSequence = [false, true];
+  const sent = [];
+  const result = await deliverNotificationEvents({
+    adapter,
+    ownerId: "worker",
+    sendPush: async (entry) => sent.push(entry.id),
+    logger: { info() {}, error() {} }
+  });
+  assert.deepEqual(sent, ["only-device"]);
+  assert.equal(result.suppressed, 1,
+    "a block after the last send but before completion prevents event completion");
+  assert.equal(adapter.events.get(event.id).errorCode, "BLOCKED_PAIR");
+}
 
 {
   const events = [queued(id("a"), "reaction", "multi"), queued(id("b"), "comment", "none"), queued(id("c"), "reveal-request", "expired")];
