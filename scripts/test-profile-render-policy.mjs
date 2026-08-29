@@ -27,6 +27,9 @@ assert.equal(profileSource.includes('addDoc(collection(db, parent.collection, pa
 assert.match(profileSource, /window\.confirm\("Permanently delete this post\? This cannot be undone\."\)/,
   "profile owner deletion requires explicit permanent confirmation");
 assert.match(profileSource, /cachedReported\(/, "Profile uses cached report state while rerendering controls");
+assert.match(profileSource, /reportPost\.className = REPORT_BUTTON_CLASS/, "Profile post Report buttons reuse the Follow pill token");
+assert.match(profileSource, /await moderationClient\.report\(reportTarget, postReportReason\.value\);[\s\S]{0,300}removeReportedPostFromLocalState\(postDoc\.ref\.path\)/,
+  "a successful profile-post report removes that post's interactions from local UI state immediately");
 assert.match(profileSource, /loadReportedState\(/, "Profile loads duplicate report state for user and post controls");
 assert.match(profileSource, /watchReported\(/, "Profile passively observes deterministic report receipts across tabs");
 assert.match(profileSource, /moderationClient\?\.destroy\(\)/, "Profile tears down report receipt listeners");

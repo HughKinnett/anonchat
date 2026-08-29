@@ -42,10 +42,12 @@ try {
     await db.doc(`moderationActions/${id}`).set({ action: "deleteMaterial", requestedAt: Timestamp.fromMillis(3), requestedBy: "admin", status: "queued" });
     await put(db, [
       ["posts/post/comments/comment", { uid: "other", text: "comment" }], ["posts/post/comments/comment/replies/reply", { uid: "other", text: "reply" }],
-      ["posts/post/reactions/reaction", { uid: "other" }], ["communityVotes/vote", { postId: "post", uid: "other" }], ["timelineVotes/vote", { postId: "post", uid: "other" }]
+      ["posts/post/reactions/reaction", { uid: "other" }], ["communityVotes/posts:post:other", { postCollection: "posts", postId: "post", uid: "other" }],
+      ["communityPosts/post", { authorId: "other", username: "Other", content: "same ID" }], ["communityVotes/communityPosts:post:other", { postCollection: "communityPosts", postId: "post", uid: "other" }]
     ]);
     await processModeration(adapter, { ownerId: "delete", logger: { error() {} } });
-    for (const path of ["posts/post", "posts/post/comments/comment", "posts/post/comments/comment/replies/reply", "posts/post/reactions/reaction", "communityVotes/vote", "timelineVotes/vote", `moderationCases/${id}`, `moderationActions/${id}`]) assert.equal((await db.doc(path).get()).exists, false, `${path} is permanently removed`);
+    for (const path of ["posts/post", "posts/post/comments/comment", "posts/post/comments/comment/replies/reply", "posts/post/reactions/reaction", "communityVotes/posts:post:other", `moderationCases/${id}`, `moderationActions/${id}`]) assert.equal((await db.doc(path).get()).exists, false, `${path} is permanently removed`);
+    assert.equal((await db.doc("communityVotes/communityPosts:post:other").get()).exists, true, "same-ID community poll votes are never deleted with a timeline post");
     assert.deepEqual(await processModeration(adapter, { ownerId: "repeat", logger: { error() {} } }), { inspected: 0, processed: 0, failed: 0, skipped: 0, terminalIntakes: 0, terminalActions: 0, expiredRooms: 0, backfilled: 0, roomLifecycleMigrated: 0, roomLifecycleQuarantined: 0, roomLifecycleDeferred: 0, legacyRoomsCleaned: 0, legacyRoomsManualReview: 0 }, "repeated runs are idempotent");
   }
 
@@ -214,6 +216,111 @@ try {
     assert.equal((await db.doc("roomMessages/expired").get()).data().moderationState, "hidden"); assert.equal((await db.doc(`moderationCases/${id}`).get()).data().status, "expiredEvidence"); assert.equal((await db.doc(`moderationActions/${id}`).get()).data().status, "failed");
   }
 
+  // A reported room is retained past expiry, restores every retained transcript page to one durable fresh expiry,
+  // and an atomic later report wins even if it lands after restore finalization but before old receipt cleanup.
+  {
+    const oldHoldId = "reporter_room_restorable";
+    const newHoldId = "later-reporter_room_restorable";
+    let failFirstPage = true;
+    const setup = scenario(2_000_000_000_000, {
+      beforeRoomRestorePage: async ({ phase, count }) => {
+        if (phase === "page" && count === 100 && failFirstPage) {
+          failFirstPage = false;
+          throw Object.assign(new Error("injected room restore interruption"), { code: "action-limit" });
+        }
+      }
+    });
+    const { db, adapter, clock } = setup;
+    const roomCaseId = caseId("room", "restorable");
+    const entries = [
+      ["rooms/restorable", {
+        ownerId: "author", name: "Retained room", topic: "Reviewable transcript",
+        createdAt: Timestamp.fromMillis(clock.now - 86_400_001), expiresAt: Timestamp.fromMillis(clock.now - 1),
+        moderationState: "hidden", moderationHoldId: oldHoldId, moderationHeldAt: Timestamp.fromMillis(clock.now - 10), cleanupState: "open"
+      }],
+      [`reportIntakes/${oldHoldId}`, intake("room", {
+        targetKind: "room", targetCollection: "rooms", targetId: "restorable", targetPath: "rooms/restorable"
+      })],
+      ["reportReceipts/reporter/room/restorable", { reporterUid: "reporter", targetKind: "room", targetId: "restorable", createdAt: Timestamp.fromMillis(1) }]
+    ];
+    for (let index = 0; index < 101; index += 1) {
+      entries.push([`roomMessages/restorable-${String(index).padStart(3, "0")}`, {
+        roomId: "restorable", senderId: index % 2 ? "other" : "author", tempName: "Member", text: `message ${index}`,
+        createdAt: Timestamp.fromMillis(clock.now - 1_000 + index), expiresAt: Timestamp.fromMillis(clock.now - 1), moderationState: "visible"
+      }]);
+      entries.push([`roomMembers/restorable-${String(index).padStart(3, "0")}`, {
+        roomId: "restorable", uid: `member-${index}`, joinedAt: Timestamp.fromMillis(clock.now - 2_000 + index)
+      }]);
+    }
+    await put(db, entries);
+    const intakeResult = await processModeration(adapter, { ownerId: "room-intake", logger: { error() {} } });
+    assert.equal(intakeResult.processed, 1);
+    assert.equal(intakeResult.expiredRooms, 0, "the expiry sweep retains a hidden reported room");
+    assert.equal((await db.doc("rooms/restorable").get()).exists, true);
+    const roomCase = (await db.doc(`moderationCases/${roomCaseId}`).get()).data();
+    assert.equal(roomCase.snapshot.text, "Reviewable transcript");
+    assert.equal(roomCase.moderationHoldId, oldHoldId, "the case is fenced to the exact report hold it reviewed");
+
+    await db.doc(`moderationActions/${roomCaseId}`).set({ action: "restore", requestedAt: Timestamp.fromMillis(clock.now), requestedBy: "admin", status: "queued" });
+    const interrupted = await processModeration(adapter, { ownerId: "room-restore-interrupted", logger: { error() {} } });
+    assert.equal(interrupted.failed, 1);
+    const interruptedAction = (await db.doc(`moderationActions/${roomCaseId}`).get()).data();
+    assert.equal(interruptedAction.status, "failed");
+    assert.equal(interruptedAction.restoreCursor, "restorable-099", "the committed transcript cursor survives a worker interruption");
+    const durableExpiry = interruptedAction.restoreExpiresAt.toMillis();
+    assert.equal(durableExpiry, clock.now + 86_400_000, "the fresh 24-hour expiry is chosen once and persisted");
+    assert.equal((await db.doc("rooms/restorable").get()).data().moderationState, "hidden", "the room stays hidden until every transcript page is refreshed");
+
+    clock.now += 120_000;
+    let laterReportInserted = false;
+    const recovery = new FirestoreModerationAdapter({
+      db, Timestamp, FieldPath, clock: () => clock.now, tokenFactory: () => "room-restore-recovery",
+      beforeRoomRestorePage: async ({ phase }) => {
+        if (phase !== "finalized" || laterReportInserted) return;
+        laterReportInserted = true;
+        await put(db, [
+          ["rooms/restorable", {
+            ...(await db.doc("rooms/restorable").get()).data(),
+            moderationState: "hidden", moderationHoldId: newHoldId, moderationHeldAt: Timestamp.fromMillis(clock.now)
+          }],
+          [`reportIntakes/${newHoldId}`, intake("later-room", {
+            reporterUid: "later-reporter", targetKind: "room", targetCollection: "rooms", targetId: "restorable", targetPath: "rooms/restorable",
+            createdAt: Timestamp.fromMillis(clock.now)
+          })],
+          ["reportReceipts/later-reporter/room/restorable", { reporterUid: "later-reporter", targetKind: "room", targetId: "restorable", createdAt: Timestamp.fromMillis(clock.now) }]
+        ]);
+      }
+    });
+    const restored = await processModeration(recovery, { ownerId: "room-restore-recovery", logger: { error() {} } });
+    assert.equal(restored.processed, 1);
+    assert.equal((await db.doc(`moderationActions/${roomCaseId}`).get()).exists, false);
+    assert.equal((await db.doc(`reportIntakes/${oldHoldId}`).get()).exists, false, "restore removes only the intake it reviewed");
+    assert.equal((await db.doc("reportReceipts/reporter/room/restorable").get()).exists, false);
+    assert.equal((await db.doc(`reportIntakes/${newHoldId}`).get()).exists, true, "a later report is never swept up by old receipt cleanup");
+    assert.equal((await db.doc("reportReceipts/later-reporter/room/restorable").get()).exists, true);
+    const rereportedRoom = (await db.doc("rooms/restorable").get()).data();
+    assert.equal(rereportedRoom.moderationState, "hidden", "the later report wins after restore finalization");
+    assert.equal(rereportedRoom.moderationHoldId, newHoldId);
+    assert.equal(rereportedRoom.expiresAt.toMillis(), durableExpiry);
+    const transcript = await db.collection("roomMessages").where("roomId", "==", "restorable").get();
+    assert.equal(transcript.size, 101);
+    assert.equal(transcript.docs.every((message) => message.data().expiresAt.toMillis() === durableExpiry), true,
+      "every retained transcript page receives the same durable expiry");
+
+    const rereport = await processModeration(recovery, { ownerId: "room-rereport", logger: { error() {} } });
+    assert.equal(rereport.processed, 1);
+    assert.equal((await db.doc(`moderationCases/${roomCaseId}`).get()).data().status, "open");
+    assert.equal((await db.doc(`moderationCases/${roomCaseId}`).get()).data().moderationHoldId, newHoldId);
+
+    await db.doc(`moderationActions/${roomCaseId}`).set({ action: "deleteMaterial", requestedAt: Timestamp.fromMillis(clock.now), requestedBy: "admin", status: "queued" });
+    const deleted = await processModeration(recovery, { ownerId: "room-delete", logger: { error() {} } });
+    assert.equal(deleted.processed, 1);
+    for (const path of [
+      "rooms/restorable", "roomMessages/restorable-000", "roomMessages/restorable-100",
+      "roomMembers/restorable-000", "roomMembers/restorable-100", `moderationCases/${roomCaseId}`, `moderationActions/${roomCaseId}`
+    ]) assert.equal((await db.doc(path).get()).exists, false, `${path} is removed by the leased room cascade`);
+  }
+
 
   // Room cleanup has one transactional winner; rerunning after deletion does not add a second count.
   {
@@ -295,9 +402,9 @@ try {
   // A recovered partial community cascade removes descendants and votes before the parent on the next lease.
   {
     const { db, adapter, clock } = scenario(); const id = caseId("communityPost", "community");
-    await put(db, [["communityPosts/community", { authorId: "author", username: "Author", content: "material" }], ["communityPosts/community/comments/comment", { uid: "other" }], ["communityPosts/community/comments/comment/replies/reply", { uid: "other" }], ["communityPosts/community/reactions/reaction", { uid: "other" }], ["communityVotes/community-vote", { postId: "community", uid: "other" }], ["timelineVotes/community-vote", { postId: "community", uid: "other" }], [`moderationCases/${id}`, { targetKind: "communityPost", targetCollection: "communityPosts", targetId: "community", targetPath: "communityPosts/community", reportedUserId: "author", snapshot: { kind: "communityPost" }, status: "deleteQueued" }], [`moderationActions/${id}`, { action: "deleteMaterial", requestedAt: Timestamp.fromMillis(1), requestedBy: "admin", status: "processing", attempts: 1, leaseOwner: "lost", leaseToken: "lost", leaseExpiresAt: Timestamp.fromMillis(clock.now - 1) }]]);
+    await put(db, [["communityPosts/community", { authorId: "author", username: "Author", content: "material" }], ["communityPosts/community/comments/comment", { uid: "other" }], ["communityPosts/community/comments/comment/replies/reply", { uid: "other" }], ["communityPosts/community/reactions/reaction", { uid: "other" }], ["communityVotes/communityPosts:community:other", { postCollection: "communityPosts", postId: "community", uid: "other" }], [`moderationCases/${id}`, { targetKind: "communityPost", targetCollection: "communityPosts", targetId: "community", targetPath: "communityPosts/community", reportedUserId: "author", snapshot: { kind: "communityPost" }, status: "deleteQueued" }], [`moderationActions/${id}`, { action: "deleteMaterial", requestedAt: Timestamp.fromMillis(1), requestedBy: "admin", status: "processing", attempts: 1, leaseOwner: "lost", leaseToken: "lost", leaseExpiresAt: Timestamp.fromMillis(clock.now - 1) }]]);
     assert.equal((await processModeration(adapter, { ownerId: "cascade-recovery", logger: { error() {} } })).processed, 1);
-    for (const path of ["communityPosts/community", "communityPosts/community/comments/comment", "communityPosts/community/comments/comment/replies/reply", "communityPosts/community/reactions/reaction", "communityVotes/community-vote", "timelineVotes/community-vote", `moderationCases/${id}`]) assert.equal((await db.doc(path).get()).exists, false, `${path} is removed after recovery`);
+    for (const path of ["communityPosts/community", "communityPosts/community/comments/comment", "communityPosts/community/comments/comment/replies/reply", "communityPosts/community/reactions/reaction", "communityVotes/communityPosts:community:other", `moderationCases/${id}`]) assert.equal((await db.doc(path).get()).exists, false, `${path} is removed after recovery`);
   }
 
   // A real mid-cascade failure retains the case, then an expired lease reclaims and completes idempotently.

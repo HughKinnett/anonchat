@@ -1,4 +1,4 @@
-import { blockId, reportId, reportIntakePayload } from "./moderation-policy.mjs";
+import { blockId, reportHoldPatch, reportId, reportIntakePayload } from "./moderation-policy.mjs";
 
 const alreadyReported = () => Object.assign(new Error("This item has already been reported."), {
   code: "already-reported"
@@ -77,6 +77,13 @@ export const createModerationClient = ({ db, firestore, currentUid, timestamp, c
       const batch = writeBatch(db);
       batch.set(ref, payload);
       batch.set(receipt, { reporterUid: currentUid, targetKind: target.targetKind, targetId: target.targetId, createdAt: payload.createdAt });
+      const hold = reportHoldPatch({
+        reporterUid: currentUid,
+        targetKind: target.targetKind,
+        targetId: target.targetId,
+        timestamp: payload.createdAt
+      });
+      if (hold) batch.update(doc(db, target.targetCollection, target.targetId), hold);
       await batch.commit();
       updateReported(key, true); channel?.postMessage?.({ key, reported: true });
     } catch (writeError) {

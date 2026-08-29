@@ -13,7 +13,7 @@ export const timestampToMillis = (value) => {
 };
 export const caseId = (targetKind, targetId) => `${targetKind}_${encodeURIComponent(String(targetId))}`;
 const isSafeId = (value) => typeof value === "string" && value.length > 0 && !value.includes("/") && value !== "." && value !== "..";
-const collections = Object.freeze({ post: "posts", communityPost: "communityPosts", roomMessage: "roomMessages", user: "users" });
+const collections = Object.freeze({ post: "posts", communityPost: "communityPosts", room: "rooms", roomMessage: "roomMessages", user: "users" });
 export const isValidModerationIntake = (id, intake) => {
   if (!intake || !REPORT_TARGETS.includes(intake.targetKind) || collections[intake.targetKind] !== intake.targetCollection
     || !isSafeId(intake.reporterUid) || !isSafeId(intake.reportedUserId) || !isSafeId(intake.targetId)
@@ -50,6 +50,7 @@ export const snapshotForTarget = (kind, data) => {
   if (!data || typeof data !== "object") throw Object.assign(new Error("unsupported-target"), { code: "unsupported-target" });
   if (kind === "post") return { kind, authorId: String(data.authorId ?? ""), authorName: boundedName(data.username), text: boundedText(data.content), media: boundedMedia([{ kind: "postImage", value: data.imageData }]), category: boundedName(data.category) };
   if (kind === "communityPost") return { kind, authorId: String(data.authorId ?? ""), authorName: boundedName(data.username), text: boundedText(data.content), category: boundedName(data.category), optionCount: Array.isArray(data.options) ? Math.min(4, data.options.length) : 0 };
+  if (kind === "room") return { kind, authorId: String(data.ownerId ?? ""), authorName: boundedName(data.name), text: boundedText(data.topic), createdAt: data.createdAt, expiresAt: data.expiresAt };
   if (kind === "roomMessage") return { kind, authorId: String(data.senderId ?? ""), authorName: boundedName(data.tempName), text: boundedText(data.text), roomId: String(data.roomId ?? ""), expiresAt: data.expiresAt };
   if (kind === "user") return { kind, authorId: String(data.uid ?? ""), authorName: boundedName(data.username), media: boundedMedia([{ kind: "profileImage", value: data.profileImage }, { kind: "coverImage", value: data.coverImage }]) };
   throw Object.assign(new Error("unsupported-target"), { code: "unsupported-target" });

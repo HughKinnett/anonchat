@@ -5,6 +5,13 @@ const millis = (value) => {
   } catch { return null; }
 };
 
+export const formatDisappearsAt = (value, locales, options) => {
+  const expiresAt = millis(value);
+  return expiresAt === null
+    ? "Disappearance time unavailable"
+    : `Disappears ${new Date(expiresAt).toLocaleString(locales, options)}`;
+};
+
 export const nearestFutureExpiry = (expiries, nowMillis = Date.now()) => expiries
   .map(millis).filter((value) => value !== null && value > nowMillis)
   .reduce((nearest, value) => nearest === null || value < nearest ? value : nearest, null);

@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
-import {
+import * as moderationPolicy from "../moderation-policy.mjs";
+const {
   REPORT_REASONS,
   REPORT_TARGETS,
+  REPORT_BUTTON_CLASS,
   blockId,
   isRoomActive,
   reportId,
+  reportHoldPatch,
   reportIntakePayload,
   roomExpiry
-} from "../moderation-policy.mjs";
+} = moderationPolicy;
 await import("./test-interaction-parent-policy.mjs");
 
 const NOW = 1_700_000_000_000;
@@ -20,7 +23,9 @@ assert.deepEqual(REPORT_REASONS, [
   "privacy-impersonation",
   "other"
 ]);
-assert.deepEqual(REPORT_TARGETS, ["post", "communityPost", "roomMessage", "user"]);
+assert.deepEqual(REPORT_TARGETS, ["post", "communityPost", "room", "roomMessage", "user"]);
+assert.equal(REPORT_BUTTON_CLASS, "follow-button report-button",
+  "every report control reuses the Follow button design token");
 
 for (const { blockerUid, blockedUid, expected } of [
   { blockerUid: "a", blockedUid: "b", expected: "a_b" },
@@ -41,6 +46,7 @@ assert.throws(() => reportId("u1", "user", "u1"), /self/);
 const collectionByTarget = {
   post: "posts",
   communityPost: "communityPosts",
+  room: "rooms",
   roomMessage: "roomMessages",
   user: "users"
 };
@@ -66,6 +72,16 @@ for (const [targetKind, targetCollection] of Object.entries(collectionByTarget))
     status: "queued"
   });
 }
+
+for (const targetKind of ["post", "communityPost", "room"]) {
+  assert.deepEqual(reportHoldPatch({ reporterUid: "u1", targetKind, targetId: `${targetKind}-1`, timestamp: NOW }), {
+    moderationState: "hidden",
+    moderationHoldId: `u1_${targetKind}_${targetKind}-1`,
+    moderationHeldAt: NOW
+  }, `${targetKind} reports produce the exact atomic hidden hold`);
+}
+assert.equal(reportHoldPatch({ reporterUid: "u1", targetKind: "roomMessage", targetId: "message-1", timestamp: NOW }), null,
+  "legacy room-message reports retain their processor-only path");
 assert.throws(() => reportIntakePayload({
   reporterUid: "u1", targetKind: "post", targetCollection: "posts", targetId: "p1",
   reportedUserId: "u1", reason: "harassment", timestamp: NOW

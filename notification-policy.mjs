@@ -154,14 +154,16 @@ export const validateTrustedSource = (type, data, nowMillis) => {
     && Number.isFinite(timestampMillis(data.expiresAt)) && timestampMillis(data.expiresAt) > nowMillis;
 };
 
-export const queuedEvent = ({ type, actorUid, recipientUid, route, sourceCreatedAt, now }) => {
+export const queuedEvent = ({ type, actorUid, recipientUid, roomId, route, sourceCreatedAt, now }) => {
   if (!TYPE_SET.has(type) || !nonempty(actorUid) || !nonempty(recipientUid) || actorUid === recipientUid
     || PAYLOADS[type].url !== route || !Number.isFinite(timestampMillis(sourceCreatedAt))
-    || !Number.isFinite(timestampMillis(now))) throw codedError("INVALID_EVENT_INPUT");
+    || !Number.isFinite(timestampMillis(now))
+    || (type === "room-message" ? !nonempty(roomId) : roomId !== undefined)) throw codedError("INVALID_EVENT_INPUT");
   return {
     type,
     actorUid,
     recipientUid,
+    ...(type === "room-message" ? { roomId } : {}),
     route,
     sourceCreatedAt,
     status: "pending",
@@ -172,7 +174,7 @@ export const queuedEvent = ({ type, actorUid, recipientUid, route, sourceCreated
 };
 
 export const isValidQueueEvent = (event) => {
-  const baseKeys = ["type", "actorUid", "recipientUid", "route", "sourceCreatedAt", "status", "attempts", "createdAt", "updatedAt"];
+  const baseKeys = ["type", "actorUid", "recipientUid", ...(event?.type === "room-message" ? ["roomId"] : []), "route", "sourceCreatedAt", "status", "attempts", "createdAt", "updatedAt"];
   const expectedKeySets = event?.status === "processing"
     ? [[...baseKeys, "leaseOwner", "leaseToken", "leaseExpiresAt"]]
     : event?.status === "failed"
@@ -183,6 +185,7 @@ export const isValidQueueEvent = (event) => {
   if (!expectedKeySets.some((keys) => exactKeys(event, keys))
     || !TYPE_SET.has(event.type) || PAYLOADS[event.type].url !== event.route
     || !nonempty(event.actorUid) || !nonempty(event.recipientUid) || event.actorUid === event.recipientUid
+    || (event.type === "room-message" && !nonempty(event.roomId))
     || !Number.isInteger(event.attempts) || event.attempts < 0
     || !["pending", "processing", "failed", ...TERMINAL_NOTIFICATION_STATUSES].includes(event.status)
     || !Number.isFinite(timestampMillis(event.sourceCreatedAt))
@@ -196,6 +199,11 @@ export const isValidQueueEvent = (event) => {
       && (!Object.hasOwn(event, "retryAt") || Number.isFinite(timestampMillis(event.retryAt)));
   }
   return true;
+};
+
+export const isLegacyRoomEventMissingContext = (event) => {
+  if (event?.type !== "room-message" || Object.hasOwn(event, "roomId")) return false;
+  return isValidQueueEvent({ ...event, roomId: "legacy-context-validation" });
 };
 
 export const fixedNotificationErrorCode = (error) => {

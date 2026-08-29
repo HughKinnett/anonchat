@@ -55,7 +55,7 @@ const contentWrites = (firestore, target) => {
     () => setDoc(doc(firestore, "posts", `repost_member_${post}`), { type: "repost", authorId: "member", username: "member", sourceCollection: "posts", originalPostId: post, originalAuthorId: uid, originalUsername: uid, content: `${uid} post`, imageData: "", moderationState: "visible", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "posts", post, "comments", `comment_${suffix}`), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "posts", post, "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "communityVotes", `${post}_member`), { postId: post, uid: "member", option: 0, createdAt: serverTimestamp() }),
+    () => setDoc(doc(firestore, "communityVotes", `posts:${post}:member`), { postCollection: "posts", postId: post, uid: "member", option: 0, createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "circleMembers", `${circle}_member`), { circleId: circle, uid: "member", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "communityPosts", `community_${suffix}`), { authorId: "member", username: "member", content: "community", category: "Question", circleId: circle, options: [], moderationState: "visible", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "roomMembers", `${room}_member`), { roomId: room, uid: "member", joinedAt: serverTimestamp() }),
@@ -78,7 +78,7 @@ const threePrincipalWrites = (firestore) => [
   ["original-repost", () => setDoc(doc(firestore, "posts", "repost_member_three-original"), { type: "repost", authorId: "member", username: "member", sourceCollection: "posts", originalPostId: "three-original", originalAuthorId: "post_author", originalUsername: "post_author", content: "three original", imageData: "", moderationState: "visible", createdAt: serverTimestamp() })],
   ["community-comment", () => setDoc(doc(firestore, "communityPosts", "three-community", "comments", "member"), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() })],
   ["community-reaction", () => setDoc(doc(firestore, "communityPosts", "three-community", "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() })],
-  ["community-vote", () => setDoc(doc(firestore, "communityVotes", "three-community_member"), { postId: "three-community", uid: "member", option: 0, createdAt: serverTimestamp() })],
+  ["community-vote", () => setDoc(doc(firestore, "communityVotes", "communityPosts:three-community:member"), { postCollection: "communityPosts", postId: "three-community", uid: "member", option: 0, createdAt: serverTimestamp() })],
   ["room-comment", () => setDoc(doc(firestore, "roomMessages", "three-room-message", "comments", "member"), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() })],
   ["room-reaction", () => setDoc(doc(firestore, "roomMessages", "three-room-message", "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() })]
 ];
@@ -167,7 +167,7 @@ try {
     await assertFails(setDoc(doc(member, ...parentPath, "comments", `blocked_${parentPath[1]}`), { uid: "member", username: "member", text: "blocked", createdAt: serverTimestamp() }));
     await assertFails(setDoc(doc(member, ...parentPath, "reactions", "member"), { uid: "member", type: "heart", createdAt: serverTimestamp() }));
   }
-  await assertFails(setDoc(doc(member, "communityVotes", "other-repost-target_member"), { postId: "other-repost-target", uid: "member", option: 0, createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(member, "communityVotes", "posts:other-repost-target:member"), { postCollection: "posts", postId: "other-repost-target", uid: "member", option: 0, createdAt: serverTimestamp() }));
   await assertSucceeds(deleteDoc(doc(member, "messageRequests", "member_target")));
   await assertFails(setDoc(doc(member, "messageRequests", "member_target"), { fromId: "member", toId: "target", status: "pending", createdAt: serverTimestamp() }));
   await assertFails(setDoc(doc(target, "posts", "target-new"), { type: "original", authorId: "target", username: "target", content: "new", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: serverTimestamp() }));

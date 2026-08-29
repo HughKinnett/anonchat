@@ -9,9 +9,10 @@ import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { markNotificationsSeen, readSeenNotificationIds } from "./notification-storage.mjs";
 import { buildInAppNotifications, notificationUiId } from "./notification-ui-policy.mjs";
 import { createModerationClient } from "./moderation-client.mjs";
-import { REPORT_REASONS } from "./moderation-policy.mjs";
+import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
+import { pollVoteDocumentId as voteDocumentId } from "./poll-vote-policy.mjs";
 import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
 import { createViewerBlockTracker, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
@@ -114,7 +115,14 @@ const postDeleteStatuses = new Map();
 const blockedUid = (uid) => isBlockedActor(uid, viewerBlocks);
 const visibleTimelinePosts = () => allTimelinePosts()
   .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
-  .filter((post) => isBlockedPost(post, viewerBlocks));
+  .filter((post) => isBlockedPost(post, viewerBlocks))
+  .filter((post) => reportCardStatuses.get(post.ref.path)?.hidden !== true);
+const syncReportedHolds = (collectionName, documents) => {
+  const visiblePaths = new Set(documents.map((entry) => entry.ref.path));
+  for (const [path, reportState] of reportCardStatuses) {
+    if (reportState.hidden === true && path.startsWith(`${collectionName}/`) && !visiblePaths.has(path)) reportCardStatuses.delete(path);
+  }
+};
 const visibleUsers = () => visibleRecords(users, viewerBlocks, ["uid"]);
 const visibleFollows = () => visibleRecords(follows, viewerBlocks, ["followerId", "followingId"]);
 
@@ -747,13 +755,13 @@ const createReportDialog = () => {
     dialogStatus.textContent = "Submitting report…";
     try {
       await moderationClient.report(target, reason.value);
-      reportCardStatuses.set(target.path, { message: "Report submitted.", isError: false });
+      reportCardStatuses.set(target.path, { message: "Report submitted.", isError: false, hidden: true });
       dialog.close();
       activeReportTarget = undefined;
       renderFeed();
     } catch (error) {
       if (error?.code === "already-reported") {
-        reportCardStatuses.set(target.path, { message: "This item has already been reported.", isError: false });
+        reportCardStatuses.set(target.path, { message: "This item has already been reported.", isError: false, hidden: true });
         dialog.close();
         activeReportTarget = undefined;
       } else {
@@ -781,7 +789,7 @@ const createReportDialog = () => {
 const openReportDialog = async (target) => {
   try {
     if (await moderationClient.hasReported(target)) {
-      reportCardStatuses.set(target.path, { message: "This item has already been reported.", isError: false });
+      reportCardStatuses.set(target.path, { message: "This item has already been reported.", isError: false, hidden: true });
       renderFeed();
       return;
     }
@@ -996,7 +1004,11 @@ const renderPost = (postDoc) => {
   const poll = document.createElement("div");
   poll.className = "timeline-poll";
   if (post.category === "Poll" && Array.isArray(post.options)) {
-    const votes = pollVotes.filter((vote) => vote.data().postId === sourceId);
+    const voteParent = parent;
+    const votes = pollVotes.filter((vote) =>
+      vote.data().postCollection === voteParent.collection
+      && vote.data().postId === voteParent.id
+    );
     const mine = votes.find((vote) => vote.data().uid === currentUser.uid);
     post.options.forEach((option, index) => {
       const count = votes.filter((vote) => vote.data().option === index).length;
@@ -1010,10 +1022,13 @@ const renderPost = (postDoc) => {
       button.append(label, total);
       button.addEventListener("click", async () => {
         button.disabled = true;
-        const voteRef = doc(db, "communityVotes", `${sourceId}_${currentUser.uid}`);
+        const voteRef = doc(db, "communityVotes", voteDocumentId(voteParent.collection, voteParent.id, currentUser.uid));
         try {
           if (mine?.data().option === index) await deleteDoc(voteRef);
-          else await setDoc(voteRef, { postId: sourceId, uid: currentUser.uid, option: index, createdAt: serverTimestamp() });
+          else await setDoc(voteRef, {
+            postCollection: voteParent.collection, postId: voteParent.id,
+            uid: currentUser.uid, option: index, createdAt: serverTimestamp()
+          });
         } catch {
           setStatus("Could not update your vote.", true);
           button.disabled = false;
@@ -1180,7 +1195,7 @@ const renderPost = (postDoc) => {
     const path = postDoc.ref.path;
     const reportStatus = reportCardStatuses.get(path);
     const report = document.createElement("button");
-    report.className = "report-button";
+    report.className = REPORT_BUTTON_CLASS;
     report.type = "button";
     report.textContent = "Report";
     report.disabled = Boolean(reportStatus && !reportStatus.isError);
@@ -1442,26 +1457,35 @@ const clearPollVoteListeners = () => {
   pollVotes = [];
 };
 
+const visiblePollTargets = () => {
+  const targets = new Map();
+  for (const post of visibleTimelinePosts().filter((entry) => entry.data().category === "Poll")) {
+    const parent = interactionParentForPost(post);
+    if (["posts", "communityPosts"].includes(parent.collection)) targets.set(parent.path, parent);
+  }
+  return [...targets.values()];
+};
+
 const syncPollVoteListeners = () => {
   clearPollVoteListeners();
   const generation = pollVoteGeneration;
-  const visiblePostIds = communityPostDocs
-    .filter((post) => post.data().category === "Poll" && isBlockedPost(post, viewerBlocks))
-    .map((post) => post.id);
   const votesByChunk = new Map();
-  for (let offset = 0; offset < visiblePostIds.length; offset += 30) {
-    const chunk = visiblePostIds.slice(offset, offset + 30);
-    const chunkKey = String(offset);
-    pollVoteListeners.push(onSnapshot(
-      query(collection(db, "communityVotes"), where("postId", "in", chunk)),
-      (snapshot) => {
-        if (generation !== pollVoteGeneration) return;
-        votesByChunk.set(chunkKey, snapshot.docs);
-        pollVotes = [...votesByChunk.values()].flat();
-        renderFeed();
-      },
-      () => setStatus("Could not load poll votes.", true)
-    ));
+  for (const postCollection of ["posts", "communityPosts"]) {
+    const visiblePostIds = visiblePollTargets().filter((target) => target.collection === postCollection).map((target) => target.id);
+    for (let offset = 0; offset < visiblePostIds.length; offset += 30) {
+      const chunk = visiblePostIds.slice(offset, offset + 30);
+      const chunkKey = `${postCollection}:${offset}`;
+      pollVoteListeners.push(onSnapshot(
+        query(collection(db, "communityVotes"), where("postCollection", "==", postCollection), where("postId", "in", chunk)),
+        (snapshot) => {
+          if (generation !== pollVoteGeneration) return;
+          votesByChunk.set(chunkKey, snapshot.docs);
+          pollVotes = [...votesByChunk.values()].flat();
+          renderFeed();
+        },
+        () => setStatus("Could not load poll votes.", true)
+      ));
+    }
   }
 };
 
@@ -1596,6 +1620,7 @@ onAuthStateChanged(auth, async (user) => {
   listeners.push(listenForSession(
     query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(100)),
     (snapshot) => {
+      syncReportedHolds("posts", snapshot.docs);
       postDocs = snapshot.docs;
       syncInteractionListeners();
       renderFeed();
@@ -1607,6 +1632,7 @@ onAuthStateChanged(auth, async (user) => {
   listeners.push(listenForSession(
     query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(100)),
     (snapshot) => {
+      syncReportedHolds("communityPosts", snapshot.docs);
       communityPostDocs = snapshot.docs;
       syncPollVoteListeners();
       syncInteractionListeners();

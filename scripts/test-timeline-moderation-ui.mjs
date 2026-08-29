@@ -6,7 +6,7 @@ const html = await readFile(new URL("../timeline.html", import.meta.url), "utf8"
 
 assert.match(timeline, /import \{ createModerationClient \} from "\.\/moderation-client\.mjs";/,
   "Timeline uses the shared moderation client for report submissions");
-assert.match(timeline, /import \{ REPORT_REASONS \} from "\.\/moderation-policy\.mjs";/,
+assert.match(timeline, /import \{ REPORT_BUTTON_CLASS, REPORT_REASONS \} from "\.\/moderation-policy\.mjs";/,
   "the shared report dialog is constrained to the policy's allowed reasons");
 assert.match(timeline, /import \{ interactionParentForPost \} from "\.\/interaction-parent-policy\.mjs";/,
   "Timeline uses the shared interaction-parent resolver");
@@ -14,12 +14,16 @@ assert.match(timeline, /const createReportDialog = \(\) => \{/,
   "Timeline creates one shared accessible report dialog");
 assert.match(timeline, /report\.textContent = "Report";/,
   "cards expose a Report action");
+assert.match(timeline, /report\.className = REPORT_BUTTON_CLASS/,
+  "Timeline Report buttons reuse the Follow button class token");
 assert.match(timeline, /if \(post\.authorId === currentUser\.uid\) \{[\s\S]*remove\.textContent = "Delete";/,
   "every owned card exposes a Delete action");
 assert.match(timeline, /window\.confirm\("Permanently delete this post\? This cannot be undone\."\)/,
   "owner deletion requires an explicit permanent confirmation");
-assert.match(timeline, /reportCardStatuses\.set\(target\.path, \{ message: "Report submitted\.", isError: false \}\)/,
-  "report success is rendered inline on the originating card");
+assert.match(timeline, /reportCardStatuses\.set\(target\.path, \{ message: "Report submitted\.", isError: false, hidden: true \}\)/,
+  "report success immediately marks only the originating card unavailable");
+assert.match(timeline, /filter\(\(post\) => reportCardStatuses\.get\(post\.ref\.path\)\?\.hidden !== true\)/,
+  "a locally committed report removes that item and all of its interaction controls before the query listener catches up");
 assert.match(timeline, /reportCardStatuses\.set\(target\.path, \{ message: "Could not submit this report\. Please try again\.", isError: true \}\)/,
   "report failures are rendered inline on the originating card");
 assert.match(timeline, /if \(reportSubmitting \|\| !activeReportTarget\) return;/,
@@ -45,8 +49,20 @@ for (const collectionName of ["posts", "communityPosts"]) {
   );
 }
 assert.match(timeline,
-  /visiblePostIds\.slice\(offset, offset \+ 30\)[\s\S]*query\(collection\(db, "communityVotes"\), where\("postId", "in", chunk\)\)/,
-  "poll-vote listeners constrain every query to currently visible community posts"
+  /visiblePollTargets\(\)[\s\S]*where\("postCollection", "==", postCollection\)[\s\S]*where\("postId", "in", chunk\)/,
+  "poll-vote listeners constrain every query to the exact visible post collection and IDs"
+);
+assert.match(timeline,
+  /voteDocumentId\(voteParent\.collection, voteParent\.id, currentUser\.uid\)/,
+  "poll vote writes use a collection-namespaced deterministic document ID"
+);
+assert.match(timeline,
+  /postCollection: voteParent\.collection, postId: voteParent\.id/,
+  "poll vote writes persist the canonical post collection discriminator"
+);
+assert.match(timeline,
+  /vote\.data\(\)\.postCollection === voteParent\.collection[\s\S]*vote\.data\(\)\.postId === voteParent\.id/,
+  "poll results cannot leak between posts and communityPosts documents that share an ID"
 );
 assert.doesNotMatch(timeline,
   /onSnapshot\(\s*collection\(db, "communityVotes"\)/,
