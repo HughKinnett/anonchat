@@ -58,6 +58,23 @@ export const redactedSummary = ({ inspected = 0, processed = 0, failed = 0, skip
   `MODERATION_RESULT inspected=${inspected} processed=${processed} failed=${failed} skipped=${skipped} terminalIntakes=${terminalIntakes} terminalActions=${terminalActions} expiredRooms=${expiredRooms} backfilled=${backfilled} roomLifecycleMigrated=${roomLifecycleMigrated} roomLifecycleQuarantined=${roomLifecycleQuarantined} roomLifecycleDeferred=${roomLifecycleDeferred} legacyRoomsCleaned=${legacyRoomsCleaned} legacyRoomsManualReview=${legacyRoomsManualReview}`;
 export const fixedErrorCode = (error) => {
   const code = error?.code;
+  const firestoreCodes = new Map([
+    [3, "FIRESTORE_INVALID_ARGUMENT"],
+    [7, "FIRESTORE_PERMISSION_DENIED"],
+    [8, "FIRESTORE_RESOURCE_EXHAUSTED"],
+    [9, "FIRESTORE_FAILED_PRECONDITION"],
+    [10, "FIRESTORE_ABORTED"],
+    [13, "FIRESTORE_INTERNAL"],
+    [14, "FIRESTORE_UNAVAILABLE"],
+    ["invalid-argument", "FIRESTORE_INVALID_ARGUMENT"],
+    ["permission-denied", "FIRESTORE_PERMISSION_DENIED"],
+    ["resource-exhausted", "FIRESTORE_RESOURCE_EXHAUSTED"],
+    ["failed-precondition", "FIRESTORE_FAILED_PRECONDITION"],
+    ["aborted", "FIRESTORE_ABORTED"],
+    ["internal", "FIRESTORE_INTERNAL"],
+    ["unavailable", "FIRESTORE_UNAVAILABLE"]
+  ]);
+  if (firestoreCodes.has(code)) return firestoreCodes.get(code);
   return new Set(["invalid-intake", "unsupported-target", "lease-lost", "action-invalid", "action-limit", "source-unavailable", "heartbeat-failed", "expired-evidence", "unsettled-intake"]).has(code) ? code.toUpperCase().replaceAll("-", "_") : "PROCESSOR_FAILURE";
 };
 import { REPORT_REASONS, REPORT_TARGETS, reportId } from "./moderation-policy.mjs";

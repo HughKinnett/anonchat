@@ -86,5 +86,10 @@ export const processModeration = async (adapter, { ownerId = `moderation-${crypt
     }
     await heartbeat(adapter, logger, "completed");
     return summary;
-  } catch (error) { await heartbeat(adapter, logger, "failed", fixedErrorCode(error)); throw error; }
+  } catch (error) {
+    const errorCode = fixedErrorCode(error);
+    log(logger, "error", errorCode);
+    await heartbeat(adapter, logger, "failed", errorCode);
+    throw error;
+  }
 };
