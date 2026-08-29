@@ -296,7 +296,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "22" }
       - run: npm ci
       - id: auth
         uses: google-github-actions/auth@v3
@@ -328,7 +328,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "22" }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "17" }
       - run: npm ci

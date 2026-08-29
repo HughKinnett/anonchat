@@ -76,4 +76,13 @@ class TerminalLegacyRoomAdapter extends DryRunAdapter {
 }
 const legacyTerminal = await processModeration(new TerminalLegacyRoomAdapter(), { logger: { error() {} } });
 assert.equal(legacyTerminal.legacyRoomsManualReview, 1, "an exhausted abandoned legacy-room lease reaches terminal manual review");
+
+class FatalRoomLifecycleAdapter extends DryRunAdapter {
+  async backfillRoomLifecycle() { throw Object.assign(new Error("private Firestore detail"), { code: 9 }); }
+}
+const fatalLog = [];
+await assert.rejects(() => processModeration(new FatalRoomLifecycleAdapter(), {
+  logger: { error(code) { fatalLog.push(code); } }
+}), (error) => error.code === 9);
+assert.deepEqual(fatalLog, ["FIRESTORE_FAILED_PRECONDITION"], "fatal logs contain only an allowlisted operational code");
 console.log("Moderation processor passed");

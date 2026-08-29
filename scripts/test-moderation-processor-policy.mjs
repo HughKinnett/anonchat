@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {
   LEASE_MS, PAGE_SIZE, MAX_ATTEMPTS, SNAPSHOT_TEXT_LIMIT, SNAPSHOT_MEDIA_LIMIT, LEGACY_ROOM_GRACE_MS, caseId, isLeaseEligible, isTerminalModerationRecord,
-  retryDelayMillis, snapshotForTarget, redactedSummary
+  retryDelayMillis, snapshotForTarget, redactedSummary, fixedErrorCode
 } from "../moderation-processor-policy.mjs";
 
 const time = (milliseconds) => ({ toMillis: () => milliseconds });
@@ -47,4 +47,7 @@ assert.throws(() => snapshotForTarget("directMessage", { text: "private" }), /un
 const summary = redactedSummary({ inspected: 1, processed: 2, failed: 3, skipped: 4, expiredRooms: 5, backfilled: 6 });
 assert.equal(summary, "MODERATION_RESULT inspected=1 processed=2 failed=3 skipped=4 terminalIntakes=0 terminalActions=0 expiredRooms=5 backfilled=6 roomLifecycleMigrated=0 roomLifecycleQuarantined=0 roomLifecycleDeferred=0 legacyRoomsCleaned=0 legacyRoomsManualReview=0");
 assert.equal(/author|hello|uid/i.test(summary), false);
+assert.equal(fixedErrorCode({ code: 9 }), "FIRESTORE_FAILED_PRECONDITION");
+assert.equal(fixedErrorCode({ code: "permission-denied" }), "FIRESTORE_PERMISSION_DENIED");
+assert.equal(fixedErrorCode({ code: "unknown-sensitive-value" }), "PROCESSOR_FAILURE");
 console.log("Moderation processor policy passed");

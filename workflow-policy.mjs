@@ -116,7 +116,7 @@ export const validateDeletionWorkflow = (workflow) => {
   const steps = jobSteps(job, errors, "jobs.process");
   exactlyOrderedSteps(errors, steps, ["uses:actions/checkout@v4", "uses:actions/setup-node@v4", "run:npm ci", "uses:google-github-actions/auth@v3", "run:npm run admin-deletion:process"], "deletion workflow steps");
   const node = singleStep(errors, steps, "uses", "actions/setup-node@v4", "Node setup");
-  exactly(errors, String(node?.with?.["node-version"]), "20", "Node version");
+  exactly(errors, String(node?.with?.["node-version"]), "22", "Node version");
   const install = singleStep(errors, steps, "run", "npm ci", "npm ci");
   void install;
   const auth = singleStep(errors, steps, "uses", "google-github-actions/auth@v3", "Google authentication");
@@ -126,7 +126,7 @@ export const validateDeletionWorkflow = (workflow) => {
   exactly(errors, processor?.env?.GCLOUD_PROJECT, "anonchatlogin", "deletion processor project");
   exactly(errors, processor?.env?.GOOGLE_APPLICATION_CREDENTIALS, credentialPathReference, "deletion processor credential path");
   validateStep(errors, steps[0], { uses: "actions/checkout@v4" }, "deletion checkout step");
-  validateStep(errors, node, { uses: "actions/setup-node@v4", with: { "node-version": "20" } }, "deletion Node step");
+  validateStep(errors, node, { uses: "actions/setup-node@v4", with: { "node-version": "22" } }, "deletion Node step");
   validateStep(errors, install, { run: "npm ci" }, "deletion install step");
   validateStep(errors, auth, { id: "auth", uses: "google-github-actions/auth@v3", with: { credentials_json: secretReference } }, "deletion authentication step");
   validateStep(errors, processor, { run: "npm run admin-deletion:process", env: { GCLOUD_PROJECT: "anonchatlogin", GOOGLE_APPLICATION_CREDENTIALS: credentialPathReference } }, "deletion processor step");
@@ -157,7 +157,7 @@ export const validateModerationWorkflow = (workflow) => {
   const auth = singleStep(errors, steps, "uses", "google-github-actions/auth@v3", "moderation Google authentication");
   const processor = singleStep(errors, steps, "run", "npm run moderation:process", "moderation processor command");
   validateStep(errors, steps[0], { uses: "actions/checkout@v4" }, "moderation checkout step");
-  validateStep(errors, node, { uses: "actions/setup-node@v4", with: { "node-version": "20" } }, "moderation Node step");
+  validateStep(errors, node, { uses: "actions/setup-node@v4", with: { "node-version": "22" } }, "moderation Node step");
   validateStep(errors, install, { run: "npm ci" }, "moderation install step");
   validateStep(errors, auth, { id: "auth", uses: "google-github-actions/auth@v3", with: { credentials_json: secretReference } }, "moderation authentication step");
   validateStep(errors, processor, { run: "npm run moderation:process", env: { GCLOUD_PROJECT: "anonchatlogin", GOOGLE_APPLICATION_CREDENTIALS: credentialPathReference } }, "moderation processor step");
@@ -209,7 +209,7 @@ export const validateDeployWorkflow = (workflow) => {
   validateStep(errors, steps[1], {
     name: "Set up Node.js",
     uses: "actions/setup-node@v4",
-    with: { "node-version": "20" }
+    with: { "node-version": "22" }
   }, "deploy Node step");
   validateStep(errors, steps[2], {
     name: "Install trusted dependencies",
@@ -265,7 +265,7 @@ export const validateRulesWorkflow = (workflow) => {
   const steps = jobSteps(job, errors, "jobs.test");
   exactlyOrderedSteps(errors, steps, ["uses:actions/checkout@v4", "uses:actions/setup-node@v4", "uses:actions/setup-java@v4", "run:npm ci", "run:npm run test:workflow-policy", "run:npm run test:firestore-ci"], "rules workflow steps");
   const node = singleStep(errors, steps, "uses", "actions/setup-node@v4", "rules Node setup");
-  exactly(errors, String(node?.with?.["node-version"]), "20", "rules Node version");
+  exactly(errors, String(node?.with?.["node-version"]), "22", "rules Node version");
   const java = singleStep(errors, steps, "uses", "actions/setup-java@v4", "Java setup");
   exactly(errors, String(java?.with?.["java-version"]), "21", "Java version");
   exactly(errors, java?.with?.distribution, "temurin", "Java distribution");
@@ -273,7 +273,7 @@ export const validateRulesWorkflow = (workflow) => {
   singleStep(errors, steps, "run", "npm run test:workflow-policy", "workflow policy test command");
   singleStep(errors, steps, "run", "npm run test:firestore-ci", "Firestore CI test command");
   validateStep(errors, steps[0], { uses: "actions/checkout@v4" }, "rules checkout step");
-  validateStep(errors, node, { uses: "actions/setup-node@v4", with: { "node-version": "20" } }, "rules Node step");
+  validateStep(errors, node, { uses: "actions/setup-node@v4", with: { "node-version": "22" } }, "rules Node step");
   validateStep(errors, java, { uses: "actions/setup-java@v4", with: { distribution: "temurin", "java-version": "21" } }, "rules Java step");
   validateStep(errors, steps[3], { run: "npm ci" }, "rules install step");
   validateStep(errors, steps[4], { run: "npm run test:workflow-policy" }, "rules policy test step");
