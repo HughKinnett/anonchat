@@ -1115,7 +1115,16 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.moderationState == 'visible'
         && validRoomExpiry();
-      allow update: if validModerationHoldUpdate('room', roomId, resource.data.ownerId);
+      allow update: if validModerationHoldUpdate('room', roomId, resource.data.ownerId)
+        || (activeUserAfter()
+          && resource.data.ownerId == request.auth.uid
+          && resource.data.get('moderationState', 'visible') == 'visible'
+          && resource.data.get('cleanupState', 'open') != 'closing'
+          && request.resource.data.get('cleanupState', '') == 'closing'
+          && request.resource.data.closedAt == request.time
+          && request.resource.data.expiresAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['cleanupState', 'closedAt', 'expiresAt']));
       allow delete: if false;
     }
 

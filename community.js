@@ -235,7 +235,34 @@ const renderRooms = () => {
     const controls = document.createElement("div");
     controls.className = "room-card-actions";
     controls.append(enter);
-    if (data.ownerId !== state.user.uid) controls.append(reportRoomControl(room));
+    if (data.ownerId === state.user.uid) {
+      const removeRoom = document.createElement("button");
+      removeRoom.type = "button";
+      removeRoom.className = "primary";
+      removeRoom.textContent = "Delete room";
+      removeRoom.setAttribute("aria-label", `Delete temporary room ${data.name}`);
+      removeRoom.addEventListener("click", async () => {
+        if (!window.confirm("Delete this temporary room now? Everyone will immediately lose access.")) return;
+        removeRoom.disabled = true;
+        try {
+          await updateDoc(room.ref, {
+            cleanupState: "closing",
+            closedAt: serverTimestamp(),
+            expiresAt: serverTimestamp()
+          });
+          state.rooms = state.rooms.filter((entry) => entry.id !== room.id);
+          if (state.activeRoom === room.id) closeActiveRoom("You deleted this temporary room.");
+          renderRooms();
+          setStatus("Temporary room deleted.");
+        } catch {
+          removeRoom.disabled = false;
+          setStatus("Could not delete that temporary room.", true);
+        }
+      });
+      controls.append(removeRoom);
+    } else {
+      controls.append(reportRoomControl(room));
+    }
     card.append(copy, controls);
     return card;
   }));

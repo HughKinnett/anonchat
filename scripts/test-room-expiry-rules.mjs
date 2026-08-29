@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 
 const testEnv = await initializeTestEnvironment({
   projectId: "anonchat-room-expiry-rules-test",
@@ -41,6 +41,14 @@ try {
     await assertFails(setDoc(doc(member, "roomMembers", `${roomId}_member`), { roomId, uid: "member", joinedAt: serverTimestamp() }));
     await assertFails(setDoc(doc(member, "roomMessages", `${roomId}-message`), { roomId, senderId: "member", tempName: "Member", text: "expired", expiresAt: new Date(0), moderationState: "visible", createdAt: serverTimestamp() }));
   }
+  await assertFails(updateDoc(doc(member, "rooms", "active-room"), {
+    cleanupState: "closing", closedAt: serverTimestamp(), expiresAt: serverTimestamp()
+  }), "only the room creator can close a room early");
+  await assertSucceeds(updateDoc(doc(owner, "rooms", "active-room"), {
+    cleanupState: "closing", closedAt: serverTimestamp(), expiresAt: serverTimestamp()
+  }));
+  const closedRoom = await getDoc(doc(owner, "rooms", "active-room"));
+  if (closedRoom.data().cleanupState !== "closing") throw new Error("owner close was not stored");
   console.log("Firestore room expiry authorization passed");
 } finally {
   await testEnv.cleanup();
