@@ -322,12 +322,18 @@ function renderReportRow(item) {
   }
   if (actionState.feedback) info.append(create("small", actionState.feedback, "report-feedback"));
   if (!user) info.append(create("small", "Reported account is no longer available.", "report-feedback"));
-  else if (protectedUser) info.append(create("small", "Protected administrator accounts cannot be changed.", "report-feedback"));
+  else if (protectedUser) info.append(create("small",
+    "This administrator account cannot be banned or deleted, but its posts can still be restored or removed.",
+    "report-feedback"));
+  const directPostAction = ["post", "communityPost"].includes(item.targetKind);
+  const postActionClosed = ["restored", "deleted", "expiredEvidence"].includes(item.status);
   const restore = create("button", item.targetKind === "room" ? "Allow room to resume" : "Restore material", "admin-action restore");
-  restore.type = "button"; restore.dataset.focusKey = focusKey("report", "restore", item.id); restore.dataset.reportId = item.id; restore.disabled = actionState.restore.disabled || !moderationControlsReady();
+  restore.type = "button"; restore.dataset.focusKey = focusKey("report", "restore", item.id); restore.dataset.reportId = item.id;
+  restore.disabled = directPostAction ? postActionClosed : actionState.restore.disabled || !moderationControlsReady();
   restore.onclick = () => queueModerationAction(item, "restore", restore);
   const removeMaterial = create("button", item.targetKind === "room" ? "Delete room permanently" : "Delete material permanently", "admin-action danger");
-  removeMaterial.type = "button"; removeMaterial.dataset.focusKey = focusKey("report", "delete-material", item.id); removeMaterial.dataset.reportId = item.id; removeMaterial.disabled = actionState.deleteMaterial.disabled || !moderationControlsReady();
+  removeMaterial.type = "button"; removeMaterial.dataset.focusKey = focusKey("report", "delete-material", item.id); removeMaterial.dataset.reportId = item.id;
+  removeMaterial.disabled = directPostAction ? postActionClosed : actionState.deleteMaterial.disabled || !moderationControlsReady();
   removeMaterial.onclick = () => queueModerationAction(item, "deleteMaterial", removeMaterial);
   const ban = create("button", "Ban user", "admin-action danger");
   ban.type = "button"; ban.dataset.focusKey = focusKey("report", "ban", item.id); ban.dataset.reportId = item.id; ban.disabled = actionState.ban.disabled || !accountAvailable;
