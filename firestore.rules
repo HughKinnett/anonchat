@@ -334,6 +334,43 @@ service cloud.firestore {
         && request.resource.data.status == 'queued';
     }
 
+    function validImmediateReportCase(caseId) {
+      let intakeId = request.auth.uid + '_' + request.resource.data.targetKind + '_'
+        + request.resource.data.targetId;
+      let intake = getAfter(/databases/$(database)/documents/reportIntakes/$(intakeId));
+      return activeUserAfter()
+        && request.resource.data.keys().hasOnly([
+          'targetKind', 'targetCollection', 'targetId', 'targetPath', 'reportedUserId',
+          'snapshot', 'status', 'reportCount', 'reasonTotals', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.targetKind in ['post', 'communityPost']
+        && caseId == request.resource.data.targetKind + '_' + request.resource.data.targetId
+        && existsAfter(/databases/$(database)/documents/reportIntakes/$(intakeId))
+        && !exists(/databases/$(database)/documents/reportIntakes/$(intakeId))
+        && intake.data.reporterUid == request.auth.uid
+        && intake.data.targetKind == request.resource.data.targetKind
+        && intake.data.targetCollection == request.resource.data.targetCollection
+        && intake.data.targetId == request.resource.data.targetId
+        && intake.data.reportedUserId == request.resource.data.reportedUserId
+        && intake.data.createdAt == request.time
+        && request.resource.data.targetPath
+          == request.resource.data.targetCollection + '/' + request.resource.data.targetId
+        && request.resource.data.snapshot.keys()
+          .hasOnly(['kind', 'authorId', 'authorName', 'text'])
+        && request.resource.data.snapshot.kind == request.resource.data.targetKind
+        && request.resource.data.snapshot.authorId == request.resource.data.reportedUserId
+        && request.resource.data.snapshot.authorName is string
+        && request.resource.data.snapshot.authorName.size() <= 100
+        && request.resource.data.snapshot.text is string
+        && request.resource.data.snapshot.text.size() <= 500
+        && request.resource.data.status == 'open'
+        && request.resource.data.reportCount == 1
+        && request.resource.data.reasonTotals.keys().hasOnly([intake.data.reason])
+        && request.resource.data.reasonTotals.get(intake.data.reason, 0) == 1
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
     function validAdminDeletionCase(caseId) {
       return isAdmin()
         && request.resource.data.keys().hasOnly([
@@ -638,14 +675,15 @@ service cloud.firestore {
 
     match /moderationCases/{caseId} {
       allow read: if isAdmin();
-      allow create: if validAdminDeletionCase(caseId);
-      allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'updatedAt', 'resolvedAt', 'resolvedBy'])
-        && request.resource.data.status in ['restored', 'deleted']
-        && request.resource.data.updatedAt == request.time
-        && request.resource.data.resolvedAt == request.time
-        && request.resource.data.resolvedBy == request.auth.uid;
+      allow create: if validImmediateReportCase(caseId) || validAdminDeletionCase(caseId);
+      allow update: if validImmediateReportCase(caseId)
+        || (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt', 'resolvedAt', 'resolvedBy'])
+          && request.resource.data.status in ['restored', 'deleted']
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.resolvedAt == request.time
+          && request.resource.data.resolvedBy == request.auth.uid);
       allow delete: if false;
 
       match /reports/{reportId} {

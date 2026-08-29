@@ -74,16 +74,39 @@ export const createModerationClient = ({ db, firestore, currentUid, timestamp, c
     if (await hasReported(target)) throw alreadyReported();
     const key = reportKey(target);
     try {
-      const batch = writeBatch(db);
-      batch.set(ref, payload);
-      batch.set(receipt, { reporterUid: currentUid, targetKind: target.targetKind, targetId: target.targetId, createdAt: payload.createdAt });
       const hold = reportHoldPatch({
         reporterUid: currentUid,
         targetKind: target.targetKind,
         targetId: target.targetId,
         timestamp: payload.createdAt
       });
-      if (hold) batch.update(doc(db, target.targetCollection, target.targetId), hold);
+      const materialRef = hold ? doc(db, target.targetCollection, target.targetId) : undefined;
+      const materialSnapshot = materialRef ? await getDoc(materialRef) : undefined;
+      const material = materialSnapshot?.exists() ? materialSnapshot.data() : undefined;
+      const batch = writeBatch(db);
+      batch.set(ref, payload);
+      batch.set(receipt, { reporterUid: currentUid, targetKind: target.targetKind, targetId: target.targetId, createdAt: payload.createdAt });
+      if (hold) {
+        batch.update(materialRef, hold);
+        batch.set(doc(db, "moderationCases", `${target.targetKind}_${target.targetId}`), {
+          targetKind: target.targetKind,
+          targetCollection: target.targetCollection,
+          targetId: target.targetId,
+          targetPath: `${target.targetCollection}/${target.targetId}`,
+          reportedUserId: target.reportedUserId,
+          snapshot: {
+            kind: target.targetKind,
+            authorId: String(material?.authorId || target.reportedUserId),
+            authorName: String(material?.username || "anonymous").slice(0, 100),
+            text: String(material?.content || "").slice(0, 500)
+          },
+          status: "open",
+          reportCount: 1,
+          reasonTotals: { [reason]: 1 },
+          createdAt: payload.createdAt,
+          updatedAt: payload.createdAt
+        });
+      }
       await batch.commit();
       updateReported(key, true); channel?.postMessage?.({ key, reported: true });
     } catch (writeError) {
