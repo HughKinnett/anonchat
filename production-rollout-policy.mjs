@@ -7,6 +7,36 @@ export const gcloudCompositeIndexListArguments = (projectId) => [
   "--format=json"
 ];
 
+const safeResourceId = (value) => typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value);
+const safeFieldPath = (value) => typeof value === "string"
+  && (value === "__name__" || /^[A-Za-z_][A-Za-z0-9_.]{0,1499}$/.test(value));
+const queryScopeArgument = (scope) => new Map([
+  ["COLLECTION", "collection"],
+  ["COLLECTION_GROUP", "collection-group"],
+  ["COLLECTION_RECURSIVE", "collection-recursive"]
+]).get(scope);
+const fieldConfigArgument = (field) => {
+  if (!safeFieldPath(field?.fieldPath)) throw coded("INVALID_INDEX_DEFINITION");
+  if (field.order === "ASCENDING") return `field-path=${field.fieldPath},order=ascending`;
+  if (field.order === "DESCENDING") return `field-path=${field.fieldPath},order=descending`;
+  if (field.arrayConfig === "CONTAINS") return `field-path=${field.fieldPath},array-config=contains`;
+  throw coded("INVALID_INDEX_DEFINITION");
+};
+export const gcloudCompositeIndexCreateArguments = (projectId, index) => {
+  const scope = queryScopeArgument(index?.queryScope);
+  if (!safeResourceId(projectId) || !safeResourceId(index?.collectionGroup) || !scope
+    || !Array.isArray(index?.fields) || index.fields.length < 2) throw coded("INVALID_INDEX_DEFINITION");
+  return [
+    "firestore", "indexes", "composite", "create",
+    "--project", projectId,
+    "--database", "(default)",
+    "--collection-group", index.collectionGroup,
+    "--query-scope", scope,
+    ...index.fields.flatMap((field) => ["--field-config", fieldConfigArgument(field)]),
+    "--async", "--quiet"
+  ];
+};
+
 const collectionGroupFromName = (name) => {
   if (typeof name !== "string") return "";
   const match = name.match(/\/collectionGroups\/([^/]+)\/indexes\//);
@@ -33,6 +63,11 @@ export const requiredIndexesReady = (requiredIndexes, remoteIndexes) =>
   Array.isArray(requiredIndexes) && Array.isArray(remoteIndexes)
   && requiredIndexes.every((required) => remoteIndexes.some((remote) =>
     remote?.state === "READY" && matchesRequiredIndex(required, remote)));
+
+export const missingRequiredIndexes = (requiredIndexes, remoteIndexes) => {
+  if (!Array.isArray(requiredIndexes) || !Array.isArray(remoteIndexes)) throw coded("INVALID_INDEX_LIST");
+  return requiredIndexes.filter((required) => !remoteIndexes.some((remote) => matchesRequiredIndex(required, remote)));
+};
 
 export const waitForRequiredIndexes = async ({
   requiredIndexes,

@@ -40,8 +40,10 @@ jobs:
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Deploy Firestore indexes
-        run: npx --no-install firebase deploy --project anonchatlogin --only firestore:indexes --non-interactive
+      - name: Ensure required Firestore indexes
+        run: npm run rollout:ensure-indexes
+        env:
+          GCLOUD_PROJECT: anonchatlogin
 
       - name: Wait for required Firestore indexes
         run: npm run rollout:wait-indexes
