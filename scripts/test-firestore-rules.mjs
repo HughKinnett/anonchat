@@ -75,6 +75,37 @@ try {
     status: "accepted", respondedAt: serverTimestamp()
   }));
 
+  // Accepted private chats are readable only by their two participants.
+  await testEnv.clearFirestore();
+  await seed({ ...declinedRequest, status: "accepted" });
+  await testEnv.withSecurityRulesDisabled(async (context) => setDoc(
+    doc(context.firestore(), "directMessages", "accepted-message"),
+    {
+      participants: ["user-a", "user-b"],
+      senderId: "user-a",
+      text: "private",
+      createdAt: new Date(2)
+    }
+  ));
+  await assertSucceeds(getDoc(doc(userA, "directMessages", "accepted-message")));
+  await assertSucceeds(getDoc(doc(userB, "directMessages", "accepted-message")));
+  await assertFails(getDoc(doc(userC, "directMessages", "accepted-message")));
+
+  // Participants cannot read messages until the request is accepted.
+  await testEnv.clearFirestore();
+  await seed({ ...declinedRequest, status: "pending" });
+  await testEnv.withSecurityRulesDisabled(async (context) => setDoc(
+    doc(context.firestore(), "directMessages", "pending-message"),
+    {
+      participants: ["user-a", "user-b"],
+      senderId: "user-a",
+      text: "not yet available",
+      createdAt: new Date(2)
+    }
+  ));
+  await assertFails(getDoc(doc(userA, "directMessages", "pending-message")));
+  await assertFails(getDoc(doc(userB, "directMessages", "pending-message")));
+
   console.log("Firestore message request authorization regressions passed");
 } finally {
   await testEnv.cleanup();

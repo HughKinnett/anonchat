@@ -1210,7 +1210,14 @@ service cloud.firestore {
     }
 
     match /directMessages/{messageId} {
-      allow read: if activeUser() && request.auth.uid in resource.data.participants;
+      allow read: if activeUser()
+        && resource.data.participants is list
+        && resource.data.participants.size() == 2
+        && resource.data.participants[0] != resource.data.participants[1]
+        && resource.data.senderId in resource.data.participants
+        && request.auth.uid in resource.data.participants
+        && acceptedChat(resource.data.participants[0] == request.auth.uid
+          ? resource.data.participants[1] : resource.data.participants[0]);
       allow create: if activeUserAfter()
         && request.resource.data.keys().hasOnly(['participants', 'senderId', 'text', 'createdAt', 'expiresAt'])
         && request.resource.data.participants is list
