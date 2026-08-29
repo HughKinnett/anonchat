@@ -33,6 +33,10 @@ assert.deepEqual(snapshotForTarget("communityPost", { authorId: "author", userna
   kind: "communityPost", authorId: "author", authorName: "Name", text: "hello", category: "Question", optionCount: 2
 });
 const expiry = time(88);
+const roomCreatedAt = time(1);
+assert.deepEqual(snapshotForTarget("room", { ownerId: "author", name: "Room name", topic: "Room topic", createdAt: roomCreatedAt, expiresAt: expiry }), {
+  kind: "room", authorId: "author", authorName: "Room name", text: "Room topic", createdAt: roomCreatedAt, expiresAt: expiry
+});
 assert.deepEqual(snapshotForTarget("roomMessage", { senderId: "author", tempName: "Temp", text: "hello", roomId: "room", expiresAt: expiry }), {
   kind: "roomMessage", authorId: "author", authorName: "Temp", text: "hello", roomId: "room", expiresAt: expiry
 });

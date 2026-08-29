@@ -1,8 +1,9 @@
 import { LEGACY_ROOM_GRACE_MS, LEASE_MS, MAX_ATTEMPTS, PAGE_SIZE, caseId, fixedErrorCode, isLeaseEligible, isTerminalModerationRecord, isValidModerationIntake, restoreOutcome, retryDelayMillis, snapshotForTarget, timestampToMillis } from "./moderation-processor-policy.mjs";
 
 const coded = (code) => Object.assign(new Error(code), { code });
-const targetAuthor = (kind, data) => kind === "roomMessage" ? data.senderId : kind === "user" ? data.uid : data.authorId;
+const targetAuthor = (kind, data) => kind === "room" ? data.ownerId : kind === "roomMessage" ? data.senderId : kind === "user" ? data.uid : data.authorId;
 const safeRoomId = (value) => typeof value === "string" && value.length > 0 && !value.includes("/") && value !== "." && value !== "..";
+const ROOM_RESTORE_MS = 24 * 60 * 60 * 1000;
 const protectedEvidence = (snapshot) => {
   const { media = [], ...boundedSnapshot } = snapshot;
   return {
@@ -13,8 +14,8 @@ const protectedEvidence = (snapshot) => {
 const retentionBoundary = Object.freeze({ boundary: "adminPermanentDelete", purgeAfter: null });
 
 export class FirestoreModerationAdapter {
-  constructor({ db, Timestamp, FieldPath, clock = () => Date.now(), tokenFactory = () => crypto.randomUUID(), beforeLeasedDelete, beforeBackfillPage, beforeRoomLifecyclePage, beforeRoomCleanupClaim, beforeRoomMessageCleanupClaim }) {
-    this.db = db; this.Timestamp = Timestamp; this.FieldPath = FieldPath; this.clock = clock; this.tokenFactory = tokenFactory; this.beforeLeasedDelete = beforeLeasedDelete; this.beforeBackfillPage = beforeBackfillPage; this.beforeRoomLifecyclePage = beforeRoomLifecyclePage; this.beforeRoomCleanupClaim = beforeRoomCleanupClaim; this.beforeRoomMessageCleanupClaim = beforeRoomMessageCleanupClaim;
+  constructor({ db, Timestamp, FieldPath, clock = () => Date.now(), tokenFactory = () => crypto.randomUUID(), beforeLeasedDelete, beforeBackfillPage, beforeRoomLifecyclePage, beforeRoomCleanupClaim, beforeRoomMessageCleanupClaim, beforeRoomRestorePage }) {
+    this.db = db; this.Timestamp = Timestamp; this.FieldPath = FieldPath; this.clock = clock; this.tokenFactory = tokenFactory; this.beforeLeasedDelete = beforeLeasedDelete; this.beforeBackfillPage = beforeBackfillPage; this.beforeRoomLifecyclePage = beforeRoomLifecyclePage; this.beforeRoomCleanupClaim = beforeRoomCleanupClaim; this.beforeRoomMessageCleanupClaim = beforeRoomMessageCleanupClaim; this.beforeRoomRestorePage = beforeRoomRestorePage;
   }
   now() { return this.clock(); }
   timestamp(value) { return this.Timestamp.fromMillis(value); }
@@ -353,13 +354,14 @@ export class FirestoreModerationAdapter {
       const [caseSnapshot, reportSnapshot, actionSnapshot] = await Promise.all([transaction.get(caseRef), transaction.get(reportRef), transaction.get(actionRef)]);
       const evidence = protectedEvidence(snapshotForTarget(intake.targetKind, source));
       const expiredEvidence = intake.targetKind === "roomMessage" && timestampToMillis(source.expiresAt) <= this.now();
-      const base = { targetKind: intake.targetKind, targetCollection: intake.targetCollection, targetId: intake.targetId, targetPath: intake.targetPath, reportedUserId: intake.reportedUserId, snapshot: evidence.snapshot, evidenceRetention: retentionBoundary, updatedAt: this.timestamp(this.now()) };
+      const roomHold = intake.targetKind === "room" ? { moderationHoldId: id } : {};
+      const base = { targetKind: intake.targetKind, targetCollection: intake.targetCollection, targetId: intake.targetId, targetPath: intake.targetPath, reportedUserId: intake.reportedUserId, snapshot: evidence.snapshot, evidenceRetention: retentionBoundary, ...roomHold, updatedAt: this.timestamp(this.now()) };
       const deletionPending = caseSnapshot.exists && (caseSnapshot.data().status === "deleteQueued" || (actionSnapshot.exists && actionSnapshot.data().action === "deleteMaterial" && ["queued", "processing", "failed"].includes(actionSnapshot.data().status)));
       if (!caseSnapshot.exists) {
         transaction.set(caseRef, { ...base, status: expiredEvidence ? "expiredEvidence" : "open", reportCount: 0, reasonTotals: {}, createdAt: this.timestamp(this.now()) });
         if (evidence.media.length) transaction.set(caseRef.collection("evidence").doc("media"), { items: evidence.media, createdAt: this.timestamp(this.now()), retention: retentionBoundary });
       }
-      else transaction.set(caseRef, { status: deletionPending ? "deleteQueued" : expiredEvidence ? "expiredEvidence" : "open", updatedAt: this.timestamp(this.now()) }, { merge: true });
+      else transaction.set(caseRef, { status: deletionPending ? "deleteQueued" : expiredEvidence ? "expiredEvidence" : "open", ...roomHold, updatedAt: this.timestamp(this.now()) }, { merge: true });
       if (!reportSnapshot.exists) {
         const totals = caseSnapshot.exists ? (caseSnapshot.data().reasonTotals ?? {}) : {};
         const nextTotals = { ...totals, [intake.reason]: Math.min(PAGE_SIZE, (totals[intake.reason] ?? 0) + 1) };
@@ -396,6 +398,8 @@ export class FirestoreModerationAdapter {
     throw coded("action-invalid");
   }
   async #restore(id, token) {
+    const currentCase = await this.caseRef(id).get();
+    if (currentCase.exists && currentCase.data().targetKind === "room") return this.#restoreRoom(id, token);
     const outcome = await this.db.runTransaction(async (transaction) => {
       const actionRef = this.actionRef(id); await this.#assertLease(transaction, actionRef, token);
       const caseRef = this.caseRef(id); const caseSnapshot = await transaction.get(caseRef);
@@ -410,6 +414,129 @@ export class FirestoreModerationAdapter {
     if (outcome === "missing") return;
     await this.#deleteProcessedReceipts(id, token);
     await this.db.runTransaction(async (transaction) => { await this.#assertLease(transaction, this.actionRef(id), token); transaction.delete(this.actionRef(id)); });
+  }
+  async #restoreRoom(id, token) {
+    const initialized = await this.db.runTransaction(async (transaction) => {
+      const actionRef = this.actionRef(id); const action = await this.#assertLease(transaction, actionRef, token);
+      const caseRef = this.caseRef(id); const caseSnapshot = await transaction.get(caseRef);
+      if (!caseSnapshot.exists) { transaction.delete(actionRef); return { outcome: "missing" }; }
+      const item = caseSnapshot.data();
+      if (item.targetKind !== "room" || item.targetCollection !== "rooms" || !safeRoomId(item.targetId)) throw coded("action-invalid");
+      if (action.restorePhase === "finalized") return {
+        outcome: "finalized", item, restoreExpiresAt: action.restoreExpiresAt, restoreCursor: action.restoreCursor,
+        restoreHoldId: action.restoreHoldId, restoreIntakeId: action.restoreIntakeId, restoreReporterUid: action.restoreReporterUid
+      };
+      const roomRef = this.db.collection("rooms").doc(item.targetId); const room = await transaction.get(roomRef);
+      if (restoreOutcome(item, room, this.now()) === "expired") throw coded("expired-evidence");
+      const restoreHoldId = action.restoreHoldId ?? item.moderationHoldId;
+      if (!safeRoomId(restoreHoldId)) throw coded("action-invalid");
+      if (room.data().moderationState !== "hidden" || room.data().moderationHoldId !== restoreHoldId || item.moderationHoldId !== restoreHoldId) {
+        transaction.delete(actionRef);
+        return { outcome: "superseded" };
+      }
+      const restoreIntakeId = action.restoreIntakeId ?? restoreHoldId;
+      if (!safeRoomId(restoreIntakeId)) throw coded("action-invalid");
+      const intakeSnapshot = await transaction.get(this.intakeRef(restoreIntakeId));
+      const reportSnapshot = await transaction.get(caseRef.collection("reports").doc(restoreIntakeId));
+      const intakeData = intakeSnapshot.data(); const reportData = reportSnapshot.data();
+      const restoreReporterUid = action.restoreReporterUid
+        ?? (intakeSnapshot.exists && isValidModerationIntake(restoreIntakeId, intakeData)
+          && intakeData.targetKind === "room" && intakeData.targetId === item.targetId ? intakeData.reporterUid : reportData?.reporterUid);
+      if (!safeRoomId(restoreReporterUid)) throw coded("action-invalid");
+      const restoreExpiresAt = Number.isFinite(timestampToMillis(action.restoreExpiresAt))
+        ? action.restoreExpiresAt : this.timestamp(this.now() + ROOM_RESTORE_MS);
+      transaction.set(actionRef, {
+        restorePhase: "messages", restoreExpiresAt, restoreHoldId, restoreIntakeId, restoreReporterUid,
+        leaseExpiresAt: this.timestamp(this.now() + LEASE_MS)
+      }, { merge: true });
+      return {
+        outcome: "messages", item, restoreExpiresAt, restoreCursor: typeof action.restoreCursor === "string" ? action.restoreCursor : "",
+        restoreHoldId, restoreIntakeId, restoreReporterUid
+      };
+    });
+    if (["missing", "superseded"].includes(initialized.outcome)) return;
+    if (initialized.outcome !== "finalized") {
+      let cursor = initialized.restoreCursor; let completed = false; let passes = 0;
+      while (passes++ < MAX_ATTEMPTS) {
+        let messageQuery = this.db.collection("roomMessages").where("roomId", "==", initialized.item.targetId)
+          .orderBy(this.FieldPath.documentId()).limit(PAGE_SIZE);
+        if (cursor) messageQuery = messageQuery.startAfter(cursor);
+        const page = await messageQuery.get();
+        if (page.empty) { completed = true; break; }
+        const nextCursor = page.docs.at(-1).id;
+        const pageOutcome = await this.db.runTransaction(async (transaction) => {
+          const action = await this.#assertLease(transaction, this.actionRef(id), token);
+          const [caseSnapshot, room, ...messages] = await Promise.all([
+            transaction.get(this.caseRef(id)),
+            transaction.get(this.db.collection("rooms").doc(initialized.item.targetId)),
+            ...page.docs.map((entry) => transaction.get(entry.ref))
+          ]);
+          if (!caseSnapshot.exists || !room.exists) throw coded("expired-evidence");
+          if (action.restorePhase === "finalized") return "finalized";
+          if (caseSnapshot.data().moderationHoldId !== initialized.restoreHoldId
+            || room.data().moderationState !== "hidden" || room.data().moderationHoldId !== initialized.restoreHoldId) {
+            transaction.delete(this.actionRef(id)); return "superseded";
+          }
+          messages.forEach((message) => {
+            if (message.exists && message.data().roomId === initialized.item.targetId) transaction.set(message.ref, { expiresAt: initialized.restoreExpiresAt }, { merge: true });
+          });
+          transaction.set(this.actionRef(id), {
+            restoreCursor: nextCursor, restorePhase: "messages", leaseExpiresAt: this.timestamp(this.now() + LEASE_MS)
+          }, { merge: true });
+          return "messages";
+        });
+        if (pageOutcome === "superseded") return;
+        if (pageOutcome === "finalized") { completed = true; break; }
+        cursor = nextCursor;
+        await this.beforeRoomRestorePage?.({ phase: "page", roomId: initialized.item.targetId, count: page.size, nextCursor });
+      }
+      if (!completed) throw coded("action-limit");
+    }
+    const finalized = await this.db.runTransaction(async (transaction) => {
+      const action = await this.#assertLease(transaction, this.actionRef(id), token);
+      if (action.restorePhase === "finalized") return { outcome: "finalized", action };
+      const [caseSnapshot, room] = await Promise.all([
+        transaction.get(this.caseRef(id)), transaction.get(this.db.collection("rooms").doc(initialized.item.targetId))
+      ]);
+      if (!caseSnapshot.exists || !room.exists) throw coded("expired-evidence");
+      if (caseSnapshot.data().moderationHoldId !== initialized.restoreHoldId
+        || room.data().moderationState !== "hidden" || room.data().moderationHoldId !== initialized.restoreHoldId) {
+        transaction.delete(this.actionRef(id)); return { outcome: "superseded" };
+      }
+      transaction.set(room.ref, {
+        moderationState: "visible", moderationUpdatedAt: this.timestamp(this.now()), expiresAt: initialized.restoreExpiresAt,
+        cleanupState: "open", cleanupLeaseOwner: "", cleanupLeaseToken: "", cleanupLeaseExpiresAt: this.timestamp(this.now())
+      }, { merge: true });
+      transaction.set(caseSnapshot.ref, { status: "restored", updatedAt: this.timestamp(this.now()) }, { merge: true });
+      transaction.set(this.actionRef(id), {
+        restorePhase: "finalized", restoreFinalizedAt: this.timestamp(this.now()), leaseExpiresAt: this.timestamp(this.now() + LEASE_MS)
+      }, { merge: true });
+      return { outcome: "finalized", action: { ...action, ...initialized, restorePhase: "finalized" } };
+    });
+    if (finalized.outcome === "superseded") return;
+    await this.beforeRoomRestorePage?.({ phase: "finalized", roomId: initialized.item.targetId, count: 0 });
+    const restoreData = { ...initialized, ...finalized.action };
+    await this.#deleteExactRoomRestoreReceipt(id, token, restoreData);
+    await this.db.runTransaction(async (transaction) => {
+      await this.#assertLease(transaction, this.actionRef(id), token);
+      transaction.delete(this.actionRef(id));
+    });
+  }
+  async #deleteExactRoomRestoreReceipt(id, token, restoreData) {
+    const intakeRef = this.intakeRef(restoreData.restoreIntakeId);
+    const receiptRef = this.db.collection("reportReceipts").doc(restoreData.restoreReporterUid).collection("room").doc(restoreData.item.targetId);
+    await this.db.runTransaction(async (transaction) => {
+      await this.#assertLease(transaction, this.actionRef(id), token);
+      const [intake, receipt] = await Promise.all([transaction.get(intakeRef), transaction.get(receiptRef)]);
+      const data = intake.data();
+      const exactIntake = intake.exists && isValidModerationIntake(restoreData.restoreIntakeId, data)
+        && data.targetKind === "room" && data.targetId === restoreData.item.targetId
+        && data.reporterUid === restoreData.restoreReporterUid && data.status === "processed";
+      if (!exactIntake) return;
+      transaction.delete(intakeRef);
+      if (receipt.exists && receipt.data().targetKind === "room" && receipt.data().targetId === restoreData.item.targetId
+        && receipt.data().reporterUid === restoreData.restoreReporterUid) transaction.delete(receiptRef);
+    });
   }
   async #deleteProcessedReceipts(caseIdValue, token) {
     const target = await this.caseRef(caseIdValue).get(); if (!target.exists) return;
@@ -439,13 +566,23 @@ export class FirestoreModerationAdapter {
     if (!caseSnapshot.exists) { await this.db.runTransaction(async (transaction) => { await this.#assertLease(transaction, this.actionRef(id), token); transaction.delete(this.actionRef(id)); }); return; }
     const item = caseSnapshot.data(); await this.renewAction(id, token);
     if (["post", "communityPost"].includes(item.targetKind)) await this.#deletePostCascade(id, token, this.db.collection(item.targetCollection).doc(item.targetId));
+    else if (item.targetKind === "room") {
+      await this.#deleteProcessedReceipts(id, token);
+      const removed = await this.#cleanupRoom(item.targetId, {
+        ownerId: `moderation-${id}`, runCutoff: this.now(), allowInvalidTimestamp: true,
+        onProgress: () => this.renewAction(id, token)
+      });
+      if (!removed && (await this.db.collection("rooms").doc(item.targetId).get()).exists) throw coded("lease-lost");
+    }
     else if (item.targetKind === "roomMessage") await this.#deleteDocumentTree(id, token, this.db.collection("roomMessages").doc(item.targetId));
     await this.#deleteDocumentTree(id, token, this.caseRef(id));
     await this.db.runTransaction(async (transaction) => { await this.#assertLease(transaction, this.actionRef(id), token); transaction.delete(this.actionRef(id)); });
   }
   async #deletePostCascade(id, token, postRef) {
     await this.#deleteChildCollections(id, token, postRef);
-    for (const collection of ["communityVotes", "timelineVotes"]) await this.#deleteWhere(id, token, this.db.collection(collection).where("postId", "==", postRef.id));
+    await this.#deleteWhere(id, token, this.db.collection("communityVotes")
+      .where("postCollection", "==", postRef.parent.id)
+      .where("postId", "==", postRef.id));
     await this.renewAction(id, token); const snapshot = await postRef.get(); if (snapshot.exists) await this.#deleteLeasedRef(id, token, postRef);
   }
   async #deleteDocumentTree(id, token, reference) {
@@ -572,32 +709,40 @@ export class FirestoreModerationAdapter {
         }, { merge: true });
         return "resolved";
       }
-      if ((!allowInvalidTimestamp && (!Number.isFinite(expiry) || expiry > runCutoff)) || timestampToMillis(data.cleanupLeaseExpiresAt) > this.now()) return false;
+      if ((!allowInvalidTimestamp && (data.moderationState === "hidden" || !Number.isFinite(expiry) || expiry > runCutoff))
+        || timestampToMillis(data.cleanupLeaseExpiresAt) > this.now()) return false;
       transaction.update(roomRef, { cleanupState: "closing", cleanupRunCutoffAt: this.timestamp(runCutoff), cleanupLeaseOwner: ownerId, cleanupLeaseToken: leaseToken, cleanupLeaseExpiresAt: this.timestamp(this.now() + LEASE_MS) }); return true;
     });
     if (!claimed || claimed === "resolved") return claimed;
-    for (const collection of ["roomMessages", "roomMembers"]) {
-      let passes = 0; while (passes++ < MAX_ATTEMPTS) {
-        await onProgress();
-        await this.#renewRoomLease(roomRef, leaseToken);
-        const page = await this.db.collection(collection).where("roomId", "==", id).orderBy(this.FieldPath.documentId()).limit(PAGE_SIZE).get();
-        if (page.empty) break;
-        if (collection === "roomMessages") for (const message of page.docs) {
-          await this.#drainTargetIntakes(message.ref.path, ownerId, roomRef, leaseToken);
-          await this.#deleteDocumentDescendants(message.ref, async () => {
-            await onProgress();
-            await this.#renewRoomLease(roomRef, leaseToken);
-          });
+    let completed = false;
+    try {
+      for (const collection of ["roomMessages", "roomMembers"]) {
+        let passes = 0; while (passes++ < MAX_ATTEMPTS) {
+          await onProgress();
+          await this.#renewRoomLease(roomRef, leaseToken);
+          const page = await this.db.collection(collection).where("roomId", "==", id).orderBy(this.FieldPath.documentId()).limit(PAGE_SIZE).get();
+          if (page.empty) break;
+          if (collection === "roomMessages") for (const message of page.docs) {
+            await this.#drainTargetIntakes(message.ref.path, ownerId, roomRef, leaseToken);
+            await this.#deleteDocumentDescendants(message.ref, async () => {
+              await onProgress();
+              await this.#renewRoomLease(roomRef, leaseToken);
+            });
+          }
+          await this.#renewRoomLease(roomRef, leaseToken); const batch = this.db.batch(); page.docs.forEach((doc) => batch.delete(doc.ref)); await batch.commit();
         }
-        await this.#renewRoomLease(roomRef, leaseToken); const batch = this.db.batch(); page.docs.forEach((doc) => batch.delete(doc.ref)); await batch.commit();
+        if (passes > MAX_ATTEMPTS) throw coded("action-limit");
       }
-      if (passes > MAX_ATTEMPTS) throw coded("action-limit");
+      await onProgress();
+      await this.db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(roomRef); if (!snapshot.exists || snapshot.data().cleanupLeaseToken !== leaseToken || timestampToMillis(snapshot.data().cleanupLeaseExpiresAt) <= this.now()) throw coded("lease-lost");
+        transaction.delete(roomRef);
+      });
+      completed = true;
+      return true;
+    } finally {
+      if (!completed) await this.#releaseRoomLease(roomRef, leaseToken).catch(() => {});
     }
-    await onProgress();
-    await this.db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(roomRef); if (!snapshot.exists || snapshot.data().cleanupLeaseToken !== leaseToken || timestampToMillis(snapshot.data().cleanupLeaseExpiresAt) <= this.now()) throw coded("lease-lost");
-      transaction.delete(roomRef);
-    }); return true;
   }
   async #drainTargetIntakes(targetPath, ownerId, roomRef, roomLeaseToken) {
     let passes = 0;

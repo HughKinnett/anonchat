@@ -18,6 +18,7 @@ import {
   createEventId,
   createSubscriptionVersionFingerprint,
   fixedNotificationErrorCode,
+  isLegacyRoomEventMissingContext,
   isValidQueueEvent,
   notificationPayload,
   queuedEvent,
@@ -167,6 +168,27 @@ assert.equal(isValidQueueEvent({
   leaseToken: "token",
   leaseExpiresAt: later
 }), true);
+const roomEvent = queuedEvent({
+  type: "room-message", actorUid: "actor", recipientUid: "recipient", roomId: "room-1", sourceCreatedAt: createdAt,
+  now: later, route: "/community.html#rooms-panel"
+});
+assert.equal(roomEvent.roomId, "room-1");
+assert.equal(isValidQueueEvent(roomEvent), true);
+assert.equal(isValidQueueEvent({ ...roomEvent, roomId: "" }), false);
+const { roomId: omittedRoomId, ...legacyRoomEvent } = roomEvent;
+void omittedRoomId;
+assert.equal(isLegacyRoomEventMissingContext(legacyRoomEvent), true,
+  "pre-roomId queue records are recognized only for fixed safe suppression");
+assert.equal(isLegacyRoomEventMissingContext({ ...legacyRoomEvent, type: "comment", route: "/timeline.html" }), false);
+assert.equal(isLegacyRoomEventMissingContext({ ...legacyRoomEvent, actorUid: "" }), false);
+assert.throws(() => queuedEvent({
+  type: "room-message", actorUid: "actor", recipientUid: "recipient", sourceCreatedAt: createdAt,
+  now: later, route: "/community.html#rooms-panel"
+}), /INVALID_EVENT_INPUT/, "room notification state cannot discard its parent room id");
+assert.throws(() => queuedEvent({
+  type: "comment", actorUid: "actor", recipientUid: "recipient", roomId: "forged", sourceCreatedAt: createdAt,
+  now: later, route: "/timeline.html"
+}), /INVALID_EVENT_INPUT/, "non-room events cannot smuggle room state");
 for (const forbidden of ["text", "body", "email", "username", "endpoint", "p256dh", "auth", "roomAlias", "sourcePath"]) {
   assert.equal(Object.hasOwn(event, forbidden), false, `${forbidden} is not copied into the queue`);
 }

@@ -1,21 +1,22 @@
 import { auth, db } from "./firebase-config.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { adminDeletionQueuePayloads, canAdminSetBanned, canQueueAdminDeletion, isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
-import { canConfirmDeletion, deletionDialogJobTransition, deletionJobRecord, filterModerationCases, filterUsers, generalContentDeletionPayloads, generalContentDeletionWriteMode, hasDeletionJob, isTerminalModerationAction, legacyRoomActionPayload, moderationActionPayload, moderationActionRetryPayload, moderationActionState, moderationCaseRecord, processorHealth, queueFailureDialogTransition, resolveReportActionFocus, resolveUserFocus, sortInactiveUsers, statusForUser, timestampMillis } from "./admin-dashboard-policy.mjs";
+import { canConfirmDeletion, deletionDialogJobTransition, deletionJobRecord, filterModerationCases, filterUsers, generalContentDeletionPayloads, generalContentDeletionWriteMode, hasDeletionJob, isTerminalModerationAction, legacyRoomActionPayload, moderationActionPayload, moderationActionRetryPayload, moderationActionState, moderationActionsAvailable, moderationCaseRecord, moderationTranscriptMessage, processorHealth, queueFailureDialogTransition, resolveReportActionFocus, resolveUserFocus, sortInactiveUsers, statusForUser, timestampMillis } from "./admin-dashboard-policy.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { addDoc, collection, collectionGroup, doc, getDoc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { addDoc, collection, collectionGroup, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = id => document.getElementById(id);
-const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], roomMessages: [], votes: [], jobs: new Map(), moderationCases: [], moderationActions: new Map(), legacyRooms: [], processor: null };
+const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], votes: [], jobs: new Map(), moderationCases: [], moderationActions: new Map(), legacyRooms: [], processor: null, moderationProcessor: null, moderationProcessorListenerHealthy: false };
 const unsubs = [];
 let adminUid = "", adminUser = null, userFilter = "all", reportFilter = "open", pageActive = true, listenersStarted = false, heartbeatTimer = null;
 let dialogState = { open: false, targetUid: "", submitting: false }, dialogTarget = null, dialogTrigger = null;
 const pendingModerationActions = new Map();
-const pendingLegacyRoomActions = new Set(), loadedModerationEvidence = new Map(), reportActionUnsubs = new Map();
-const moderationEvidenceEpochs = new Map();
+const pendingLegacyRoomActions = new Set(), loadedModerationEvidence = new Map(), loadedRoomTranscripts = new Map(), reportActionUnsubs = new Map();
+const moderationEvidenceEpochs = new Map(), roomTranscriptEpochs = new Map();
 let reportCasesUnsub = null, legacyRoomsUnsub = null, reportPageLast = null, legacyRoomPageLast = null;
 const reportPageSize = 100, reportPageCursors = [];
+const roomTranscriptPageSize = 100;
 const legacyRoomPageSize = 100, legacyRoomPageCursors = [];
 
 const setStatus = (message, error = false) => { $("admin-status").textContent = message; $("admin-status").style.color = error ? "#fca5a5" : ""; };
@@ -30,18 +31,26 @@ const userOptions = () => ({ now: Date.now(), deletionJobs: state.jobs });
 const focusKey = (scope, action, uid) => `${scope}-${action}-${uid}`;
 const controlByFocusKey = key => [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === key);
 const currentUserFocusKey = () => document.activeElement?.closest?.("[data-focus-key]")?.dataset.focusKey || "";
+const moderationControlsReady = () => moderationActionsAvailable({
+  listenerHealthy: state.moderationProcessorListenerHealthy,
+  processor: state.moderationProcessor
+});
 const evictModerationEvidence = (id) => {
   moderationEvidenceEpochs.set(id, (moderationEvidenceEpochs.get(id) || 0) + 1);
   const media = loadedModerationEvidence.get(id) || [];
   media.forEach((item) => { if (item?.objectUrl) URL.revokeObjectURL(item.objectUrl); });
   loadedModerationEvidence.delete(id);
 };
+const evictRoomTranscript = (id) => {
+  roomTranscriptEpochs.set(id, (roomTranscriptEpochs.get(id) || 0) + 1);
+  loadedRoomTranscripts.delete(id);
+};
 
 function activityByUser() {
   const points = new Map(), add = (uid, amount = 1) => { if (uid) points.set(uid, (points.get(uid) || 0) + amount); };
   state.posts.forEach(entry => add(entry.authorId, 3)); state.communityPosts.forEach(entry => add(entry.authorId, 3));
   state.comments.forEach(entry => add(entry.uid, 2)); state.reactions.forEach(entry => add(entry.uid));
-  state.follows.forEach(entry => add(entry.followerId)); state.roomMessages.forEach(entry => add(entry.senderId));
+  state.follows.forEach(entry => add(entry.followerId));
   return points;
 }
 
@@ -102,7 +111,7 @@ function renderUsers() {
   restoreUserFocus(activeFocusKey);
 }
 
-const reportTypeLabel = kind => ({ post: "Timeline post", communityPost: "Community post", roomMessage: "Room message", user: "User profile" }[kind] || "Reported material");
+const reportTypeLabel = kind => ({ post: "Timeline post", communityPost: "Community post", room: "Temporary chat room", roomMessage: "Room message", user: "User profile" }[kind] || "Reported material");
 const reportStatusLabel = status => ({ open: "Needs review", restored: "Restored", deleteQueued: "Permanent deletion queued", expiredEvidence: "Source expired — evidence retained" }[status] || "Needs review");
 const reportReasonLabel = item => {
   const reasons = Object.entries(item.reasonTotals || {}).filter(([, count]) => Number(count) > 0)
@@ -115,6 +124,36 @@ const reportDeletionPending = item => {
   return Boolean(user && hasDeletionJob(user, state.jobs));
 };
 const reportAction = item => pendingModerationActions.get(item.id) || state.moderationActions.get(item.id);
+
+async function loadRoomTranscriptPage(item) {
+  if (item.targetKind !== "room") return;
+  const transcript = loadedRoomTranscripts.get(item.id) || { messages: [], cursor: null, complete: false, loading: false };
+  if (transcript.loading || transcript.complete) return;
+  const epoch = roomTranscriptEpochs.get(item.id) || 0;
+  loadedRoomTranscripts.set(item.id, { ...transcript, loading: true, error: "" });
+  renderReports();
+  try {
+    const transcriptQuery = transcript.cursor
+      ? query(collection(db, "roomMessages"), where("roomId", "==", item.targetId), orderBy("createdAt", "asc"), orderBy(documentId(), "asc"), startAfter(transcript.cursor), limit(roomTranscriptPageSize))
+      : query(collection(db, "roomMessages"), where("roomId", "==", item.targetId), orderBy("createdAt", "asc"), orderBy(documentId(), "asc"), limit(roomTranscriptPageSize));
+    const snapshot = await getDocs(transcriptQuery);
+    if (!listenersStarted || !pageActive || roomTranscriptEpochs.get(item.id) !== epoch
+      || !state.moderationCases.some((entry) => entry.id === item.id)) return;
+    loadedRoomTranscripts.set(item.id, {
+      messages: [...transcript.messages, ...snapshot.docs.map((entry) => moderationTranscriptMessage(entry.id, entry.data()))],
+      cursor: snapshot.docs.at(-1) ?? transcript.cursor,
+      complete: snapshot.size < roomTranscriptPageSize,
+      loading: false,
+      error: ""
+    });
+    renderReports();
+  } catch {
+    if (roomTranscriptEpochs.get(item.id) !== epoch) return;
+    loadedRoomTranscripts.set(item.id, { ...transcript, loading: false, error: "Could not load this room transcript." });
+    setStatus("Could not load this room transcript.", true);
+    renderReports();
+  }
+}
 
 const reportFocus = () => {
   const control = document.activeElement?.closest?.("[data-focus-key]");
@@ -130,6 +169,10 @@ function restoreReportFocus({ sourceFocusKey, reportId } = {}) {
 }
 
 async function queueModerationAction(item, action, control) {
+  if (!moderationControlsReady()) {
+    setStatus("Moderation actions are paused until the trusted service is healthy.", true);
+    return;
+  }
   const user = reportUser(item), existingAction = reportAction(item), intendedFocus = { sourceFocusKey: control.dataset.focusKey, reportId: item.id };
   const actionState = moderationActionState({ caseRecord: item, action: existingAction, deletionPending: reportDeletionPending(item), username: user?.username });
   if (actionState[action]?.disabled || pendingModerationActions.has(item.id)) return;
@@ -140,8 +183,11 @@ async function queueModerationAction(item, action, control) {
     await setDoc(doc(db, "moderationActions", item.id), terminalRetry
       ? moderationActionRetryPayload({ caseRecord: item, action, existingAction, requestedAt })
       : moderationActionPayload({ caseRecord: item, action, requestedBy: adminUid, requestedAt }));
-    if (action === "deleteMaterial") evictModerationEvidence(item.id);
-    setStatus(terminalRetry ? "Material action queued for another attempt." : action === "restore" ? "Restore material queued." : "Permanent material deletion queued.");
+    if (action === "deleteMaterial") { evictModerationEvidence(item.id); evictRoomTranscript(item.id); }
+    setStatus(terminalRetry ? "Material action queued for another attempt."
+      : item.targetKind === "room" && action === "restore" ? "Room resume queued."
+      : item.targetKind === "room" ? "Permanent room deletion queued."
+      : action === "restore" ? "Restore material queued." : "Permanent material deletion queued.");
   } catch {
     pendingModerationActions.delete(item.id);
     setStatus("Could not queue that material action. No changes were made.", true);
@@ -227,14 +273,38 @@ function renderReportRow(item) {
     }
     info.append(evidenceHost);
   }
+  if (item.targetKind === "room") {
+    const transcript = loadedRoomTranscripts.get(item.id);
+    const transcriptHost = create("section", undefined, "room-transcript");
+    transcriptHost.setAttribute("aria-label", "Reported room transcript");
+    transcriptHost.append(create("strong", "Room transcript"));
+    if (transcript?.messages?.length) {
+      const list = create("div", undefined, "room-transcript-list");
+      transcript.messages.forEach((message) => {
+        const entry = create("article", undefined, "room-transcript-message");
+        entry.append(create("small", `@${message.authorName || "Unknown member"} · ${formatDate(message.createdAt)}`), create("p", message.text || "Empty message"));
+        list.append(entry);
+      });
+      transcriptHost.append(list);
+    }
+    if (transcript?.error) transcriptHost.append(create("small", transcript.error, "report-feedback"));
+    if (!transcript?.complete) {
+      const loadTranscript = create("button", transcript?.messages?.length ? "Load more messages" : "View transcript", "admin-action");
+      loadTranscript.type = "button"; loadTranscript.disabled = transcript?.loading === true;
+      loadTranscript.textContent = transcript?.loading ? "Loading transcript…" : loadTranscript.textContent;
+      loadTranscript.onclick = () => loadRoomTranscriptPage(item);
+      transcriptHost.append(loadTranscript);
+    } else if (!transcript.messages.length) transcriptHost.append(create("small", "No retained messages are available.", "report-feedback"));
+    info.append(transcriptHost);
+  }
   if (actionState.feedback) info.append(create("small", actionState.feedback, "report-feedback"));
   if (!user) info.append(create("small", "Reported account is no longer available.", "report-feedback"));
   else if (protectedUser) info.append(create("small", "Protected administrator accounts cannot be changed.", "report-feedback"));
-  const restore = create("button", "Restore material", "admin-action restore");
-  restore.type = "button"; restore.dataset.focusKey = focusKey("report", "restore", item.id); restore.dataset.reportId = item.id; restore.disabled = actionState.restore.disabled;
+  const restore = create("button", item.targetKind === "room" ? "Allow room to resume" : "Restore material", "admin-action restore");
+  restore.type = "button"; restore.dataset.focusKey = focusKey("report", "restore", item.id); restore.dataset.reportId = item.id; restore.disabled = actionState.restore.disabled || !moderationControlsReady();
   restore.onclick = () => queueModerationAction(item, "restore", restore);
-  const removeMaterial = create("button", "Delete material permanently", "admin-action danger");
-  removeMaterial.type = "button"; removeMaterial.dataset.focusKey = focusKey("report", "delete-material", item.id); removeMaterial.dataset.reportId = item.id; removeMaterial.disabled = actionState.deleteMaterial.disabled;
+  const removeMaterial = create("button", item.targetKind === "room" ? "Delete room permanently" : "Delete material permanently", "admin-action danger");
+  removeMaterial.type = "button"; removeMaterial.dataset.focusKey = focusKey("report", "delete-material", item.id); removeMaterial.dataset.reportId = item.id; removeMaterial.disabled = actionState.deleteMaterial.disabled || !moderationControlsReady();
   removeMaterial.onclick = () => queueModerationAction(item, "deleteMaterial", removeMaterial);
   const ban = create("button", "Ban user", "admin-action danger");
   ban.type = "button"; ban.dataset.focusKey = focusKey("report", "ban", item.id); ban.dataset.reportId = item.id; ban.disabled = actionState.ban.disabled || !accountAvailable;
@@ -246,6 +316,7 @@ function renderReportRow(item) {
 }
 
 async function queueLegacyRoomAction(item, action, control) {
+  if (!moderationControlsReady()) { setStatus("Moderation actions are paused until the trusted service is healthy.", true); return; }
   if (pendingLegacyRoomActions.has(item.id)) return;
   pendingLegacyRoomActions.add(item.id); control.disabled = true;
   try {
@@ -259,7 +330,7 @@ function renderLegacyRooms() {
     const row = create("article", undefined, "admin-row"), info = create("div"), actions = create("div", undefined, "admin-actions");
     info.append(create("strong", `Room ${item.id}`), create("small", `Reason: ${item.reason || "invalid lifecycle timestamp"}`), create("small", `Attempts: ${item.attempts ?? 0}`), create("small", "Manual review required before cleanup or release."));
     for (const [action, label, className] of [["retryCleanup", "Retry cleanup", ""], ["approveCleanup", "Approve cleanup", "danger"], ["release", "Release room", "restore"]]) {
-      const button = create("button", label, `admin-action ${className}`); button.type = "button"; button.disabled = pendingLegacyRoomActions.has(item.id);
+      const button = create("button", label, `admin-action ${className}`); button.type = "button"; button.disabled = pendingLegacyRoomActions.has(item.id) || !moderationControlsReady();
       button.onclick = () => queueLegacyRoomAction(item, action, button); actions.append(button);
     }
     row.append(info, actions); return row;
@@ -287,6 +358,7 @@ function startReportQueue() {
     state.moderationCases = snapshot.docs.map(entry => moderationCaseRecord(entry.id, entry.data()));
     const visibleIds = new Set(state.moderationCases.map(item => item.id));
     for (const id of loadedModerationEvidence.keys()) if (!visibleIds.has(id)) evictModerationEvidence(id);
+    for (const id of loadedRoomTranscripts.keys()) if (!visibleIds.has(id)) evictRoomTranscript(id);
     reportPageLast = snapshot.docs.at(-1) ?? null;
     syncReportActionListeners(); renderReports();
     $("admin-reports-load-more").hidden = snapshot.size < reportPageSize;
@@ -327,8 +399,9 @@ function renderContent() {
     const writeMode = generalContentDeletionWriteMode({ caseExists: Boolean(existingCase), actionExists: Boolean(existingAction) });
     const queued = existingCase?.status === "deleteQueued" || ["queued", "processing", "failed"].includes(existingAction?.status);
     const remove = create("button", queued ? "Deletion queued" : writeMode === "blocked" ? "Review moderation case" : "Delete", "admin-action danger");
-    remove.type = "button"; remove.disabled = queued || writeMode === "blocked";
+    remove.type = "button"; remove.disabled = queued || writeMode === "blocked" || !moderationControlsReady();
     remove.onclick = async () => {
+      if (!moderationControlsReady()) { setStatus("Moderation actions are paused until the trusted service is healthy.", true); return; }
       if (!window.confirm("Queue permanent deletion of this public content and all descendants?")) return;
       remove.disabled = true; remove.textContent = "Queueing deletion…";
       try {
@@ -375,7 +448,8 @@ function renderAnalytics() {
   const engagedPosts = state.posts.map(entry => ({ entry, score: state.comments.filter(comment => comment.parentId === entry.id).length + state.reactions.filter(reaction => reaction.parentId === entry.id).length })).sort((left, right) => right.score - left.score).slice(0, 8);
   $("top-posts").replaceChildren(...engagedPosts.map(({ entry, score }, index) => rankRow(index + 1, `@${entry.username || "Unknown user"}`, `${score} interactions · ${String(entry.content || "Photo post").slice(0, 55)}`, `timeline.html#post-${entry.id}`)));
   const originals = state.posts.filter(entry => entry.type !== "repost").length, reposts = state.posts.length - originals, photos = state.posts.filter(entry => entry.imageData).length;
-  const activeRooms = new Set(state.roomMessages.filter(entry => (timestampMillis(entry.expiresAt) ?? 0) > Date.now()).map(entry => entry.roomId)).size;
+  const activeRooms = state.rooms.filter(entry => entry.moderationState === "visible"
+    && entry.cleanupState !== "closing" && (timestampMillis(entry.expiresAt) ?? 0) > Date.now()).length;
   $("community-pulse").replaceChildren(healthRow("Original posts", originals), healthRow("Reposts", reposts), healthRow("Photo posts", photos), healthRow("Rooms active now", activeRooms), healthRow("Circles used for posts", `${pct(new Set(state.communityPosts.map(entry => entry.circleId).filter(Boolean)).size, state.circles.length)}%`), healthRow("Average circle size", (state.members.length / Math.max(1, state.circles.length)).toFixed(1)));
   const missingActivity = state.users.filter(user => timestampMillis(user.lastActiveAt) === null).length, failedJobs = [...state.jobs.values()].filter(job => job.data?.status === "failed").length;
   $("data-health").replaceChildren(healthRow("Accounts without recorded activity", missingActivity, missingActivity ? "warn" : "good"), healthRow("Deletion jobs needing attention", failedJobs, failedJobs ? "bad" : "good"), healthRow("Public posts shown", state.posts.length + state.communityPosts.length));
@@ -388,6 +462,15 @@ function renderProcessorHealth() {
   const health = processorHealth(state.processor);
   $("processor-health").textContent = health.kind === "working" ? "Working normally. Permanent deletion is being checked automatically." : health.kind === "delayed" ? "Delayed. The service has not checked in recently; it will keep retrying." : "Not running. Open the recovery page to restore the account deletion service.";
   $("processor-health").className = `status-${health.kind}`;
+  const moderationHealth = state.moderationProcessorListenerHealthy
+    ? processorHealth(state.moderationProcessor)
+    : { kind: "not-running" };
+  $("moderation-processor-health").textContent = moderationHealth.kind === "working"
+    ? "Working normally. Reported posts and rooms can be reviewed safely."
+    : moderationHealth.kind === "delayed"
+      ? "Delayed. Reported-material actions are paused until the service checks in."
+      : "Unavailable. Reported-material actions are paused. Open the recovery page to restart the service.";
+  $("moderation-processor-health").className = `status-${moderationHealth.kind}`;
 }
 
 function renderAll() { renderMetrics(); renderUsers(); renderReports(); renderContent(); renderAnalytics(); }
@@ -444,14 +527,22 @@ function startLiveData() {
   observe(query(collection(db, "communityPosts"), orderBy("createdAt", "desc")), "communityPosts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
   observe(collection(db, "pageViews"), "views", renderAnalytics); observe(collectionGroup(db, "comments"), "comments", renderAnalytics); observe(collectionGroup(db, "reactions"), "reactions", renderAnalytics);
   observe(collection(db, "follows"), "follows", renderAnalytics); observe(collection(db, "circles"), "circles", renderAnalytics); observe(collection(db, "circleMembers"), "members", renderAnalytics);
-  observe(collection(db, "rooms"), "rooms", renderAnalytics); observe(collection(db, "roomMessages"), "roomMessages", renderAnalytics); observe(collection(db, "communityVotes"), "votes", () => { renderMetrics(); renderAnalytics(); });
+  observe(collection(db, "rooms"), "rooms", renderAnalytics); observe(collection(db, "communityVotes"), "votes", () => { renderMetrics(); renderAnalytics(); });
   startReportQueue();
   startLegacyRoomQueue();
   unsubs.push(onSnapshot(collection(db, "adminDeletionJobs"), handleJobSnapshot, () => setStatus("Could not load live deletion status.", true)));
   unsubs.push(onSnapshot(doc(db, "system", "deletionProcessor"), snapshot => { state.processor = snapshot.exists() ? snapshot.data() : null; renderProcessorHealth(); }, () => { state.processor = null; renderProcessorHealth(); }));
-  heartbeatTimer = window.setInterval(renderProcessorHealth, 60 * 1000);
+  unsubs.push(onSnapshot(doc(db, "system", "moderationProcessor"), { includeMetadataChanges: true }, snapshot => {
+    state.moderationProcessorListenerHealthy = snapshot.metadata.fromCache !== true;
+    state.moderationProcessor = snapshot.exists() ? snapshot.data() : null;
+    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms();
+  }, () => {
+    state.moderationProcessorListenerHealthy = false; state.moderationProcessor = null;
+    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms();
+  }));
+  heartbeatTimer = window.setInterval(() => { renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); }, 60 * 1000);
 }
-function stopLiveData() { while (unsubs.length) unsubs.pop()(); reportCasesUnsub?.(); reportCasesUnsub = null; legacyRoomsUnsub?.(); legacyRoomsUnsub = null; for (const unsubscribe of reportActionUnsubs.values()) unsubscribe(); reportActionUnsubs.clear(); for (const id of loadedModerationEvidence.keys()) evictModerationEvidence(id); if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer); heartbeatTimer = null; listenersStarted = false; }
+function stopLiveData() { while (unsubs.length) unsubs.pop()(); reportCasesUnsub?.(); reportCasesUnsub = null; legacyRoomsUnsub?.(); legacyRoomsUnsub = null; for (const unsubscribe of reportActionUnsubs.values()) unsubscribe(); reportActionUnsubs.clear(); for (const id of loadedModerationEvidence.keys()) evictModerationEvidence(id); for (const id of loadedRoomTranscripts.keys()) evictRoomTranscript(id); if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer); heartbeatTimer = null; state.moderationProcessorListenerHealthy = false; listenersStarted = false; }
 
 $("admin-user-search").oninput = renderUsers; $("admin-report-status").onchange = () => { reportFilter = $("admin-report-status").value; reportPageCursors.length = 0; startReportQueue(); }; $("admin-reports-load-more").onclick = () => { if (reportPageLast) { reportPageCursors.push(reportPageLast); startReportQueue(); } }; $("admin-reports-previous").onclick = () => { reportPageCursors.pop(); startReportQueue(); }; $("admin-content-search").oninput = renderContent; $("admin-content-type").onchange = renderContent; $("metric-window").onchange = () => { renderMetrics(); renderAnalytics(); };
 $("legacy-rooms-older").onclick = () => { if (legacyRoomPageLast) { legacyRoomPageCursors.push(legacyRoomPageLast); startLegacyRoomQueue(); } };

@@ -65,5 +65,10 @@ jobs:
       - name: Deploy Firestore rules
         run: npx --no-install firebase deploy --project anonchatlogin --only firestore:rules --non-interactive
 
+      - name: Drain poll votes created during rules cutover
+        run: npm run rollout:migrate-poll-votes
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+
       - name: Deploy Firebase Hosting
         run: npx --no-install firebase deploy --project anonchatlogin --only hosting --non-interactive

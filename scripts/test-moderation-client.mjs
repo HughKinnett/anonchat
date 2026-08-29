@@ -19,7 +19,11 @@ const firestore = {
   deleteDoc: async (ref) => { deletes.push(ref); refs.delete(ref.path); },
   writeBatch: () => {
     const operations = [];
-    return { set(ref, payload) { operations.push({ ref, payload }); }, async commit() { for (const operation of operations) { writes.push(operation); refs.set(operation.ref.path, operation.payload); } } };
+    return {
+      set(ref, payload) { operations.push({ ref, payload }); },
+      update(ref, payload) { operations.push({ ref, payload }); },
+      async commit() { for (const operation of operations) { writes.push(operation); refs.set(operation.ref.path, { ...(refs.get(operation.ref.path) || {}), ...operation.payload }); } }
+    };
   }
 };
 let now = 100;
@@ -109,11 +113,14 @@ assert.deepEqual(writes, [{
 }, {
   ref: { path: "reportReceipts/reporter/post/post-1" },
   payload: { reporterUid: "reporter", targetKind: "post", targetId: "post-1", createdAt: "server-time" }
+}, {
+  ref: { path: "posts/post-1" },
+  payload: { moderationState: "hidden", moderationHoldId: "reporter_post_post-1", moderationHeldAt: "server-time" }
 }]);
 assert.equal(await client.hasReported(post), true);
 assert.equal(client.cachedReported(post), true);
 await assert.rejects(() => client.report(post, "harassment"), (error) => error?.code === "already-reported");
-assert.equal(writes.length, 2, "a duplicate does not overwrite either atomic report record");
+assert.equal(writes.length, 3, "a duplicate does not overwrite either atomic report record or hidden hold");
 assert.equal([...refs.keys()].filter(path => path === "reportIntakes/reporter_post_post-1").length, 1);
 await assert.rejects(() => client.report({ ...post, reportedUserId: "reporter" }, "spam-scam"), /self report/);
 await assert.rejects(() => client.report({ ...post, targetKind: "user", targetCollection: "users", targetId: "reporter", reportedUserId: "reporter" }, "other"), /self report/);
@@ -152,7 +159,7 @@ const crossTabClient = createModerationClient({
     ...firestore,
     writeBatch: () => {
       const operations = [];
-      return { set(ref, payload) { operations.push({ ref, payload }); }, async commit() {
+      return { set(ref, payload) { operations.push({ ref, payload }); }, update(ref, payload) { operations.push({ ref, payload }); }, async commit() {
         const receipt = operations.find(operation => operation.ref.path.includes("reportReceipts/"));
         refs.set(receipt.ref.path, receipt.payload); throw new Error("duplicate raced");
       } };
@@ -175,6 +182,7 @@ const rejectedRaceClient = createModerationClient({
     getDoc: async () => { rejectedRaceReads += 1; return { exists: () => false }; },
     writeBatch: () => ({
       set() {},
+      update() {},
       async commit() {
         rejectedRaceChannel.onmessage({ data: { key: "post:rejected-race", reported: true } });
         throw new Error("batch rejected after cross-tab receipt");
@@ -190,6 +198,30 @@ assert.equal(rejectedRaceClient.cachedReported(rejectedRacePost), true,
   "a rejected local batch cannot erase an authoritative cross-tab receipt");
 assert.equal(rejectedRaceReads, 1, "recovery does not issue a stale read after reported=true becomes known");
 rejectedRaceClient.destroy();
+
+const roomWrites = [];
+const roomClient = createModerationClient({
+  db: {}, currentUid: "room-reporter", timestamp,
+  firestore: {
+    ...firestore,
+    getDoc: async () => ({ exists: () => false }),
+    writeBatch: () => {
+      const operations = [];
+      return {
+        set(ref, payload) { operations.push({ method: "set", path: ref.path, payload }); },
+        update(ref, payload) { operations.push({ method: "update", path: ref.path, payload }); },
+        async commit() { roomWrites.push(...operations); }
+      };
+    }
+  }
+});
+await roomClient.report({ targetKind: "room", targetCollection: "rooms", targetId: "room-1", reportedUserId: "owner" }, "other");
+assert.deepEqual(roomWrites.at(-1), {
+  method: "update",
+  path: "rooms/room-1",
+  payload: { moderationState: "hidden", moderationHoldId: "room-reporter_room_room-1", moderationHeldAt: "server-time" }
+}, "room intake, receipt, and hidden hold share one client batch");
+roomClient.destroy();
 client.destroy();
 assert.equal(channels[0].closeCalled, true, "the one shared cross-tab channel is closed on teardown");
 

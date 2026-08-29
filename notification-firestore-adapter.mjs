@@ -9,6 +9,7 @@ import {
   canonicalSubscriptionVersion,
   compareSourceCursors,
   isValidQueueEvent,
+  isLegacyRoomEventMissingContext,
   retryDelayMs,
   shouldExhaustNotification,
   TERMINAL_NOTIFICATION_STATUSES,
@@ -155,6 +156,19 @@ export class FirestoreNotificationAdapter {
     return snapshot.docs.map((document) => document.data().uid);
   }
 
+  async roomAvailable(roomId) {
+    if (typeof roomId !== "string" || !roomId || roomId.includes("/")) return false;
+    const room = await this.db.collection("rooms").doc(roomId).get();
+    if (!room.exists) return false;
+    const data = room.data();
+    return typeof data.ownerId === "string" && data.ownerId.length > 0
+      && data.moderationState === "visible"
+      && data.cleanupState !== "closing"
+      && Number.isFinite(timestampMillis(data.expiresAt))
+      && timestampMillis(data.expiresAt) > this.now()
+      && await this.recipientAvailable(data.ownerId);
+  }
+
   async recipientAvailable(uid) {
     const [profile, adminDeletion, selfDeletion] = await Promise.all([
       this.db.collection("users").doc(uid).get(),
@@ -287,6 +301,22 @@ export class FirestoreNotificationAdapter {
       const snapshot = await transaction.get(reference);
       if (!snapshot.exists) return null;
       const event = snapshot.data();
+      if (isLegacyRoomEventMissingContext(event)) {
+        const errorCode = "LEGACY_ROOM_CONTEXT_MISSING";
+        transaction.set(reference, {
+          type: event.type,
+          actorUid: event.actorUid,
+          recipientUid: event.recipientUid,
+          route: event.route,
+          sourceCreatedAt: event.sourceCreatedAt,
+          status: "suppressed",
+          attempts: event.attempts,
+          createdAt: event.createdAt,
+          updatedAt: this.timestamp(this.now()),
+          errorCode
+        });
+        return { id: eventId, terminal: "suppressed", errorCode };
+      }
       if (!isValidQueueEvent(event)) {
         transaction.set(reference, {
           status: "exhausted",
@@ -313,6 +343,7 @@ export class FirestoreNotificationAdapter {
         type: event.type,
         actorUid: event.actorUid,
         recipientUid: event.recipientUid,
+        ...(event.type === "room-message" ? { roomId: event.roomId } : {}),
         route: event.route,
         sourceCreatedAt: event.sourceCreatedAt,
         status: "processing",
@@ -383,6 +414,7 @@ export class FirestoreNotificationAdapter {
       type: event.type,
       actorUid: event.actorUid,
       recipientUid: event.recipientUid,
+      ...(event.type === "room-message" ? { roomId: event.roomId } : {}),
       route: event.route,
       sourceCreatedAt: event.sourceCreatedAt,
       status,

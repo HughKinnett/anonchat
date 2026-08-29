@@ -1,16 +1,16 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
 import { createModerationClient } from "./moderation-client.mjs";
-import { isRoomActive, roomExpiry } from "./moderation-policy.mjs";
+import { REPORT_BUTTON_CLASS, isRoomActive, roomExpiry } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
-import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
+import { formatDisappearsAt, scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { createViewerBlockTracker, isBlockedActor } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  addDoc, collection, deleteDoc, doc, documentId, getDoc, onSnapshot, orderBy, query,
+  addDoc, collection, deleteDoc, doc, documentId, getDoc, limit, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -26,6 +26,7 @@ const listeners = [];
 const sessionGeneration = createSessionGeneration();
 let activeCommunitySession = 0;
 let clearRoomExpiryTimer = () => {};
+let stopRoomMessageListener = () => {};
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
   $("status").classList.toggle("danger", error);
@@ -41,6 +42,33 @@ const now = () => Date.now();
 const isBlockedUid = (uid) => isBlockedActor(uid, state.viewerBlocks);
 const activeRoom = (roomId = state.activeRoom) => state.rooms.find((room) => room.id === roomId);
 const roomIsAvailable = (room) => room && isRoomActive(room.data(), now()) && !isBlockedUid(room.data().ownerId);
+const closeActiveRoom = (message) => {
+  stopRoomMessageListener();
+  stopRoomMessageListener = () => {};
+  state.roomMessages = [];
+  state.activeRoom = "";
+  clearRoomExpiryTimer();
+  clearRoomExpiryTimer = () => {};
+  if ($("room-dialog").open) $("room-dialog").close();
+  if (message) setStatus(message, true);
+};
+const listenToRoomMessages = (roomId) => {
+  stopRoomMessageListener();
+  stopRoomMessageListener = onSnapshot(query(
+    collection(db, "roomMessages"),
+    where("roomId", "==", roomId),
+    where("moderationState", "==", "visible"),
+    orderBy("createdAt", "asc"),
+    orderBy(documentId()),
+    limit(100)
+  ), (snapshot) => {
+    if (state.activeRoom !== roomId) return;
+    state.roomMessages = snapshot.docs;
+    renderRoomMessages();
+  }, () => {
+    if (state.activeRoom === roomId) closeActiveRoom("That room is no longer available.");
+  });
+};
 const scheduleActiveRoomExpiry = () => {
   clearRoomExpiryTimer();
   const room = activeRoom();
@@ -110,6 +138,9 @@ const renderRooms = () => {
     return;
   }
   const rooms = state.rooms.filter((room) => roomIsAvailable(room)).sort(compareNewestFirst);
+  if (state.activeRoom && !rooms.some((room) => room.id === state.activeRoom)) {
+    closeActiveRoom("That room is no longer available.");
+  }
   $("room-list").replaceChildren(...rooms.map((room) => {
     const data = room.data();
     const card = document.createElement("article");
@@ -120,27 +151,29 @@ const renderRooms = () => {
     const topic = document.createElement("p");
     topic.className = "muted";
     topic.textContent = data.topic;
-    copy.append(heading, topic);
+    const expiry = document.createElement("small");
+    expiry.className = "muted";
+    expiry.textContent = formatDisappearsAt(data.expiresAt);
+    copy.append(heading, topic, expiry);
     const enter = document.createElement("button");
     enter.className = "primary";
     enter.textContent = joinedRoom(room.id) ? "Open room" : "Join anonymously";
     enter.addEventListener("click", () => openRoom(room.id, data.name));
-    card.append(copy, enter);
+    const controls = document.createElement("div");
+    controls.className = "room-card-actions";
+    controls.append(enter);
+    if (data.ownerId !== state.user.uid) controls.append(reportRoomControl(room));
+    card.append(copy, controls);
     return card;
   }));
 };
 
 const openRoom = async (id, name) => {
-  const room = activeRoom(id);
-  if (!room || !isRoomActive(room.data(), now())) {
-    setStatus("Room expired.", true);
-    return;
-  }
-  if (isBlockedUid(room.data().ownerId)) {
-    setStatus("Could not join a blocked room.", true);
-    return;
-  }
   try {
+    const currentRoom = await getDoc(doc(db, "rooms", id));
+    if (!currentRoom.exists() || !isRoomActive(currentRoom.data(), now())) throw new Error("room-unavailable");
+    if (isBlockedUid(currentRoom.data().ownerId)) throw new Error("room-blocked");
+    state.rooms = state.rooms.map((room) => room.id === id ? currentRoom : room);
     await setDoc(doc(db, "roomMembers", `${id}_${state.user.uid}`), {
       roomId: id, uid: state.user.uid, joinedAt: serverTimestamp()
     }, { merge: true });
@@ -149,6 +182,8 @@ const openRoom = async (id, name) => {
     return;
   }
   state.activeRoom = id;
+  state.roomMessages = [];
+  listenToRoomMessages(id);
   $("room-title").textContent = name;
   $("room-alias").textContent = `You are ${aliasFor(id)}`;
   renderRoomMessages();
@@ -157,19 +192,19 @@ const openRoom = async (id, name) => {
 };
 
 $("room-dialog").querySelector(".dialog-close").addEventListener("click", () => {
-  $("room-dialog").close();
-  state.activeRoom = "";
-  clearRoomExpiryTimer();
-  clearRoomExpiryTimer = () => {};
+  closeActiveRoom();
 });
 
 const renderRoomMessages = () => {
+  const room = activeRoom();
+  $("room-disappears").textContent = room
+    ? formatDisappearsAt(room.data().expiresAt)
+    : "Disappearance time unavailable";
   if (!state.viewerBlocks.ready) {
     $("room-message-form").hidden = true;
     $("room-messages").replaceChildren();
     return;
   }
-  const room = activeRoom();
   const expired = !room || !isRoomActive(room.data(), now());
   const form = $("room-message-form");
   form.hidden = expired;
@@ -191,14 +226,13 @@ const renderRoomMessages = () => {
     const text = document.createElement("span");
     text.textContent = data.text;
     item.append(sender, text);
-    if (data.senderId !== state.user.uid) item.append(reportRoomMessage(message));
     return item;
   }));
   $("room-messages").scrollTop = $("room-messages").scrollHeight;
   scheduleActiveRoomExpiry();
 };
 
-const reportRoomMessage = (message) => {
+const reportRoomControl = (room) => {
   const controls = document.createElement("div");
   controls.className = "message-report";
   const reason = document.createElement("select");
@@ -208,22 +242,25 @@ const reportRoomMessage = (message) => {
   );
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "secondary report-button";
+  button.className = REPORT_BUTTON_CLASS;
   button.textContent = "Report";
-  button.setAttribute("aria-label", `Report message by ${message.data().tempName}`);
+  button.setAttribute("aria-label", `Report temporary room ${room.data().name}`);
   const status = document.createElement("span");
   status.role = "status";
   button.addEventListener("click", async () => {
     button.disabled = true;
     status.textContent = "Reporting…";
     const target = {
-      targetKind: "roomMessage", targetCollection: "roomMessages", targetId: message.id,
-      targetPath: `roomMessages/${message.id}`, reportedUserId: message.data().senderId
+      targetKind: "room", targetCollection: "rooms", targetId: room.id,
+      targetPath: `rooms/${room.id}`, reportedUserId: room.data().ownerId
     };
     try {
       if (await state.moderation.hasReported(target)) throw Object.assign(new Error("already reported"), { code: "already-reported" });
       await state.moderation.report(target, reason.value);
-      status.textContent = "Reported.";
+      state.rooms = state.rooms.filter((entry) => entry.id !== room.id);
+      if (state.activeRoom === room.id) closeActiveRoom("That room is paused for administrator review.");
+      renderRooms();
+      status.textContent = "Reported. The room is paused for administrator review.";
       reason.disabled = true;
       button.textContent = "Reported";
     } catch (error) {
@@ -609,6 +646,8 @@ const stopCommunityResources = () => {
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
   clearRoomExpiryTimer();
   clearRoomExpiryTimer = () => {};
+  stopRoomMessageListener();
+  stopRoomMessageListener = () => {};
   state.moderation?.destroy();
   Object.assign(state, {
     profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
@@ -709,7 +748,6 @@ onAuthStateChanged(auth, async (user) => {
     }
   );
   listen(query(collection(db, "rooms"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), orderBy(documentId())), "rooms", renderRooms);
-  listen(query(collection(db, "roomMessages"), where("moderationState", "==", "visible"), orderBy("createdAt", "asc"), orderBy(documentId())), "roomMessages", renderRoomMessages);
   listen(query(collection(db, "roomMembers"), where("uid", "==", user.uid)), "roomMemberships", renderRooms);
 
   const mergePrivate = (key, firstQuery, secondQuery, render, onReady) => {

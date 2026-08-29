@@ -11,5 +11,6 @@
 .main-menu-panel .menu-danger{color:#fca5a5}
 .primary:disabled,.secondary:disabled{cursor:not-allowed}
 .primary[aria-busy=true],.secondary[aria-busy=true]{cursor:wait}
+.follow-button{min-height:34px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.05);color:var(--text);font-size:.82rem;font-weight:700}.room-card-actions{display:flex;flex:0 0 auto;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:8px}.message-report{display:flex;align-items:center;flex-wrap:wrap;gap:7px}.message-report select{width:auto;min-width:145px}
 @media(max-width:620px){.topbar{padding:10px 14px}.community-header-actions{gap:6px}.topbar .secondary{padding:9px 11px}}
-.message-report{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin-top:.45rem}.message-report select,.message-report button{min-height:2.75rem}.message-report span{min-height:1.25rem}@media(max-width:520px){.message-report{align-items:stretch}.message-report select,.message-report button{flex:1 1 9rem}}
+.message-report{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin-top:.45rem}.message-report select{min-height:2.75rem}.message-report span{min-height:1.25rem}@media(max-width:520px){.message-report{align-items:stretch}.message-report select{flex:1 1 9rem}}

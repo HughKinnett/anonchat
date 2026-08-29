@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { nearestFutureExpiry, scheduleExpiryBoundary } from "../temporary-room-timer-policy.mjs";
+import { formatDisappearsAt, nearestFutureExpiry, scheduleExpiryBoundary } from "../temporary-room-timer-policy.mjs";
 
 const time = (value) => ({ toMillis: () => value });
 assert.equal(nearestFutureExpiry([time(150), time(101), time(100), null], 100), 101);
 assert.equal(nearestFutureExpiry([time(100), null], 100), null);
+assert.equal(formatDisappearsAt(time(Date.UTC(2026, 7, 29, 12, 30)), "en-US", { timeZone: "UTC" }),
+  "Disappears 8/29/2026, 12:30:00 PM");
+assert.equal(formatDisappearsAt(null, "en-US", { timeZone: "UTC" }), "Disappearance time unavailable");
 
 const scheduled = [];
 let fired = 0;

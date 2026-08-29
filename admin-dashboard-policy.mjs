@@ -74,6 +74,9 @@ export const processorHealth = (processor, now = Date.now()) => {
   return { kind: "not-running", label: "Not running" };
 };
 
+export const moderationActionsAvailable = ({ listenerHealthy, processor, now = Date.now() } = {}) =>
+  listenerHealthy === true && processorHealth(processor, now).kind === "working";
+
 const MODERATION_PREVIEW_LIMIT = 240;
 export const MAX_MODERATION_ACTION_ATTEMPTS = 8;
 const activeActionStatuses = new Set(["queued", "leased", "processing"]);
@@ -89,6 +92,15 @@ export const moderationCaseRecord = (pathId, data = {}) => ({
   preview: typeof data.snapshot?.text === "string"
     ? data.snapshot.text.slice(0, MODERATION_PREVIEW_LIMIT)
     : data.targetKind === "user" ? "Profile report" : "No text preview available."
+});
+
+export const moderationTranscriptMessage = (pathId, data = {}) => ({
+  id: String(pathId),
+  roomId: String(data.roomId ?? ""),
+  senderId: String(data.senderId ?? ""),
+  authorName: typeof data.tempName === "string" ? data.tempName.slice(0, 100) : "",
+  text: typeof data.text === "string" ? data.text.slice(0, 500) : "",
+  createdAt: data.createdAt
 });
 
 export const generalContentDeletionPayloads = ({ id, type, authorId, requestedBy, requestedAt } = {}) => {

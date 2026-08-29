@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   assertSettledModerationResult,
   gcloudCompositeIndexCreateArguments,
@@ -8,6 +9,15 @@ import {
   verifyProductionRolloutState,
   waitForRequiredIndexes
 } from "../production-rollout-policy.mjs";
+
+const productionProcessorSource = await readFile(
+  new URL("./process-production-moderation.mjs", import.meta.url),
+  "utf8"
+);
+const voteMigrationCall = productionProcessorSource.indexOf("migratePollVotes()");
+const moderationProcessorCall = productionProcessorSource.indexOf("processModeration()");
+assert.ok(voteMigrationCall >= 0 && moderationProcessorCall > voteMigrationCall,
+  "the privileged poll-vote migration completes before the moderation processor and strict-rules rollout");
 
 const required = [
   {
@@ -105,12 +115,14 @@ const timestamp = (millis) => ({ toMillis: () => millis });
 const completedState = {
   moderationStateBackfill: { status: "completed", completedAt: timestamp(900) },
   roomLifecycleBackfill: { status: "completed", completedAt: timestamp(900) },
+  pollVoteSchemaMigration: { status: "completed", schemaVersion: 1, completedAt: timestamp(900) },
   moderationProcessor: { status: "completed", updatedAt: timestamp(950) }
 };
 assert.doesNotThrow(() => verifyProductionRolloutState(completedState, { nowMs: 1_000, maxHeartbeatAgeMs: 100 }));
 for (const [key, value] of [
   ["moderationStateBackfill", { status: "started" }],
   ["roomLifecycleBackfill", undefined],
+  ["pollVoteSchemaMigration", { status: "completed", schemaVersion: 0, completedAt: timestamp(900) }],
   ["moderationProcessor", { status: "failed", updatedAt: timestamp(950) }],
   ["moderationProcessor", { status: "completed", updatedAt: timestamp(899) }]
 ]) {

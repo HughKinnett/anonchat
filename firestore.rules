@@ -49,14 +49,16 @@ service cloud.firestore {
         && (!content.keys().hasAny(['roomId']) || linkedRoomAvailableAfter(content.roomId));
     }
 
-    function postAvailableAfter(postId) {
-      return (existsAfter(/databases/$(database)/documents/posts/$(postId))
+    function votePostAvailableAfter(postCollection, postId) {
+      return (postCollection == 'posts'
+          && existsAfter(/databases/$(database)/documents/posts/$(postId))
           && getAfter(/databases/$(database)/documents/posts/$(postId)).data
             .get('moderationState', 'visible') != 'hidden'
           && linkedContentAvailableAfter(
             getAfter(/databases/$(database)/documents/posts/$(postId)).data
           ))
-        || (existsAfter(/databases/$(database)/documents/communityPosts/$(postId))
+        || (postCollection == 'communityPosts'
+          && existsAfter(/databases/$(database)/documents/communityPosts/$(postId))
           && getAfter(/databases/$(database)/documents/communityPosts/$(postId)).data
             .get('moderationState', 'visible') != 'hidden'
           && linkedContentAvailableAfter(
@@ -90,6 +92,14 @@ service cloud.firestore {
         && roomIsActive(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data);
     }
 
+    function linkedRoomAvailable(roomId) {
+      return exists(/databases/$(database)/documents/rooms/$(roomId))
+        && hasNoDeletionBarrierAfter(get(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId)
+        && get(/databases/$(database)/documents/rooms/$(roomId)).data
+          .get('moderationState', 'visible') != 'hidden'
+        && roomIsActive(get(/databases/$(database)/documents/rooms/$(roomId)).data);
+    }
+
     function isAdmin() {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -118,11 +128,32 @@ service cloud.firestore {
             .get('moderationState', 'visible') != 'hidden');
     }
 
+    function votePostVisible(postCollection, postId) {
+      return (postCollection == 'posts'
+          && exists(/databases/$(database)/documents/posts/$(postId))
+          && get(/databases/$(database)/documents/posts/$(postId)).data
+            .get('moderationState', 'visible') != 'hidden')
+        || (postCollection == 'communityPosts'
+          && exists(/databases/$(database)/documents/communityPosts/$(postId))
+          && get(/databases/$(database)/documents/communityPosts/$(postId)).data
+            .get('moderationState', 'visible') != 'hidden');
+    }
+
+    function legacyVoteTargetIsUnambiguous(postId) {
+      return (exists(/databases/$(database)/documents/posts/$(postId))
+          && !exists(/databases/$(database)/documents/communityPosts/$(postId)))
+        || (!exists(/databases/$(database)/documents/posts/$(postId))
+          && exists(/databases/$(database)/documents/communityPosts/$(postId)));
+    }
+
     function communityVoteVisibleOrAdmin() {
       return isAdmin()
-        || (exists(/databases/$(database)/documents/communityPosts/$(resource.data.postId))
-          && get(/databases/$(database)/documents/communityPosts/$(resource.data.postId)).data
-            .get('moderationState', 'visible') != 'hidden');
+        || (resource.data.keys().hasAll(['postCollection'])
+          && votePostVisible(resource.data.postCollection, resource.data.postId))
+        || (!resource.data.keys().hasAny(['postCollection', 'legacyMigrationState'])
+          && legacyVoteTargetIsUnambiguous(resource.data.postId)
+          && (votePostVisible('posts', resource.data.postId)
+            || votePostVisible('communityPosts', resource.data.postId)));
     }
 
     function roomIsActive(room) {
@@ -160,6 +191,17 @@ service cloud.firestore {
           && exists(/databases/$(database)/documents/communityPosts/$(request.resource.data.targetId))
           && get(/databases/$(database)/documents/communityPosts/$(request.resource.data.targetId)).data.authorId
             == request.resource.data.reportedUserId)
+        || (request.resource.data.targetKind == 'room'
+          && request.resource.data.targetCollection == 'rooms'
+          && request.resource.data.targetPath == 'rooms/' + request.resource.data.targetId
+          && exists(/databases/$(database)/documents/rooms/$(request.resource.data.targetId))
+          && get(/databases/$(database)/documents/rooms/$(request.resource.data.targetId)).data.ownerId
+            == request.resource.data.reportedUserId
+          && get(/databases/$(database)/documents/rooms/$(request.resource.data.targetId)).data
+            .get('moderationState', 'visible') != 'hidden'
+          && get(/databases/$(database)/documents/rooms/$(request.resource.data.targetId)).data
+            .get('cleanupState', 'open') != 'closing'
+          && roomIsActive(get(/databases/$(database)/documents/rooms/$(request.resource.data.targetId)).data))
         || (request.resource.data.targetKind == 'roomMessage'
           && request.resource.data.targetCollection == 'roomMessages'
           && request.resource.data.targetPath == 'roomMessages/' + request.resource.data.targetId
@@ -180,6 +222,8 @@ service cloud.firestore {
           && exists(/databases/$(database)/documents/posts/$(targetId)))
         || (targetKind == 'communityPost'
           && exists(/databases/$(database)/documents/communityPosts/$(targetId)))
+        || (targetKind == 'room'
+          && exists(/databases/$(database)/documents/rooms/$(targetId)))
         || (targetKind == 'roomMessage'
           && exists(/databases/$(database)/documents/roomMessages/$(targetId)))
         || (targetKind == 'user'
@@ -207,6 +251,46 @@ service cloud.firestore {
         && intake.data.createdAt == request.resource.data.createdAt;
     }
 
+    function exactMaterialHoldAfter(reportId) {
+      let kind = request.resource.data.targetKind;
+      let targetId = request.resource.data.targetId;
+      let postAfter = getAfter(/databases/$(database)/documents/posts/$(targetId));
+      let communityAfter = getAfter(/databases/$(database)/documents/communityPosts/$(targetId));
+      let roomAfter = getAfter(/databases/$(database)/documents/rooms/$(targetId));
+      return (kind == 'post'
+          && postAfter.data.get('moderationState', 'visible') == 'hidden'
+          && postAfter.data.moderationHoldId == reportId
+          && postAfter.data.moderationHeldAt == request.time)
+        || (kind == 'communityPost'
+          && communityAfter.data.get('moderationState', 'visible') == 'hidden'
+          && communityAfter.data.moderationHoldId == reportId
+          && communityAfter.data.moderationHeldAt == request.time)
+        || (kind == 'room'
+          && roomAfter.data.get('moderationState', 'visible') == 'hidden'
+          && roomAfter.data.moderationHoldId == reportId
+          && roomAfter.data.moderationHeldAt == request.time)
+        || kind in ['roomMessage', 'user'];
+    }
+
+    function validModerationHoldUpdate(targetKind, targetId, reportedUserId) {
+      let reportId = request.auth.uid + '_' + targetKind + '_' + targetId;
+      let intake = getAfter(/databases/$(database)/documents/reportIntakes/$(reportId));
+      return activeUserAfter()
+        && resource.data.get('moderationState', 'visible') != 'hidden'
+        && request.resource.data.get('moderationState', 'visible') == 'hidden'
+        && request.resource.data.moderationHoldId == reportId
+        && request.resource.data.moderationHeldAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['moderationState', 'moderationHoldId', 'moderationHeldAt'])
+        && !exists(/databases/$(database)/documents/reportIntakes/$(reportId))
+        && existsAfter(/databases/$(database)/documents/reportIntakes/$(reportId))
+        && intake.data.reporterUid == request.auth.uid
+        && intake.data.targetKind == targetKind
+        && intake.data.targetId == targetId
+        && intake.data.reportedUserId == reportedUserId
+        && intake.data.createdAt == request.time;
+    }
+
     function validReportIntake(reportId) {
       return request.resource.data.keys().hasOnly([
           'reporterUid', 'targetKind', 'targetCollection', 'targetId', 'targetPath',
@@ -221,14 +305,15 @@ service cloud.firestore {
         && request.resource.data.reporterUid != request.resource.data.reportedUserId
         && reportId == request.auth.uid + '_' + request.resource.data.targetKind + '_'
           + request.resource.data.targetId
-        && request.resource.data.targetKind in ['post', 'communityPost', 'roomMessage', 'user']
+        && request.resource.data.targetKind in ['post', 'communityPost', 'room', 'roomMessage', 'user']
         && request.resource.data.reason in [
           'harassment', 'hate-threats', 'sexual-content', 'spam-scam',
           'privacy-impersonation', 'other'
         ]
         && request.resource.data.createdAt == request.time
         && request.resource.data.status == 'queued'
-        && validReportTarget();
+        && validReportTarget()
+        && exactMaterialHoldAfter(reportId);
     }
 
     function validQueuedModerationAction(caseId) {
@@ -458,6 +543,7 @@ service cloud.firestore {
         && request.resource.data.sourceCollection == 'posts'
         && postId == 'repost_' + request.auth.uid + '_' + request.resource.data.originalPostId
         && original.data.type == 'original'
+        && original.data.get('moderationState', 'visible') != 'hidden'
         && request.resource.data.originalAuthorId == original.data.authorId
         && request.resource.data.originalUsername == original.data.username
         && accountAvailableAfter(original.data.authorId)
@@ -528,12 +614,12 @@ service cloud.firestore {
     match /reportReceipts/{reporterUid}/{targetKind}/{targetId} {
       allow get: if signedIn()
         && reporterUid == request.auth.uid
-        && targetKind in ['post', 'communityPost', 'roomMessage', 'user']
+        && targetKind in ['post', 'communityPost', 'room', 'roomMessage', 'user']
         && reportReceiptTargetExists(targetKind, targetId);
       allow list: if false;
       allow create: if activeUserAfter()
         && reporterUid == request.auth.uid
-        && targetKind in ['post', 'communityPost', 'roomMessage', 'user']
+        && targetKind in ['post', 'communityPost', 'room', 'roomMessage', 'user']
         && request.resource.data.keys().hasOnly(['reporterUid', 'targetKind', 'targetId', 'createdAt'])
         && request.resource.data.reporterUid == request.auth.uid
         && request.resource.data.targetKind == targetKind
@@ -944,16 +1030,17 @@ service cloud.firestore {
         && request.resource.data.options.size() <= 4
         && request.resource.data.moderationState == 'visible'
         && request.resource.data.createdAt == request.time;
-      allow update: if false;
+      allow update: if validModerationHoldUpdate('communityPost', postId, resource.data.authorId);
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
     match /communityVotes/{voteId} {
       allow read: if signedIn() && communityVoteVisibleOrAdmin();
       allow create, update: if activeUserAfter()
-        && postAvailableAfter(request.resource.data.postId)
-        && voteId == request.resource.data.postId + '_' + request.auth.uid
-        && request.resource.data.keys().hasOnly(['postId', 'uid', 'option', 'createdAt'])
+        && votePostAvailableAfter(request.resource.data.postCollection, request.resource.data.postId)
+        && voteId == request.resource.data.postCollection + ':' + request.resource.data.postId + ':' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['postCollection', 'postId', 'uid', 'option', 'createdAt'])
+        && request.resource.data.postCollection in ['posts', 'communityPosts']
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.option is int
         && request.resource.data.option >= 0
@@ -975,7 +1062,7 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.moderationState == 'visible'
         && validRoomExpiry();
-      allow update: if false;
+      allow update: if validModerationHoldUpdate('room', roomId, resource.data.ownerId);
       allow delete: if false;
     }
 
@@ -1002,7 +1089,9 @@ service cloud.firestore {
     }
 
     match /roomMessages/{messageId} {
-      allow read: if signedIn() && visibleOrAdmin();
+      allow read: if isAdmin() || (signedIn()
+        && resource.data.get('moderationState', 'visible') != 'hidden'
+        && linkedRoomAvailable(resource.data.roomId));
       allow create: if activeUserAfter()
         && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'text', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.senderId == request.auth.uid
@@ -1018,7 +1107,9 @@ service cloud.firestore {
         && validRoomMessageExpiry(request.resource.data.roomId)
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if isAdmin() || (signedIn() && resource.data.senderId == request.auth.uid);
+      allow delete: if isAdmin() || (signedIn()
+        && resource.data.senderId == request.auth.uid
+        && linkedRoomAvailable(resource.data.roomId));
     }
 
     match /messageRequests/{requestId} {
@@ -1129,7 +1220,7 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter() && (validOriginalPost() || validRepost(postId));
-      allow update: if false;
+      allow update: if validModerationHoldUpdate('post', postId, resource.data.authorId);
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
   }

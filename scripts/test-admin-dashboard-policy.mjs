@@ -16,7 +16,9 @@ import {
   moderationActionState,
   moderationCaseRecord,
   moderationEvidenceMedia,
+  moderationTranscriptMessage,
   processorHealth,
+  moderationActionsAvailable,
   queueFailureDialogTransition,
   resolveReportActionFocus,
   resolveUserFocus,
@@ -97,6 +99,11 @@ assert.equal(processorHealth({ status: "error", updatedAt: now }, now).kind, "no
 assert.equal(processorHealth({ status: "working", updatedAt: now }, now).kind, "not-running");
 assert.equal(processorHealth({ updatedAt: now }, now).kind, "not-running");
 assert.equal(processorHealth({ status: "started", updatedAt: "unknown" }, now).kind, "not-running");
+assert.equal(moderationActionsAvailable({ listenerHealthy: true, processor: { status: "completed", updatedAt: now - 1 }, now }), true);
+assert.equal(moderationActionsAvailable({ listenerHealthy: false, processor: { status: "completed", updatedAt: now - 1 }, now }), false,
+  "moderation actions fail closed while the heartbeat listener is unavailable");
+assert.equal(moderationActionsAvailable({ listenerHealthy: true, processor: { status: "completed", updatedAt: now - 20 * 60 * 1000 }, now }), false,
+  "moderation actions fail closed when the trusted processor heartbeat is stale");
 
 // Removing the case-time sort, the canonical-ID tie-breaker, or an explicit status branch must fail these queue views.
 const moderationCases = [
@@ -118,6 +125,11 @@ const evidencePhoto = "data:image/jpeg;base64,AAAA";
 assert.deepEqual(moderationEvidenceMedia({ snapshot: { media: [{ kind: "postImage", dataUrl: evidencePhoto }, { kind: "coverImage", dataUrl: "javascript:alert(1)" }] } }), [{ kind: "postImage", dataUrl: evidencePhoto, label: "Reported post image" }]);
 assert.deepEqual(moderationEvidenceMedia({ snapshot: { media: Array.from({ length: 5 }, () => ({ kind: "profileImage", dataUrl: evidencePhoto })) } }).length, 2, "the queue renders a bounded number of evidence images");
 assert.deepEqual(moderationEvidenceMedia({ items: [{ kind: "coverImage", dataUrl: evidencePhoto }] }), [{ kind: "coverImage", dataUrl: evidencePhoto, label: "Reported profile cover image" }], "protected evidence loads from its lazy child document");
+assert.deepEqual(moderationTranscriptMessage("message-1", {
+  roomId: "room-1", senderId: "sender", tempName: "x".repeat(120), text: "y".repeat(600), createdAt: now
+}), {
+  id: "message-1", roomId: "room-1", senderId: "sender", authorName: "x".repeat(100), text: "y".repeat(500), createdAt: now
+}, "room transcript rows retain only bounded review fields");
 
 const ordinaryCase = moderationCaseRecord("ordinary", {
   status: "open", targetKind: "post", reportedUserId: "ordinary-user", snapshot: { authorName: "ordinary_user" }
@@ -216,6 +228,7 @@ for (const action of ["retryCleanup", "approveCleanup", "release"]) assert.deepE
 assert.throws(() => legacyRoomActionPayload({ roomId: "../room", action: "release", requestedBy: "admin", requestedAt: serverTimestamp }));
 
 const adminSource = await readFile(new URL("../admin.js", import.meta.url), "utf8");
+const adminHtml = await readFile(new URL("../admin.html", import.meta.url), "utf8");
 assert.doesNotMatch(adminSource, /deleteDoc\(doc\(db,\s*entry\.type/, "general moderation cannot directly delete a parent post");
 assert.match(adminSource, /batch\.set\(doc\(db, "moderationCases", payloads\.id\), payloads\.moderationCase\)/);
 assert.match(adminSource, /batch\.set\(doc\(db, "moderationActions", payloads\.id\), payloads\.action\)/);
@@ -224,11 +237,34 @@ assert.match(adminSource, /writeMode === "action-only"\) await setDoc\(doc\(db, 
 assert.match(adminSource, /writeMode === "blocked" \? "Review moderation case" : "Delete"/,
   "an existing action has a visible non-destructive status");
 assert.match(adminSource, /Permanent content deletion queued\. The trusted processor will remove descendants\./);
+assert.match(adminSource, /doc\(db, "system", "moderationProcessor"\)/,
+  "the moderation processor heartbeat is observed independently from account deletion");
+assert.match(adminSource, /includeMetadataChanges:\s*true[\s\S]*snapshot\.metadata\.fromCache !== true/,
+  "cached heartbeat snapshots keep moderation actions disabled until the trusted listener reaches the server");
+assert.match(adminHtml, /process-moderation\.yml/,
+  "the moderation health card links administrators to the correct recovery workflow");
+assert.match(adminSource, /moderationActionsAvailable\(/,
+  "room and post moderation controls share a fail-closed heartbeat gate");
+assert.match(adminSource, /if \(!moderationControlsReady\(\)\)[\s\S]*return;/,
+  "the moderation write path rechecks health instead of trusting a rendered button");
 
 assert.match(adminSource, /getDoc\(doc\(db, "moderationCases", item\.id, "evidence", "media"\)\)/, "protected media evidence is loaded only on demand");
 assert.match(adminSource, /where\("status", "in", reportStatuses\(\)\).*orderBy\("updatedAt", "desc"\).*startAfter\(reportPageCursors\.at\(-1\)\).*limit\(reportPageSize\)/s, "reported-material views are status-filtered, cursor-paginated, and bounded on the server");
 assert.match(adminSource, /onSnapshot\(doc\(db, "moderationActions", id\)/, "every visible case gets its deterministic action state");
 assert.match(adminSource, /admin-reports-load-more/, "the bounded reported-material queue can load more history");
+assert.match(adminSource, /room:\s*"Temporary chat room"/, "canonical room cases have an explicit administrator label");
+assert.match(adminSource, /query\(collection\(db, "roomMessages"\), where\("roomId", "==", item\.targetId\), orderBy\("createdAt", "asc"\), orderBy\(documentId\(\), "asc"\).*limit\(roomTranscriptPageSize\)\)/s,
+  "reported-room transcripts use a bounded, deterministic server page");
+assert.doesNotMatch(adminSource, /observe\(collection\(db, "roomMessages"\)/,
+  "the admin dashboard never subscribes to every temporary-room message");
+assert.doesNotMatch(adminSource, /state\.roomMessages/,
+  "private temporary-room messages are excluded from global admin analytics state");
+assert.match(adminSource, /state\.rooms\.filter\(entry => entry\.moderationState === "visible"/,
+  "active-room analytics derive from room metadata instead of private transcripts");
+assert.match(adminSource, /getDocs\(transcriptQuery\)/, "reported-room transcript pages are fetched only on administrator demand");
+assert.match(adminSource, /startAfter\(transcript\.cursor\)/, "administrators can advance through a reported-room transcript without an unbounded read");
+assert.match(adminSource, /Allow room to resume/, "room restore uses the administrator-facing resume language");
+assert.match(adminSource, /Delete room permanently/, "room deletion is explicit about deleting the whole room");
 assert.match(adminSource, /legacyRoomActionPayload/, "manual-review rooms expose audited administrator actions");
 assert.match(adminSource, /legacyRoomPageCursors.*startAfter/s, "legacy manual review is cursor-paginated beyond the first bounded page");
 assert.match(adminSource, /evictModerationEvidence/, "protected evidence cache is evicted on navigation and permanent deletion");

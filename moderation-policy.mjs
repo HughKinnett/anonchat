@@ -7,11 +7,13 @@ export const REPORT_REASONS = Object.freeze([
   "other"
 ]);
 
-export const REPORT_TARGETS = Object.freeze(["post", "communityPost", "roomMessage", "user"]);
+export const REPORT_TARGETS = Object.freeze(["post", "communityPost", "room", "roomMessage", "user"]);
+export const REPORT_BUTTON_CLASS = "follow-button report-button";
 
 const TARGET_COLLECTIONS = Object.freeze({
   post: "posts",
   communityPost: "communityPosts",
+  room: "rooms",
   roomMessage: "roomMessages",
   user: "users"
 });
@@ -44,6 +46,15 @@ export const reportId = (reporterUid, targetKind, targetId) => {
   assertTargetKind(targetKind);
   if (targetKind === "user" && reporterUid === targetId) throw new Error("self report is not allowed");
   return `${escapedIdentifier(reporterUid, "reporter uid")}_${targetKind}_${escapedIdentifier(targetId, "target id")}`;
+};
+
+export const reportHoldPatch = ({ reporterUid, targetKind, targetId, timestamp } = {}) => {
+  if (!["post", "communityPost", "room"].includes(targetKind)) return null;
+  return {
+    moderationState: "hidden",
+    moderationHoldId: reportId(reporterUid, targetKind, targetId),
+    moderationHeldAt: timestamp
+  };
 };
 
 export const reportIntakePayload = (input) => {

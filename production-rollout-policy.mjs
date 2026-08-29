@@ -108,6 +108,8 @@ export const verifyProductionRolloutState = (state, { nowMs = Date.now(), maxHea
   const heartbeatAge = nowMs - heartbeatMillis;
   if (!markerReady(state?.moderationStateBackfill)
     || !markerReady(state?.roomLifecycleBackfill)
+    || !markerReady(state?.pollVoteSchemaMigration)
+    || state?.pollVoteSchemaMigration?.schemaVersion !== 1
     || state?.moderationProcessor?.status !== "completed"
     || !Number.isFinite(heartbeatAge) || heartbeatAge < -60_000 || heartbeatAge > maxHeartbeatAgeMs) {
     throw coded("PRODUCTION_ROLLOUT_NOT_READY");

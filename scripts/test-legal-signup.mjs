@@ -46,13 +46,14 @@ assert.ok(ageGuard >= 0 && termsGuard >= 0 && Math.max(ageGuard, termsGuard) < c
 assert.match(loginSource, /!ageConfirmation\.checked\s*\|\|\s*!termsConfirmation\.checked|!termsConfirmation\.checked\s*\|\|\s*!ageConfirmation\.checked/,
   "signup rejects an unchecked acknowledgement");
 
-assert.match(serviceWorker, /const CACHE_NAME = "anonchat-v43";/, "service worker cache is exactly v43");
+assert.match(serviceWorker, /const CACHE_NAME = "anonchat-v44";/, "service worker cache is exactly v44");
 assert.doesNotMatch(await readFile(new URL("../privacy.html", import.meta.url), "utf8"), /non-identifying completion marker/i, "UID-keyed completion barriers are described accurately");
 assert.doesNotMatch(await readFile(new URL("../terms.html", import.meta.url), "utf8"), /non-identifying completion barrier/i, "UID-keyed completion barriers are described accurately");
 for (const asset of [
   "terms.html", "privacy.html", "support.html", "legal.css",
   "moderation-policy.mjs", "moderation-client.mjs", "content-writer-policy.mjs",
   "content-ordering.mjs", "interaction-parent-policy.mjs", "temporary-room-timer-policy.mjs",
+  "poll-vote-policy.mjs",
   "viewer-block-policy.mjs", "session-generation-policy.mjs", "timeline-interaction-policy.mjs",
   "protected-metadata-policy.mjs"
 ]) {

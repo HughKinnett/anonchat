@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { isRoomActive, roomExpiry } from "../moderation-policy.mjs";
+import * as moderationPolicy from "../moderation-policy.mjs";
+const { REPORT_BUTTON_CLASS, isRoomActive, roomExpiry } = moderationPolicy;
+import { formatDisappearsAt } from "../temporary-room-timer-policy.mjs";
 
 const source = await readFile(new URL("../community.js", import.meta.url), "utf8");
+const css = await readFile(new URL("../community.css", import.meta.url), "utf8");
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 const indexes = JSON.parse(await readFile(new URL("../firestore.indexes.json", import.meta.url), "utf8"));
 
 assert.equal(roomExpiry(1_000), 86_401_000);
 assert.equal(isRoomActive({ expiresAt: { toMillis: () => 1_001 } }, 1_000), true);
 assert.equal(isRoomActive({ expiresAt: { toMillis: () => 1_000 } }, 1_000), false);
+assert.equal(formatDisappearsAt({ toMillis: () => Date.UTC(2026, 7, 29, 12, 30) }, "en-US", { timeZone: "UTC" }),
+  "Disappears 8/29/2026, 12:30:00 PM");
 
 assert.match(source, /import\s*\{[^}]*createModerationClient[^}]*\}\s*from\s*["']\.\/moderation-client\.mjs["']/s);
 assert.match(source, /import\s*\{[^}]*compareNewestFirst[^}]*compareOldestFirst[^}]*\}\s*from\s*["']\.\/content-ordering\.mjs["']/s);
@@ -17,12 +22,27 @@ assert.match(source, /moderationState:\s*["']visible["']/);
 assert.doesNotMatch(source, /expiresAt:\s*Timestamp\.fromMillis\(now\(\)\s*\+\s*86400000\)/);
 assert.match(source, /const activeRoom = \(roomId = state\.activeRoom\) => state\.rooms\.find/);
 assert.match(source, /expiresAt:\s*room\.data\(\)\.expiresAt/);
+assert.match(source, /expiry\.textContent = formatDisappearsAt\(data\.expiresAt\)/,
+  "every temporary-room card shows the exact localized expiry from its lifecycle timestamp");
+assert.match(source, /\$\("room-disappears"\)\.textContent = room[\s\S]{0,100}formatDisappearsAt\(room\.data\(\)\.expiresAt\)/,
+  "the active-room dialog shows the exact localized expiry from the selected room lifecycle timestamp");
+assert.match(await readFile(new URL("../community.html", import.meta.url), "utf8"), /id="room-disappears"[^>]*aria-live="polite"/,
+  "the active-room expiry timestamp is exposed as live dialog text");
 assert.match(source, /isRoomActive\(room\.data\(\), now\(\)\)/);
 assert.match(source, /Room expired/);
 assert.match(source, /isBlockedUid\(room\.data\(\)\.ownerId\)/,
   "room interaction checks the live two-direction block snapshot");
-assert.match(source, /targetKind:\s*["']roomMessage["']/);
-assert.match(source, /targetPath:\s*`roomMessages\/\$\{message\.id\}`/);
+assert.equal(REPORT_BUTTON_CLASS, "follow-button report-button");
+assert.match(source, /targetKind:\s*["']room["']/);
+assert.match(source, /targetPath:\s*`rooms\/\$\{room\.id\}`/);
+assert.match(source, /button\.className\s*=\s*REPORT_BUTTON_CLASS/,
+  "temporary-room Report buttons reuse the Follow button class token");
+assert.doesNotMatch(css, /\.message-report select,\.message-report button\{[^}]*min-height/,
+  "room Report buttons are not resized away from the shared Follow pill token");
+assert.doesNotMatch(css, /\.message-report select,\.message-report button\{[^}]*flex/,
+  "responsive room Report buttons retain the shared Follow pill width");
+assert.match(source, /await state\.moderation\.report\(target, reason\.value\);[\s\S]{0,300}state\.rooms = state\.rooms\.filter\(\(entry\) => entry\.id !== room\.id\)[\s\S]{0,250}closeActiveRoom/,
+  "a successful room report immediately removes and closes only that room in local UI state");
 assert.match(source, /where\(["']moderationState["'],\s*["']==["'],\s*["']visible["']\)/);
 assert.match(source, /orderBy\(documentId\(\)\)/);
 assert.match(source, /\.sort\(compareNewestFirst\)/);
@@ -56,9 +76,10 @@ assert.equal(hasIndex("rooms", [
   { fieldPath: "__name__", order: "ASCENDING" }
 ]), true, "visible active rooms have a compatible index");
 assert.equal(hasIndex("roomMessages", [
+  { fieldPath: "roomId", order: "ASCENDING" },
   { fieldPath: "moderationState", order: "ASCENDING" },
   { fieldPath: "createdAt", order: "ASCENDING" },
   { fieldPath: "__name__", order: "ASCENDING" }
-]), true, "visible room messages have a compatible index");
+]), true, "bounded per-room visible-message queries have a compatible index");
 
 console.log("Community temporary-room lifecycle contract passed");

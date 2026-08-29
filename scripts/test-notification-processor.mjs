@@ -107,6 +107,7 @@ class ScanAdapter {
   }
   const roomEvents = [...adapter.events.values()].filter((event) => event.type === "room-message");
   assert.deepEqual(roomEvents.map((event) => event.recipientUid).sort(), ["room-a", "room-b"]);
+  assert.deepEqual(roomEvents.map((event) => event.roomId), ["room-1", "room-1"], "materialized room events retain their delivery-time parent fence");
 }
 
 {
@@ -136,6 +137,8 @@ class DeliveryAdapter {
     this.blockedPairs = new Set();
     this.blockChecks = 0;
     this.blockSequence = [];
+    this.roomAvailabilitySequence = [];
+    this.roomAvailabilityChecks = 0;
   }
   now() { return this.clock; }
   timestamp(value) { return time(value); }
@@ -160,6 +163,11 @@ class DeliveryAdapter {
     this.blockChecks += 1;
     if (this.blockSequence.length) return this.blockSequence.shift();
     return this.blockedPairs.has([left, right].sort().join("/"));
+  }
+  async roomAvailable(roomId) {
+    assert.equal(typeof roomId, "string");
+    this.roomAvailabilityChecks += 1;
+    return this.roomAvailabilitySequence.length ? this.roomAvailabilitySequence.shift() : true;
   }
   async unblockedRecipients(actorUid, recipientUids) {
     return recipientUids.filter((recipientUid) =>
@@ -237,9 +245,39 @@ const subscription = (uid, idValue, overrides = {}) => ({
 
 const queued = (id, type, recipientUid) => ({
   id,
-  data: { type, actorUid: "actor", recipientUid, route: notificationPayload(type, id).url, sourceCreatedAt: time(1), status: "pending", attempts: 0, createdAt: time(1), updatedAt: time(1) }
+  data: { type, actorUid: "actor", recipientUid, ...(type === "room-message" ? { roomId: "room-1" } : {}), route: notificationPayload(type, id).url, sourceCreatedAt: time(1), status: "pending", attempts: 0, createdAt: time(1), updatedAt: time(1) }
 });
 const id = (digit) => digit.repeat(64);
+
+{
+  const event = queued(id("e"), "room-message", "legacy-room-recipient");
+  delete event.data.roomId;
+  const adapter = new DeliveryAdapter([event], new Map([
+    ["legacy-room-recipient", [subscription("legacy-room-recipient", "legacy-room-device")]]
+  ]));
+  adapter.claimEvent = async (eventId) => {
+    Object.assign(adapter.events.get(eventId), {
+      status: "suppressed",
+      errorCode: "LEGACY_ROOM_CONTEXT_MISSING",
+      updatedAt: time(adapter.now())
+    });
+    return { id: eventId, terminal: "suppressed", errorCode: "LEGACY_ROOM_CONTEXT_MISSING" };
+  };
+  const logs = [];
+  let sends = 0;
+  const result = await deliverNotificationEvents({
+    adapter,
+    ownerId: "legacy-room-worker",
+    sendPush: async () => { sends += 1; },
+    logger: { info: (code) => logs.push(code), error: (code) => logs.push(code) }
+  });
+  assert.equal(sends, 0, "a terminally suppressed legacy room event never reaches external delivery");
+  assert.equal(adapter.roomAvailabilityChecks, 0, "suppression does not invent a room lookup");
+  assert.equal(result.suppressed, 1);
+  assert.equal(adapter.events.get(event.id).status, "suppressed");
+  assert.deepEqual(logs.filter((entry) => entry !== "NOTIFICATION_RESULT inspected=1 sent=0 delivered=0 retried=0 suppressed=1 exhausted=0 deferred=0 expired=0 skipped=0 purged=2"),
+    ["LEGACY_ROOM_CONTEXT_MISSING"], "processor logging keeps the auditable fixed suppression code");
+}
 
 {
   const event = queued(id("0"), "comment", "blocked-recipient");
@@ -298,6 +336,43 @@ const id = (digit) => digit.repeat(64);
   assert.equal(result.suppressed, 1,
     "a block after the last send but before completion prevents event completion");
   assert.equal(adapter.events.get(event.id).errorCode, "BLOCKED_PAIR");
+}
+
+{
+  const event = queued(id("7"), "room-message", "hidden-room-recipient");
+  const adapter = new DeliveryAdapter([event], new Map([
+    ["hidden-room-recipient", [subscription("hidden-room-recipient", "room-device")]]
+  ]));
+  adapter.roomAvailabilitySequence = [false];
+  let sends = 0;
+  const result = await deliverNotificationEvents({
+    adapter,
+    ownerId: "worker",
+    sendPush: async () => { sends += 1; },
+    logger: { info() {}, error() {} }
+  });
+  assert.equal(sends, 0, "a room hidden by a report before delivery never sends its queued push");
+  assert.equal(result.suppressed, 1);
+  assert.equal(adapter.events.get(event.id).errorCode, "ROOM_UNAVAILABLE");
+  assert.equal(adapter.events.get(event.id).roomId, "room-1", "suppression retains the parent room id for auditing");
+}
+
+{
+  const event = queued(id("6"), "room-message", "room-race-recipient");
+  const adapter = new DeliveryAdapter([event], new Map([
+    ["room-race-recipient", [subscription("room-race-recipient", "room-race-device")]]
+  ]));
+  adapter.roomAvailabilitySequence = [true, true, false];
+  const sent = [];
+  const result = await deliverNotificationEvents({
+    adapter,
+    ownerId: "worker",
+    sendPush: async (entry) => sent.push(entry.id),
+    logger: { info() {}, error() {} }
+  });
+  assert.deepEqual(sent, ["room-race-device"]);
+  assert.equal(result.suppressed, 1, "room availability is revalidated after the last device send before completion");
+  assert.equal(adapter.events.get(event.id).errorCode, "ROOM_UNAVAILABLE");
 }
 
 {

@@ -52,4 +52,10 @@ assert.ok(config.indexes.some((index) => index.collectionGroup === "rooms"
     { fieldPath: "cleanupLeaseExpiresAt", order: "ASCENDING" },
     { fieldPath: "__name__", order: "ASCENDING" }
   ])), "stale room-closing leases have a bounded recovery index");
+assert.ok(config.indexes.some((index) => index.collectionGroup === "roomMessages"
+  && JSON.stringify(index.fields) === JSON.stringify([
+    { fieldPath: "roomId", order: "ASCENDING" },
+    { fieldPath: "createdAt", order: "ASCENDING" },
+    { fieldPath: "__name__", order: "ASCENDING" }
+  ])), "administrator room transcripts have a bounded deterministic pagination index");
 console.log("Moderation profile index contract passed");

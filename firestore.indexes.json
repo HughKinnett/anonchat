@@ -105,7 +105,26 @@
       "collectionGroup": "roomMessages",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "roomId", "order": "ASCENDING" },
         { "fieldPath": "moderationState", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roomMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "moderationState", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roomMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "roomId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "ASCENDING" },
         { "fieldPath": "__name__", "order": "ASCENDING" }
       ]

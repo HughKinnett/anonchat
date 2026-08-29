@@ -167,6 +167,7 @@ export const scanTrustedNotificationSources = async ({ adapter, budget, limits =
           type: state.type,
           actorUid,
           recipientUid,
+          ...(state.type === "room-message" ? { roomId: source.data.roomId } : {}),
           route: notificationRoute(state.type),
           sourceCreatedAt: source.data.createdAt,
           now: adapter.timestamp(adapter.now())
@@ -249,6 +250,19 @@ export const deliverNotificationEvents = async ({
           safeLog(logger, "error", "EVENT_EXHAUSTED");
           continue;
         }
+        if (claim.terminal === "suppressed") {
+          result.suppressed += 1;
+          safeLog(logger, "info", claim.errorCode || "LEGACY_ROOM_CONTEXT_MISSING");
+          continue;
+        }
+        const roomUnavailable = async () => claim.data.type === "room-message"
+          && !(await adapter.roomAvailable(claim.data.roomId));
+        if (await roomUnavailable()) {
+          await adapter.suppressEvent(claim.id, claim.token, "ROOM_UNAVAILABLE");
+          result.suppressed += 1;
+          safeLog(logger, "info", "ROOM_UNAVAILABLE");
+          continue;
+        }
         if (!(await adapter.recipientAvailable(claim.data.recipientUid))) {
           await adapter.suppressEvent(claim.id, claim.token);
           result.suppressed += 1;
@@ -285,6 +299,10 @@ export const deliverNotificationEvents = async ({
           }
           if (!(await adapter.recipientAvailable(claim.data.recipientUid))) {
             recipientUnavailable = true;
+            break;
+          }
+          if (await roomUnavailable()) {
+            recipientUnavailable = "room";
             break;
           }
           if (await adapter.pairBlocked(claim.data.actorUid, claim.data.recipientUid)) {
@@ -337,9 +355,10 @@ export const deliverNotificationEvents = async ({
           }
         }
         if (recipientUnavailable) {
-          await adapter.suppressEvent(claim.id, claim.token);
+          const roomUnavailableAtDelivery = recipientUnavailable === "room";
+          await adapter.suppressEvent(claim.id, claim.token, roomUnavailableAtDelivery ? "ROOM_UNAVAILABLE" : "RECIPIENT_UNAVAILABLE");
           result.suppressed += 1;
-          safeLog(logger, "info", "RECIPIENT_UNAVAILABLE");
+          safeLog(logger, "info", roomUnavailableAtDelivery ? "ROOM_UNAVAILABLE" : "RECIPIENT_UNAVAILABLE");
           continue;
         }
         if (blockedPair) {
@@ -365,6 +384,12 @@ export const deliverNotificationEvents = async ({
           await adapter.suppressEvent(claim.id, claim.token, "BLOCKED_PAIR");
           result.suppressed += 1;
           safeLog(logger, "info", "BLOCKED_PAIR");
+          continue;
+        }
+        if (await roomUnavailable()) {
+          await adapter.suppressEvent(claim.id, claim.token, "ROOM_UNAVAILABLE");
+          result.suppressed += 1;
+          safeLog(logger, "info", "ROOM_UNAVAILABLE");
           continue;
         }
         if (transientFailure) {

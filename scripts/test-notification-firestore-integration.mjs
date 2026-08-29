@@ -109,6 +109,7 @@ assert.equal((await db.doc("system/notificationProcessor").get()).data().cursors
 
 await putMany([
   ["users/post-owner", { uid: "post-owner", banned: false }],
+  ["users/room-owner", { uid: "room-owner", banned: false }],
   ["users/recipient", { uid: "recipient", banned: false }],
   ["users/banned-recipient", { uid: "banned-recipient", banned: true }],
   ["users/admin-deleting-recipient", { uid: "admin-deleting-recipient", banned: true }],
@@ -117,6 +118,7 @@ await putMany([
   ["adminDeletionJobs/admin-deleting-recipient", { status: "queued" }],
   ["accountDeletionRequests/self-deleting-recipient", { status: "queued" }],
   ["posts/post-a", { authorId: "post-owner" }],
+  ["rooms/room-a", { ownerId: "room-owner", moderationState: "visible", cleanupState: "open", expiresAt: Timestamp.fromMillis(clock.now + 60_000) }],
   ["roomMembers/room-a_sender", { roomId: "room-a", uid: "sender" }],
   ["roomMembers/room-a_member-b", { roomId: "room-a", uid: "member-b" }],
   ["roomMembers/room-a_member-a", { roomId: "room-a", uid: "member-a" }],
@@ -125,6 +127,12 @@ await putMany([
 ]);
 assert.equal(await adapter.postAuthor({ path: "posts/post-a/comments/comment-a" }), "post-owner");
 assert.deepEqual((await adapter.roomMembers({ data: { roomId: "room-a" } })).sort(), ["member-a", "member-b", "sender"]);
+assert.equal(await adapter.roomAvailable("room-a"), true);
+await db.doc("rooms/room-a").update({ moderationState: "hidden" });
+assert.equal(await adapter.roomAvailable("room-a"), false, "a reported room is unavailable when push delivery revalidates it");
+await db.doc("rooms/room-a").update({ moderationState: "visible", expiresAt: Timestamp.fromMillis(clock.now - 1) });
+assert.equal(await adapter.roomAvailable("room-a"), false, "an expired room is unavailable at delivery time");
+await db.doc("rooms/room-a").update({ expiresAt: Timestamp.fromMillis(clock.now + 60_000) });
 assert.equal(await adapter.recipientAvailable("post-owner"), true);
 assert.equal(await adapter.recipientAvailable("missing-user"), false);
 assert.equal(await adapter.recipientAvailable("banned-recipient"), false);
@@ -148,6 +156,36 @@ await db.doc("adminDeletionJobs/transition-recipient").set({ status: "queued" })
 assert.equal(await adapter.recipientAvailable("transition-recipient"), false,
   "recipient availability is re-readable after an event was queued");
 assert.deepEqual((await adapter.listSubscriptions("recipient")).map((subscription) => subscription.id), ["sub-a"]);
+
+const roomStateEventId = "f".repeat(64);
+await adapter.createEvent(roomStateEventId, queuedEvent({
+  type: "room-message", actorUid: "sender", recipientUid: "recipient", roomId: "room-a", route: "/community.html#rooms-panel",
+  sourceCreatedAt: Timestamp.fromMillis(clock.now - 1), now: Timestamp.fromMillis(clock.now)
+}));
+const roomStateClaim = await adapter.claimEvent(roomStateEventId, "room-state-worker");
+assert.equal(roomStateClaim.data.roomId, "room-a", "the claimed processing state retains room identity");
+await adapter.suppressEvent(roomStateEventId, roomStateClaim.token, "ROOM_UNAVAILABLE");
+const suppressedRoomEvent = (await db.doc(`notificationEvents/${roomStateEventId}`).get()).data();
+assert.equal(suppressedRoomEvent.roomId, "room-a", "the terminal suppression state retains room identity");
+assert.equal(suppressedRoomEvent.errorCode, "ROOM_UNAVAILABLE");
+await db.doc(`notificationEvents/${roomStateEventId}`).delete();
+
+const legacyRoomEventId = "e".repeat(64);
+const { roomId: legacyRoomId, ...legacyRoomEvent } = queuedEvent({
+  type: "room-message", actorUid: "sender", recipientUid: "recipient", roomId: "room-a", route: "/community.html#rooms-panel",
+  sourceCreatedAt: Timestamp.fromMillis(clock.now - 1), now: Timestamp.fromMillis(clock.now)
+});
+void legacyRoomId;
+await db.doc(`notificationEvents/${legacyRoomEventId}`).set(legacyRoomEvent);
+const legacyRoomClaim = await adapter.claimEvent(legacyRoomEventId, "legacy-room-worker");
+assert.deepEqual(legacyRoomClaim, { id: legacyRoomEventId, terminal: "suppressed", errorCode: "LEGACY_ROOM_CONTEXT_MISSING" },
+  "a legacy room event without a delivery-time room fence is terminally suppressed without delivery");
+const suppressedLegacyRoomEvent = (await db.doc(`notificationEvents/${legacyRoomEventId}`).get()).data();
+assert.equal(suppressedLegacyRoomEvent.status, "suppressed");
+assert.equal(suppressedLegacyRoomEvent.errorCode, "LEGACY_ROOM_CONTEXT_MISSING");
+assert.equal(Object.hasOwn(suppressedLegacyRoomEvent, "roomId"), false,
+  "the auditable compatibility state never invents room identity");
+await db.doc(`notificationEvents/${legacyRoomEventId}`).delete();
 
 const queryShape = {};
 const shapeAdapter = new FirestoreNotificationAdapter({

@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v43";
+const CACHE_NAME = "anonchat-v44";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -59,6 +59,7 @@ const APP_SHELL = [
   "./session-generation-policy.mjs",
   "./timeline-interaction-policy.mjs",
   "./temporary-room-timer-policy.mjs",
+  "./poll-vote-policy.mjs",
   "./upload.js",
   "./pwa.js",
   "./manifest.webmanifest",

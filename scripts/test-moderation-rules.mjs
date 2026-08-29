@@ -17,10 +17,15 @@ const intake = (overrides = {}) => ({
 });
 const writeReport = async (db, payload) => {
   const batch = writeBatch(db);
-  batch.set(doc(db, "reportIntakes", `${payload.reporterUid}_${payload.targetKind}_${payload.targetId}`), payload);
+  const reportId = `${payload.reporterUid}_${payload.targetKind}_${payload.targetId}`;
+  batch.set(doc(db, "reportIntakes", reportId), payload);
   batch.set(doc(db, "reportReceipts", payload.reporterUid, payload.targetKind, payload.targetId), {
     reporterUid: payload.reporterUid, targetKind: payload.targetKind, targetId: payload.targetId, createdAt: payload.createdAt
   });
+  if (["post", "communityPost", "room"].includes(payload.targetKind)) batch.update(
+    doc(db, payload.targetCollection, payload.targetId),
+    { moderationState: "hidden", moderationHoldId: reportId, moderationHeldAt: payload.createdAt }
+  );
   await batch.commit();
 };
 const originalPost = (overrides = {}) => ({
@@ -48,13 +53,18 @@ const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
     setDoc(doc(db, "posts", "post-1"), { type: "original", authorId: "author", username: "author", content: "reportable", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
     setDoc(doc(db, "posts", "post-2"), { type: "original", authorId: "author", username: "author", content: "reportable", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
     setDoc(doc(db, "posts", "post-3"), { type: "original", authorId: "author", username: "author", content: "reportable", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
+    setDoc(doc(db, "posts", "active-post"), { type: "original", authorId: "author", username: "author", content: "active", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(db, "communityPosts", "community-1"), { authorId: "author", username: "author", content: "reportable", category: "Question", circleId: "circle-1", options: [], createdAt: new Date(0) }),
+    setDoc(doc(db, "communityPosts", "active-community"), { authorId: "author", username: "author", content: "active", category: "Question", circleId: "circle-1", options: [], moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(db, "rooms", "room-1"), { ownerId: "author", name: "Visible room", topic: "visible", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(db, "rooms", "active-room"), { ownerId: "author", name: "Active room", topic: "active", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(db, "rooms", "hidden-room"), { ownerId: "author", name: "Hidden room", topic: "hidden", expiresAt: roomExpiry, moderationState: "hidden", createdAt: new Date(0) }),
     setDoc(doc(db, "roomMessages", "visible-message-hidden-room"), { roomId: "hidden-room", senderId: "author", tempName: "Author", text: "visible child", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(db, "roomMembers", "hidden-room_stranger"), { roomId: "hidden-room", uid: "stranger", joinedAt: new Date(0) }),
     setDoc(doc(db, "roomMembers", "room-1_stranger"), { roomId: "room-1", uid: "stranger", joinedAt: new Date(0) }),
+    setDoc(doc(db, "roomMembers", "active-room_stranger"), { roomId: "active-room", uid: "stranger", joinedAt: new Date(0) }),
     setDoc(doc(db, "roomMessages", "message-1"), { roomId: "room-1", senderId: "author", tempName: "Author", text: "reportable", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
+    setDoc(doc(db, "roomMessages", "active-room-parent"), { roomId: "active-room", senderId: "author", tempName: "Author", text: "active", expiresAt: roomExpiry, moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(db, "moderationCases", "case-post-1"), { targetKind: "post", targetId: "post-1", status: "open", createdAt: new Date(0) }),
     setDoc(doc(db, "moderationCases", "case-post-1", "reports", "reporter_post_post-1"), { reporterUid: "reporter", reason: "harassment", createdAt: new Date(0) }),
     setDoc(doc(db, "moderationCases", "case-post-1", "evidence", "media"), { items: [{ kind: "postImage", dataUrl: "data:image/jpeg;base64,AAAA" }] }),
@@ -119,16 +129,52 @@ try {
   await assertFails(setDoc(doc(reporter, "posts", "repost_reporter_post-2"), withoutModerationState(repost("post-2"))));
   await assertFails(setDoc(doc(reporter, "posts", "repost_reporter_post-3"), repost("post-3", { moderationState: "hidden" })));
 
+  await assertSucceeds(setDoc(doc(reporter, "posts", "post-1", "comments", "before-report"), {
+    uid: "reporter", username: "reporter", text: "active comment", createdAt: serverTimestamp()
+  }), "active posts retain comment controls");
+  await assertSucceeds(setDoc(doc(reporter, "posts", "post-1", "reactions", "reporter"), {
+    uid: "reporter", type: "heart", createdAt: serverTimestamp()
+  }), "active posts retain reaction controls");
+  await assertSucceeds(setDoc(doc(reporter, "communityVotes", "communityPosts:community-1:reporter"), {
+    postCollection: "communityPosts", postId: "community-1", uid: "reporter", option: 0, createdAt: serverTimestamp()
+  }), "active Community posts retain voting controls");
+  await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-message"), {
+    roomId: "room-1", senderId: "stranger", tempName: "Stranger", text: "active room", expiresAt: roomExpiry,
+    moderationState: "visible", createdAt: serverTimestamp()
+  }), "active rooms retain messaging controls");
+
   await assertSucceeds(writeReport(reporter, intake()));
+  await assertFails(setDoc(doc(stranger, "posts", "post-1", "comments", "after-report"), {
+    uid: "stranger", username: "stranger", text: "hidden comment", createdAt: serverTimestamp()
+  }), "reported posts deny comments immediately");
+  await assertFails(setDoc(doc(stranger, "posts", "post-1", "reactions", "stranger"), {
+    uid: "stranger", type: "heart", createdAt: serverTimestamp()
+  }), "reported posts deny reactions immediately");
+  await assertFails(setDoc(doc(stranger, "posts", "repost_stranger_post-1"), repost("post-1", {
+    authorId: "stranger", username: "stranger"
+  })), "reported posts deny sharing and reposting immediately");
   assert.equal((await assertSucceeds(getDoc(intakeRef))).data().reporterUid, "reporter");
   await assertSucceeds(writeReport(reporter, intake({
     targetKind: "communityPost", targetCollection: "communityPosts", targetId: "community-1",
     targetPath: "communityPosts/community-1"
   })));
+  await assertFails(setDoc(doc(stranger, "communityVotes", "communityPosts:community-1:stranger"), {
+    postCollection: "communityPosts", postId: "community-1", uid: "stranger", option: 0, createdAt: serverTimestamp()
+  }), "reported Community posts deny voting immediately");
   await assertSucceeds(writeReport(reporter, intake({
     targetKind: "roomMessage", targetCollection: "roomMessages", targetId: "message-1",
     targetPath: "roomMessages/message-1"
   })));
+  await assertSucceeds(writeReport(reporter, intake({
+    targetKind: "room", targetCollection: "rooms", targetId: "room-1", targetPath: "rooms/room-1"
+  })));
+  await assertFails(getDoc(doc(stranger, "rooms", "room-1")), "a reported room disappears from ordinary users immediately");
+  await assertFails(getDoc(doc(stranger, "roomMessages", "active-room-message")), "retained room messages inherit the hidden parent protection");
+  await assertSucceeds(getDoc(doc(admin, "roomMessages", "active-room-message")), "admins retain transcript access while the room is hidden");
+  await assertFails(setDoc(doc(stranger, "roomMessages", "after-room-report"), {
+    roomId: "room-1", senderId: "stranger", tempName: "Stranger", text: "hidden room", expiresAt: roomExpiry,
+    moderationState: "visible", createdAt: serverTimestamp()
+  }), "reported rooms deny messaging immediately");
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await updateDoc(doc(context.firestore(), "rooms", "room-1"), { cleanupState: "closing" });
   });
@@ -244,17 +290,31 @@ try {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await setDoc(doc(context.firestore(), "posts", "hidden-post"), { type: "original", authorId: "author", username: "author", content: "hidden", imageData: "", category: "Post", options: [], moderationState: "hidden", createdAt: new Date(0) });
     await setDoc(doc(context.firestore(), "communityPosts", "hidden-community"), { authorId: "author", username: "author", content: "hidden", category: "Question", circleId: "circle-1", options: [], moderationState: "hidden", createdAt: new Date(0) });
+    await setDoc(doc(context.firestore(), "posts", "same-vote-id"), { type: "original", authorId: "author", username: "author", content: "timeline", imageData: "", category: "Poll", options: ["a", "b"], moderationState: "visible", createdAt: new Date(0) });
+    await setDoc(doc(context.firestore(), "communityPosts", "same-vote-id"), { authorId: "author", username: "author", content: "community", category: "Poll", circleId: "circle-1", options: ["a", "b"], moderationState: "visible", createdAt: new Date(0) });
     await setDoc(doc(context.firestore(), "roomMessages", "hidden-message"), { roomId: "room-1", senderId: "author", tempName: "Author", text: "hidden", expiresAt: new Date(Date.now() + 86_400_000), moderationState: "hidden", createdAt: new Date(0) });
     await setDoc(doc(context.firestore(), "communityVotes", "post-1_author"), { postId: "post-1", uid: "author", option: 0, createdAt: new Date(0) });
     await setDoc(doc(context.firestore(), "communityVotes", "hidden-post_author"), { postId: "hidden-post", uid: "author", option: 0, createdAt: new Date(0) });
-    await setDoc(doc(context.firestore(), "communityVotes", "community-1_author"), { postId: "community-1", uid: "author", option: 0, createdAt: new Date(0) });
+    await setDoc(doc(context.firestore(), "communityVotes", "active-community_author"), { postId: "active-community", uid: "author", option: 0, createdAt: new Date(0) });
     await setDoc(doc(context.firestore(), "communityVotes", "hidden-community_author"), { postId: "hidden-community", uid: "author", option: 0, createdAt: new Date(0) });
+    await setDoc(doc(context.firestore(), "communityVotes", "same-vote-id_author"), { postId: "same-vote-id", uid: "author", option: 0, createdAt: new Date(0), legacyMigrationState: "ambiguous" });
+    await setDoc(doc(context.firestore(), "communityVotes", "posts:active-post:author"), { postCollection: "posts", postId: "active-post", uid: "author", option: 0, createdAt: new Date(0) });
+    await setDoc(doc(context.firestore(), "communityVotes", "communityPosts:active-community:author"), { postCollection: "communityPosts", postId: "active-community", uid: "author", option: 0, createdAt: new Date(0) });
   });
   for (const path of [["posts", "hidden-post"], ["communityPosts", "hidden-community"], ["rooms", "hidden-room"], ["roomMessages", "hidden-message"]]) {
     await assertFails(getDoc(doc(stranger, ...path)));
     await assertSucceeds(getDoc(doc(admin, ...path)));
   }
-  await assertSucceeds(getDoc(doc(stranger, "communityVotes", "community-1_author")));
+  await assertSucceeds(getDoc(doc(stranger, "communityVotes", "active-community_author")));
+  await assertSucceeds(getDoc(doc(stranger, "communityVotes", "posts:active-post:author")), "timeline poll votes are readable through their exact posts parent");
+  await assertSucceeds(getDoc(doc(stranger, "communityVotes", "communityPosts:active-community:author")));
+  await assertFails(getDoc(doc(stranger, "communityVotes", "same-vote-id_author")), "ambiguous legacy votes cannot leak across same-ID collections");
+  await assertSucceeds(getDoc(doc(admin, "communityVotes", "same-vote-id_author")), "admins retain ambiguous legacy votes for review");
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await deleteDoc(doc(context.firestore(), "posts", "same-vote-id"));
+  });
+  await assertFails(getDoc(doc(stranger, "communityVotes", "same-vote-id_author")),
+    "an auditable ambiguous quarantine cannot become readable after one same-ID parent is deleted");
   await assertFails(getDoc(doc(stranger, "communityVotes", "post-1_author")));
   await assertFails(getDoc(doc(stranger, "communityVotes", "hidden-post_author")));
   await assertFails(getDoc(doc(stranger, "communityVotes", "hidden-community_author")));
@@ -262,23 +322,24 @@ try {
   await assertFails(getDocs(collection(stranger, "communityVotes")));
   const visibleVotes = await assertSucceeds(getDocs(query(
     collection(stranger, "communityVotes"),
-    where("postId", "in", ["community-1"])
+    where("postCollection", "==", "communityPosts"),
+    where("postId", "in", ["active-community"])
   )));
-  assert.deepEqual(visibleVotes.docs.map((entry) => entry.id), ["community-1_author"]);
+  assert.deepEqual(visibleVotes.docs.map((entry) => entry.id), ["communityPosts:active-community:author"]);
   await assertSucceeds(getDocs(collection(admin, "communityVotes")));
 
   const comment = { uid: "stranger", username: "stranger", text: "direct api", createdAt: serverTimestamp() };
   const reaction = { uid: "stranger", type: "heart", createdAt: serverTimestamp() };
-  await assertSucceeds(setDoc(doc(stranger, "posts", "post-1", "comments", "visible-control"), comment));
-  await assertSucceeds(setDoc(doc(stranger, "posts", "post-1", "reactions", "stranger"), reaction));
-  await assertSucceeds(setDoc(doc(reporter, "roomMembers", "room-1_reporter"), { roomId: "room-1", uid: "reporter", joinedAt: serverTimestamp() }));
-  await assertSucceeds(updateDoc(doc(stranger, "roomMembers", "room-1_stranger"), { joinedAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(stranger, "posts", "active-post", "comments", "visible-control"), comment));
+  await assertSucceeds(setDoc(doc(stranger, "posts", "active-post", "reactions", "stranger"), reaction));
+  await assertSucceeds(setDoc(doc(reporter, "roomMembers", "active-room_reporter"), { roomId: "active-room", uid: "reporter", joinedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(stranger, "roomMembers", "active-room_stranger"), { joinedAt: serverTimestamp() }));
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "visible-room-direct"), {
-    roomId: "room-1", senderId: "stranger", tempName: "Stranger", text: "direct api",
+    roomId: "active-room", senderId: "stranger", tempName: "Stranger", text: "direct api",
     expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
   }));
-  await assertSucceeds(setDoc(doc(stranger, "roomMessages", "message-1", "comments", "visible-control"), comment));
-  await assertSucceeds(setDoc(doc(stranger, "roomMessages", "message-1", "reactions", "stranger"), reaction));
+  await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-parent", "comments", "visible-control"), comment));
+  await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-parent", "reactions", "stranger"), reaction));
   for (const parent of [["posts", "hidden-post"], ["communityPosts", "hidden-community"], ["roomMessages", "hidden-message"]]) {
     await assertFails(setDoc(doc(stranger, ...parent, "comments", "direct-api"), comment));
     await assertFails(setDoc(doc(stranger, ...parent, "reactions", "stranger"), reaction));
@@ -289,11 +350,15 @@ try {
     roomId: "hidden-room", senderId: "stranger", tempName: "Stranger", text: "direct api",
     expiresAt: new Date(Date.now() + 86_400_000), moderationState: "visible", createdAt: serverTimestamp()
   }));
+  await assertSucceeds(deleteDoc(doc(stranger, "roomMessages", "visible-room-direct")), "a sender can delete their message while its room remains active");
+  await assertFails(deleteDoc(doc(author, "roomMessages", "visible-message-hidden-room")), "a sender cannot mutate a retained message while its room is on hold");
   await assertFails(setDoc(doc(stranger, "roomMessages", "visible-message-hidden-room", "comments", "direct-api"), comment));
   await assertFails(setDoc(doc(stranger, "roomMessages", "visible-message-hidden-room", "reactions", "stranger"), reaction));
-  await assertSucceeds(setDoc(doc(stranger, "communityVotes", "community-1_stranger"), { postId: "community-1", uid: "stranger", option: 0, createdAt: serverTimestamp() }));
-  await assertFails(setDoc(doc(stranger, "communityVotes", "hidden-community_stranger"), { postId: "hidden-community", uid: "stranger", option: 0, createdAt: serverTimestamp() }));
-  await assertFails(setDoc(doc(stranger, "communityVotes", "hidden-post_stranger"), { postId: "hidden-post", uid: "stranger", option: 0, createdAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(stranger, "communityVotes", "communityPosts:active-community:stranger"), { postCollection: "communityPosts", postId: "active-community", uid: "stranger", option: 0, createdAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(stranger, "communityVotes", "posts:active-post:stranger"), { postCollection: "posts", postId: "active-post", uid: "stranger", option: 0, createdAt: serverTimestamp() }), "active Timeline posts retain voting controls");
+  await assertFails(setDoc(doc(stranger, "communityVotes", "active-community_stranger"), { postId: "active-community", uid: "stranger", option: 0, createdAt: serverTimestamp() }), "new legacy vote shapes are rejected");
+  await assertFails(setDoc(doc(stranger, "communityVotes", "communityPosts:hidden-community:stranger"), { postCollection: "communityPosts", postId: "hidden-community", uid: "stranger", option: 0, createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(stranger, "communityVotes", "posts:hidden-post:stranger"), { postCollection: "posts", postId: "hidden-post", uid: "stranger", option: 0, createdAt: serverTimestamp() }));
   console.log("Firestore moderation authorization passed");
 } finally {
   await testEnv.cleanup();

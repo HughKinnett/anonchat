@@ -95,6 +95,7 @@ for (const requiredSuite of [
   "test:moderation-policy",
   "test:community-lifecycle",
   "test:timeline-query-compatibility",
+  "test:poll-vote-migration",
   "test:viewer-block-policy",
   "test:viewer-block-surfaces",
   "test:timeline-query-rules",
@@ -155,7 +156,7 @@ assertRejected(validateModerationWorkflow, moderationWrongSecret, "wrong moderat
 const moderationScheduleExtraKey = clone(moderationWorkflow);
 moderationScheduleExtraKey.on.schedule[0].timezone = "UTC";
 assertRejected(validateModerationWorkflow, moderationScheduleExtraKey, "moderation schedule extra key");
-for (const [script, replacement] of [["moderation:process", "node scripts/other.mjs"], ["test:moderation-processor", "node arbitrary.mjs"], ["test:moderation-firestore-integration", "node arbitrary.mjs"]]) {
+for (const [script, replacement] of [["moderation:process", "node scripts/other.mjs"], ["rollout:migrate-poll-votes", "node scripts/other.mjs"], ["test:moderation-processor", "node arbitrary.mjs"], ["test:moderation-firestore-integration", "node arbitrary.mjs"]]) {
   const tampered = structuredClone(packageJson); tampered.scripts[script] = replacement;
   assert.notDeepEqual(validatePackageScripts(tampered), [], `${script} must be pinned`);
 }
@@ -254,8 +255,14 @@ const rulesStep = deployRulesBeforeGate.jobs.deploy.steps.splice(9, 1)[0];
 deployRulesBeforeGate.jobs.deploy.steps.splice(6, 0, rulesStep);
 assertRejected(validateDeployWorkflow, deployRulesBeforeGate, "rules exposed before rollout gates");
 
+const deployWithoutPostRulesVoteDrain = clone(deployWorkflow);
+deployWithoutPostRulesVoteDrain.jobs.deploy.steps = deployWithoutPostRulesVoteDrain.jobs.deploy.steps
+  .filter((step) => step.name !== "Drain poll votes created during rules cutover");
+assertRejected(validateDeployWorkflow, deployWithoutPostRulesVoteDrain,
+  "Hosting cannot expose the new poll client before cutover-window legacy votes are drained");
+
 const deployHostingBeforeGate = clone(deployWorkflow);
-const hostingStep = deployHostingBeforeGate.jobs.deploy.steps.splice(10, 1)[0];
+const hostingStep = deployHostingBeforeGate.jobs.deploy.steps.splice(11, 1)[0];
 deployHostingBeforeGate.jobs.deploy.steps.splice(6, 0, hostingStep);
 assertRejected(validateDeployWorkflow, deployHostingBeforeGate, "Hosting exposed before rollout gates");
 

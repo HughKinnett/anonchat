@@ -3,6 +3,7 @@ import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { createModerationClient } from "./moderation-client.mjs";
+import { REPORT_BUTTON_CLASS } from "./moderation-policy.mjs";
 import { compareNewestFirst } from "./content-ordering.mjs";
 import { blockedProfileStatus, commentsForPost, interactionParentForPost } from "./profile-render-policy.mjs";
 import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
@@ -290,6 +291,13 @@ const postComments = (postDoc) => commentsForPost(
   visibleRecords(comments, viewerBlocks, ["uid"]), postDoc
 );
 
+const removeReportedPostFromLocalState = (path) => {
+  targetPosts = targetPosts.filter((entry) => entry.ref.path !== path);
+  targetCommunityPosts = targetCommunityPosts.filter((entry) => entry.ref.path !== path);
+  syncProfilePostResources([...targetPosts, ...targetCommunityPosts]);
+  schedulePostsRender();
+};
+
 const syncProfilePostResources = (postDocs) => {
   const session = activeProfileSession;
   const uid = currentUser?.uid;
@@ -496,6 +504,7 @@ const renderPosts = () => {
       });
       const reportPost = document.createElement("button");
       reportPost.type = "button";
+      reportPost.className = REPORT_BUTTON_CLASS;
       reportPost.textContent = reported === true ? "Reported" : reported === false ? "Report" : "Checking report…";
       reportPost.disabled = reported !== false;
       postReportReason.disabled = reported === true;
@@ -504,6 +513,7 @@ const renderPosts = () => {
         reportPost.disabled = true;
         try {
           await moderationClient.report(reportTarget, postReportReason.value);
+          removeReportedPostFromLocalState(postDoc.ref.path);
           reportPost.textContent = "Reported";
           postReportReason.disabled = true;
           setStatus("Report sent. Thank you for helping keep AnonChat safe.");

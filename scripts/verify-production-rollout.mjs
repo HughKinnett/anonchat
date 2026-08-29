@@ -7,7 +7,7 @@ const app = initializeApp({ credential: applicationDefault(), projectId }, "prod
 
 const main = async () => {
   const db = getFirestore(app);
-  const paths = ["moderationStateBackfill", "roomLifecycleBackfill", "moderationProcessor"];
+  const paths = ["moderationStateBackfill", "roomLifecycleBackfill", "pollVoteSchemaMigration", "moderationProcessor"];
   const snapshots = await Promise.all(paths.map((id) => db.doc(`system/${id}`).get()));
   verifyProductionRolloutState(Object.fromEntries(paths.map((id, index) => [id, snapshots[index].data()])));
   console.log("PRODUCTION_ROLLOUT_GATES_VERIFIED");

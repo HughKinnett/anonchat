@@ -12,6 +12,7 @@ const credentialPathReference = "${{ steps.auth.outputs.credentials_file_path }}
 const deployIndexesCommand = "npm run rollout:ensure-indexes";
 const waitIndexesCommand = "npm run rollout:wait-indexes";
 const processRolloutCommand = "npm run rollout:process-moderation";
+const drainPollVotesCommand = "npm run rollout:migrate-poll-votes";
 const verifyRolloutCommand = "npm run rollout:verify";
 const deployRulesCommand = "npx --no-install firebase deploy --project anonchatlogin --only firestore:rules --non-interactive";
 const deployHostingCommand = "npx --no-install firebase deploy --project anonchatlogin --only hosting --non-interactive";
@@ -29,7 +30,7 @@ const rulesPaths = [
   "*.webmanifest",
   "scripts/**"
 ];
-const firestoreCiCommand = "npm run test:legal-signup && npm run test:moderation-client && npm run test:content-writer && npm run test:moderation-backfill && npm run test:moderation-indexes && npm run test:profile-render && npm run test:moderation-policy && npm run test:community-lifecycle && npm run test:timeline-query-compatibility && npm run test:viewer-block-policy && npm run test:viewer-block-surfaces && npm run test:rules && npm run test:moderation-rules && npm run test:block-rules && npm run test:timeline-query-rules && npm run test:room-expiry-rules && npm run test:moderation-processor && npm run test:moderation-firestore-integration && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm test";
+const firestoreCiCommand = "npm run test:legal-signup && npm run test:moderation-client && npm run test:content-writer && npm run test:moderation-backfill && npm run test:moderation-indexes && npm run test:profile-render && npm run test:moderation-policy && npm run test:community-lifecycle && npm run test:timeline-query-compatibility && npm run test:poll-vote-migration && npm run test:viewer-block-policy && npm run test:viewer-block-surfaces && npm run test:rules && npm run test:moderation-rules && npm run test:block-rules && npm run test:timeline-query-rules && npm run test:room-expiry-rules && npm run test:moderation-processor && npm run test:moderation-firestore-integration && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm test";
 const workflowPolicyTestCommand = "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs && node scripts/test-production-rollout.mjs";
 const notificationTestCommand = "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes && node scripts/test-push-service-worker.mjs";
 const moderationProcessorTestCommand = "node scripts/test-moderation-processor-policy.mjs && node scripts/test-moderation-firestore-adapter.mjs && node scripts/test-moderation-processor.mjs";
@@ -200,6 +201,7 @@ export const validateDeployWorkflow = (workflow) => {
     `run:${processRolloutCommand}`,
     `run:${verifyRolloutCommand}`,
     `run:${deployRulesCommand}`,
+    `run:${drainPollVotesCommand}`,
     `run:${deployHostingCommand}`
   ], "deploy workflow steps");
   validateStep(errors, steps[0], {
@@ -243,7 +245,12 @@ export const validateDeployWorkflow = (workflow) => {
     env: { GCLOUD_PROJECT: "anonchatlogin" }
   }, "production gate verification step");
   validateStep(errors, steps[9], { name: "Deploy Firestore rules", run: deployRulesCommand }, "deploy rules step");
-  validateStep(errors, steps[10], { name: "Deploy Firebase Hosting", run: deployHostingCommand }, "deploy Hosting step");
+  validateStep(errors, steps[10], {
+    name: "Drain poll votes created during rules cutover",
+    run: drainPollVotesCommand,
+    env: { GCLOUD_PROJECT: "anonchatlogin" }
+  }, "post-rules poll-vote drain step");
+  validateStep(errors, steps[11], { name: "Deploy Firebase Hosting", run: deployHostingCommand }, "deploy Hosting step");
   return errors;
 };
 
@@ -298,6 +305,7 @@ export const validatePackageScripts = (packageJson) => {
   exactly(errors, packageJson.scripts?.["rollout:ensure-indexes"], "node scripts/ensure-firestore-indexes.mjs", "additive index deployment package script");
   exactly(errors, packageJson.scripts?.["rollout:wait-indexes"], "node scripts/wait-firestore-indexes.mjs", "index readiness package script");
   exactly(errors, packageJson.scripts?.["rollout:process-moderation"], "node scripts/process-production-moderation.mjs", "production moderation package script");
+  exactly(errors, packageJson.scripts?.["rollout:migrate-poll-votes"], "node scripts/poll-vote-migration.mjs", "poll-vote migration package script");
   exactly(errors, packageJson.scripts?.["rollout:verify"], "node scripts/verify-production-rollout.mjs", "production verification package script");
   exactly(errors, packageJson.scripts?.["test:firestore-ci"], firestoreCiCommand, "Firestore CI package script");
   return errors;
