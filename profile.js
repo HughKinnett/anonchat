@@ -838,7 +838,7 @@ onAuthStateChanged(auth, async (user) => {
   await startViewerBlockListeners(session, user.uid);
   if (!sessionIsCurrent()) return;
   renderTargetProfileIdentity();
-  const adminUsernames = ["i_love_you_h", "cybercapone", "ownercybercapone"];
+  const adminUsernames = ["i_love_you_h", "ownercybercapone"];
   const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
   const targetIsAdmin = adminUsernames.includes(String(targetProfile.username || "").toLowerCase());
   document.getElementById("profile-admin-link").hidden =

@@ -1631,7 +1631,7 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
-    !["i_love_you_h", "cybercapone", "ownercybercapone"].includes(profileUsername.toLowerCase());
+    !["i_love_you_h", "ownercybercapone"].includes(profileUsername.toLowerCase());
   const statsRef = doc(db, "system", "accountStats");
   const statsSnapshot = await getDoc(statsRef);
   if (!sessionIsCurrent()) return;
