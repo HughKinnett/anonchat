@@ -112,7 +112,7 @@ function renderUsers() {
 }
 
 const reportTypeLabel = kind => ({ post: "Timeline post", communityPost: "Community post", room: "Temporary chat room", roomMessage: "Room message", user: "User profile" }[kind] || "Reported material");
-const reportStatusLabel = status => ({ open: "Needs review", restored: "Restored", deleteQueued: "Permanent deletion queued", expiredEvidence: "Source expired — evidence retained" }[status] || "Needs review");
+const reportStatusLabel = status => ({ open: "Needs review", restored: "Restored", deleted: "Deleted", deleteQueued: "Permanent deletion queued", expiredEvidence: "Source expired — evidence retained" }[status] || "Needs review");
 const reportReasonLabel = item => {
   const reasons = Object.entries(item.reasonTotals || {}).filter(([, count]) => Number(count) > 0)
     .map(([reason, count]) => `${String(reason).replaceAll("-", " ")} (${count})`);
@@ -169,10 +169,7 @@ function restoreReportFocus({ sourceFocusKey, reportId } = {}) {
 }
 
 async function queueModerationAction(item, action, control) {
-  if (!moderationControlsReady()) {
-    setStatus("Moderation actions are paused until the trusted service is healthy.", true);
-    return;
-  }
+  const trustedServiceReady = moderationControlsReady();
   const user = reportUser(item), existingAction = reportAction(item), intendedFocus = { sourceFocusKey: control.dataset.focusKey, reportId: item.id };
   const actionState = moderationActionState({ caseRecord: item, action: existingAction, deletionPending: reportDeletionPending(item), username: user?.username });
   if (actionState[action]?.disabled || pendingModerationActions.has(item.id)) return;
@@ -180,9 +177,37 @@ async function queueModerationAction(item, action, control) {
   pendingModerationActions.set(item.id, pending); control.disabled = true; renderReports(intendedFocus);
   try {
     const requestedAt = serverTimestamp(), terminalRetry = isTerminalModerationAction(existingAction);
-    await setDoc(doc(db, "moderationActions", item.id), terminalRetry
+    const immediatelyActionable = ["post", "communityPost", "roomMessage", "user"].includes(item.targetKind);
+    if (immediatelyActionable && action === "restore") {
+      if (item.targetKind !== "user") {
+        await setDoc(doc(db, item.targetCollection, item.targetId), {
+          moderationState: "visible", restoredAt: requestedAt, restoredBy: adminUid
+        }, { merge: true });
+      }
+      pendingModerationActions.delete(item.id);
+      setStatus(item.targetKind === "user" ? "Profile report reviewed. The profile stayed active." : "Material restored immediately.");
+      renderReports(intendedFocus);
+      return;
+    } else if (immediatelyActionable && action === "deleteMaterial" && item.targetKind !== "user") {
+      await deleteDoc(doc(db, item.targetCollection, item.targetId));
+      pendingModerationActions.delete(item.id);
+      evictModerationEvidence(item.id); evictRoomTranscript(item.id);
+      setStatus("Material deleted immediately.");
+      renderReports(intendedFocus);
+      return;
+    }
+
+    if (!trustedServiceReady) {
+      pendingModerationActions.delete(item.id);
+      setStatus("This action needs the trusted moderation service, which is currently unavailable.", true);
+      renderReports(intendedFocus);
+      return;
+    }
+    if (!(immediatelyActionable && (action === "restore" || (action === "deleteMaterial" && item.targetKind !== "user")))) {
+      await setDoc(doc(db, "moderationActions", item.id), terminalRetry
       ? moderationActionRetryPayload({ caseRecord: item, action, existingAction, requestedAt })
       : moderationActionPayload({ caseRecord: item, action, requestedBy: adminUid, requestedAt }));
+    }
     if (action === "deleteMaterial") { evictModerationEvidence(item.id); evictRoomTranscript(item.id); }
     setStatus(terminalRetry ? "Material action queued for another attempt."
       : item.targetKind === "room" && action === "restore" ? "Room resume queued."

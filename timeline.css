@@ -1020,3 +1020,86 @@ button:disabled { cursor: wait; opacity: 0.6; }
 #spotify-player-wrap iframe,#profile-spotify-player iframe{display:block;width:100%;height:152px;border:0;border-radius:14px}
 .profile-spotify-card{margin-bottom:22px}
 @media(max-width:640px){.spotify-profile-card{padding:14px}.spotify-card-heading{align-items:flex-start}.spotify-input-row{flex-wrap:wrap}.spotify-input-row input{flex-basis:100%}#spotify-player-wrap iframe,#profile-spotify-player iframe{height:152px}}
+
+
+/* Unified pill controls */
+button:not(.avatar-button):not(.banner-button),
+.nav-button,
+.admin-action,
+.profile-connections-links a {
+  border-radius: 999px !important;
+}
+button:not(.avatar-button):not(.banner-button),
+.primary-button,
+.secondary-button,
+.reaction-button,
+.share-button,
+.delete-button,
+.feed-tab,
+.follow-button,
+.nav-button {
+  border: 1px solid var(--accent) !important;
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+button:not(.avatar-button):not(.banner-button):hover,
+.nav-button:hover {
+  background: var(--accent-hover) !important;
+}
+.reactions { align-items: center; }
+.reaction-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.reaction-control .reaction-button {
+  min-width: 42px;
+  padding: 0 11px;
+}
+.reaction-details { position: relative; }
+.reaction-details > summary {
+  min-width: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: white;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  list-style: none;
+}
+.reaction-details > summary::-webkit-details-marker { display: none; }
+.reaction-details > ul {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 7px);
+  right: 0;
+  width: max-content;
+  min-width: 190px;
+  max-width: min(320px, 82vw);
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 14px 34px rgba(0,0,0,.38);
+  list-style: none;
+}
+.reaction-details li + li { margin-top: 7px; }
+.reaction-details a { color: #ddd6fe; font-weight: 800; }
+.timeline-poll button { border-radius: 999px !important; }
+.view-profile-content {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-items: center;
+  text-align: center;
+}
+.view-profile-avatar { margin-right: auto; margin-left: auto; }
+.view-profile-identity,
+.profile-connections-links,
+.profile-social-actions { justify-content: center; text-align: center; }
+@media (max-width: 560px) {
+  .view-profile-content { padding-right: 18px; padding-left: 18px; }
+}

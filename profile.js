@@ -823,9 +823,11 @@ onAuthStateChanged(auth, async (user) => {
   await startViewerBlockListeners(session, user.uid);
   if (!sessionIsCurrent()) return;
   renderTargetProfileIdentity();
-  const adminUsernames = ["i_love_you_h", "cybercapone"];
+  const adminUsernames = ["i_love_you_h", "cybercapone", "ownercybercapone"];
   const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
-  document.getElementById("profile-admin-link").hidden = !viewerIsAdmin;
+  const targetIsAdmin = adminUsernames.includes(String(targetProfile.username || "").toLowerCase());
+  document.getElementById("profile-admin-link").hidden =
+    !(viewerIsAdmin && targetIsAdmin && currentUser.uid === targetUserId);
   const viewDay = new Date().toISOString().slice(0, 10);
   setDoc(doc(db, "pageViews", viewDay), {
     date: viewDay,

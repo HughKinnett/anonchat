@@ -3,3 +3,21 @@
 .report-preview{white-space:pre-wrap}.report-feedback{font-weight:800;color:#fde68a}#admin-report-status{box-sizing:border-box;min-height:44px;padding:0 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:white;font:inherit}
 .report-evidence{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.report-evidence-image{display:block;width:min(240px,100%);max-height:240px;object-fit:contain;border:1px solid var(--border);border-radius:10px;background:#080a0f}
 .room-transcript{display:grid;gap:8px;margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:12px}.room-transcript-list{display:grid;gap:7px;max-height:360px;overflow:auto}.room-transcript-message{padding:8px;border-radius:9px;background:rgba(255,255,255,.04)}.room-transcript-message p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+
+
+/* Unified admin pill controls */
+button,
+.admin-action,
+.nav-button {
+  border-radius: 999px !important;
+}
+button,
+.admin-action {
+  border: 1px solid var(--accent, #8b5cf6) !important;
+  background: var(--accent, #8b5cf6) !important;
+  color: #fff !important;
+}
+button:hover,
+.admin-action:hover {
+  background: var(--accent-hover, #7c3aed) !important;
+}

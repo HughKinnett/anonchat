@@ -892,14 +892,17 @@ const toggleReaction = async (parent, type, currentType) => {
 };
 
 const reactionButton = (parent, type, emoji, reactionDocs, reactionsTruncated) => {
-  const count = reactionDocs.filter((reaction) => reaction.data().type === type).length;
+  const matching = reactionDocs.filter((reaction) => reaction.data().type === type);
   const myReaction = reactionDocs.find((reaction) => reaction.data().uid === currentUser.uid);
   const currentType = myReaction?.data().type;
   const selected = currentType === type;
+  const wrapper = document.createElement("span");
+  wrapper.className = "reaction-control";
+
   const button = document.createElement("button");
   button.className = "reaction-button";
   button.type = "button";
-  button.textContent = `${emoji} ${boundedInteractionCount(count, reactionsTruncated)}`;
+  button.textContent = emoji;
   button.setAttribute("aria-pressed", String(selected));
   button.title = selected
     ? "Remove this reaction"
@@ -915,7 +918,31 @@ const reactionButton = (parent, type, emoji, reactionDocs, reactionsTruncated) =
       button.disabled = false;
     }
   });
-  return button;
+
+  const details = document.createElement("details");
+  details.className = "reaction-details";
+  const summary = document.createElement("summary");
+  summary.textContent = boundedInteractionCount(matching.length, reactionsTruncated);
+  summary.title = `Show who chose ${emoji}`;
+  const list = document.createElement("ul");
+  if (!matching.length) {
+    const empty = document.createElement("li");
+    empty.textContent = "No reactions yet.";
+    list.append(empty);
+  } else {
+    matching.forEach((reaction) => {
+      const entry = document.createElement("li");
+      const profile = users.find((user) => user.id === reaction.data().uid)?.data();
+      const link = document.createElement("a");
+      link.href = `profile.html?uid=${encodeURIComponent(reaction.data().uid)}`;
+      link.textContent = `@${profile?.username || "anonymous"}`;
+      entry.append(link, document.createTextNode(` chose ${emoji}`));
+      list.append(entry);
+    });
+  }
+  details.append(summary, list);
+  wrapper.append(button, details);
+  return wrapper;
 };
 
 const sharePost = async (postDoc) => {
@@ -1012,20 +1039,21 @@ const renderPost = (postDoc) => {
     const mine = votes.find((vote) => vote.data().uid === currentUser.uid);
     post.options.forEach((option, index) => {
       const count = votes.filter((vote) => vote.data().option === index).length;
+      const percentage = votes.length ? Math.round((count / votes.length) * 100) : 0;
       const button = document.createElement("button");
       button.type = "button";
       button.setAttribute("aria-pressed", String(mine?.data().option === index));
       const label = document.createElement("span");
       label.textContent = option;
       const total = document.createElement("strong");
-      total.textContent = `${count} vote${count === 1 ? "" : "s"}`;
+      total.textContent = `${percentage}% · ${count} vote${count === 1 ? "" : "s"}`;
       button.append(label, total);
       button.addEventListener("click", async () => {
+        if (mine?.data().option === index) return;
         button.disabled = true;
         const voteRef = doc(db, "communityVotes", voteDocumentId(voteParent.collection, voteParent.id, currentUser.uid));
         try {
-          if (mine?.data().option === index) await deleteDoc(voteRef);
-          else await setDoc(voteRef, {
+          await setDoc(voteRef, {
             postCollection: voteParent.collection, postId: voteParent.id,
             uid: currentUser.uid, option: index, createdAt: serverTimestamp()
           });
@@ -1592,7 +1620,7 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
-    !["i_love_you_h", "cybercapone"].includes(profileUsername.toLowerCase());
+    !["i_love_you_h", "cybercapone", "ownercybercapone"].includes(profileUsername.toLowerCase());
   const statsRef = doc(db, "system", "accountStats");
   const statsSnapshot = await getDoc(statsRef);
   if (!sessionIsCurrent()) return;
