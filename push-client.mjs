@@ -13,7 +13,7 @@ export const PUSH_ALERT_MESSAGES = Object.freeze({
   [PUSH_ALERT_STATES.UNSUPPORTED]: "Phone alerts are not supported by this browser.",
   [PUSH_ALERT_STATES.INSTALL_REQUIRED]: "On iPhone, add AnonChat to your Home Screen before enabling phone alerts.",
   [PUSH_ALERT_STATES.CONFIGURATION_PENDING]: "Phone alerts are not configured yet. Please try again later.",
-  [PUSH_ALERT_STATES.RETRY]: "Phone alerts could not be saved safely. Please try again."
+  [PUSH_ALERT_STATES.RETRY]: "Phone alerts could not finish setting up. Refresh this page, then tap Enable phone alerts again."
 });
 
 export function createPushAlertsClient({
@@ -30,7 +30,7 @@ export function createPushAlertsClient({
   remove = async () => {},
   onState = () => {},
   logger = console,
-  readinessTimeoutMs = 10_000,
+  readinessTimeoutMs = 30_000,
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout
 }) {

@@ -60,7 +60,7 @@ function validatedSubscription(subscription) {
     throw new Error("The push endpoint must use HTTPS.");
   }
   if (endpoint.length > 2048) throw new Error("The push endpoint must be at most 2048 characters.");
-  const expirationTime = subscription.expirationTime;
+  const expirationTime = subscription.expirationTime ?? null;
   if (expirationTime !== null && (!Number.isSafeInteger(expirationTime) || expirationTime < 0)) {
     throw new Error("The push expiration time must be null or a nonnegative integer.");
   }

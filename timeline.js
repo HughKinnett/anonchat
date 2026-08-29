@@ -197,6 +197,13 @@ const isStandalone = window.matchMedia("(display-mode: standalone)").matches
   || window.navigator.standalone === true;
 const serviceWorkerSupported = "serviceWorker" in navigator;
 const pushSupported = "PushManager" in window;
+const pushServiceWorkerReady = serviceWorkerSupported
+  ? navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
+      .then((registration) => {
+        void registration.update();
+        return navigator.serviceWorker.ready;
+      })
+  : null;
 
 const persistPushSubscription = async ({ id, data }) => {
   await runTransaction(db, async (transaction) => {
@@ -219,7 +226,7 @@ const pushAlertsClient = createPushAlertsClient({
   notification: "Notification" in window ? window.Notification : null,
   serviceWorkerSupported,
   pushSupported,
-  serviceWorkerReady: serviceWorkerSupported ? navigator.serviceWorker.ready : null,
+  serviceWorkerReady: pushServiceWorkerReady,
   publicKey: VAPID_PUBLIC_KEY,
   isIOS,
   isStandalone,

@@ -64,6 +64,15 @@ assert.deepEqual(record, {
     updatedAt: timestamp
   }
 });
+const recordWithoutExpiration = await createPushSubscriptionRecord({
+  uid: "user-a",
+  subscription: { ...subscription, expirationTime: undefined },
+  timestamp,
+  subtle: webcrypto.subtle
+});
+assert.equal(recordWithoutExpiration.data.expirationTime, null,
+  "mobile browsers that omit expirationTime are normalized to null");
+
 assert.deepEqual(
   Object.keys(record.data).sort(),
   ["auth", "createdAt", "endpoint", "expirationTime", "p256dh", "uid", "updatedAt"],
