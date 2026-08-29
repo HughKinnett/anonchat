@@ -1,6 +1,6 @@
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
 
-export const MAX_INTERACTION_PARENTS = 40;
+export const MAX_INTERACTION_PARENTS = 100;
 export const MAX_INTERACTION_ITEMS_PER_PARENT = 100;
 export const MAX_INTERACTION_LISTENERS = MAX_INTERACTION_PARENTS * 4;
 export const MAX_INTERACTION_DOCUMENTS = MAX_INTERACTION_PARENTS

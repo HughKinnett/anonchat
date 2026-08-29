@@ -1186,16 +1186,8 @@ const renderPost = (postDoc) => {
 
   commentsSection.append(commentsSummary, commentsList, commentForm);
   } else if (interactionState === "unavailable") {
-    commentsSection = document.createElement("button");
-    commentsSection.type = "button";
-    commentsSection.className = "secondary-button interaction-load-button";
-    commentsSection.textContent = "Load interactions";
-    commentsSection.addEventListener("click", () => {
-      commentsSection.disabled = true;
-      commentsSection.textContent = "Loading interactions…";
-      manuallyLoadedInteractionPaths.add(parent.path);
-      syncInteractionListeners();
-    });
+    commentsSection = document.createElement("div");
+    commentsSection.hidden = true;
   } else {
     commentsSection = document.createElement("p");
     commentsSection.className = "interaction-load-state muted";
@@ -1540,22 +1532,23 @@ const visiblePollTargets = () => {
 const syncPollVoteListeners = () => {
   clearPollVoteListeners();
   const generation = pollVoteGeneration;
-  const votesByChunk = new Map();
-  const visiblePostIds = [...new Set(visiblePollTargets().map((target) => target.id))];
-  for (let offset = 0; offset < visiblePostIds.length; offset += 30) {
-    const chunk = visiblePostIds.slice(offset, offset + 30);
-    const chunkKey = String(offset);
+  const votesByPoll = new Map();
+  visiblePollTargets().forEach((target) => {
     pollVoteListeners.push(onSnapshot(
-      query(collection(db, "communityVotes"), where("postId", "in", chunk)),
+      query(
+        collection(db, "communityVotes"),
+        where("postCollection", "==", target.collection),
+        where("postId", "==", target.id)
+      ),
       (snapshot) => {
         if (generation !== pollVoteGeneration) return;
-        votesByChunk.set(chunkKey, snapshot.docs);
-        pollVotes = [...votesByChunk.values()].flat();
+        votesByPoll.set(target.path, snapshot.docs);
+        pollVotes = [...votesByPoll.values()].flat();
         renderFeed();
       },
       () => setStatus("Could not load poll votes.", true)
     ));
-  }
+  });
 };
 
 const setFeedView = (profileOnly) => {
@@ -1691,6 +1684,7 @@ onAuthStateChanged(auth, async (user) => {
     (snapshot) => {
       syncReportedHolds("posts", snapshot.docs);
       postDocs = snapshot.docs;
+      syncPollVoteListeners();
       syncInteractionListeners();
       renderFeed();
       renderSearchResults();
