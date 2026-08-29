@@ -71,6 +71,7 @@ let reveals = [];
 let blockTracker = createViewerBlockTracker();
 let viewerBlocks = blockTracker.current();
 const interactionSubscriptions = new Map();
+const manuallyLoadedInteractionPaths = new Set();
 let interactionGeneration = 0;
 let interactionRenderQueued = false;
 const sessionGeneration = createSessionGeneration();
@@ -1159,6 +1160,17 @@ const renderPost = (postDoc) => {
   });
 
   commentsSection.append(commentsSummary, commentsList, commentForm);
+  } else if (interactionState === "unavailable") {
+    commentsSection = document.createElement("button");
+    commentsSection.type = "button";
+    commentsSection.className = "secondary-button interaction-load-button";
+    commentsSection.textContent = "Load interactions";
+    commentsSection.addEventListener("click", () => {
+      commentsSection.disabled = true;
+      commentsSection.textContent = "Loading interactions…";
+      manuallyLoadedInteractionPaths.add(parent.path);
+      syncInteractionListeners();
+    });
   } else {
     commentsSection = document.createElement("p");
     commentsSection.className = "interaction-load-state muted";
@@ -1286,6 +1298,7 @@ const clearInteractionListeners = () => {
     entry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
   });
   interactionSubscriptions.clear();
+  manuallyLoadedInteractionPaths.clear();
   reactions = [];
   comments = [];
   interactionRenderQueued = false;
@@ -1388,6 +1401,10 @@ const syncInteractionListeners = () => {
   const visibleParents = new Map(posts.map((post) => [post.ref.path, post]));
   const desired = new Map(timelineInteractionPlan(posts, MAX_INTERACTION_PARENTS)
     .map((parent) => [parent.path, parent]));
+  posts.forEach((post) => {
+    const parent = interactionParentForPost(post);
+    if (manuallyLoadedInteractionPaths.has(parent.path)) desired.set(parent.path, parent);
+  });
   interactionSubscriptions.forEach((entry, path) => {
     if (desired.has(path)) return;
     stopInteractionEntry(entry);
@@ -1759,16 +1776,16 @@ onAuthStateChanged(auth, async (user) => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const postContent = content.value.trim();
-  if (!currentUser || (!postContent && !pendingPostImage) || postContent.length > 500) return;
-
   const category = postCategory.value;
   const options = [...document.querySelectorAll(".poll-option")]
     .map((input) => input.value.trim())
     .filter(Boolean);
+  if (!currentUser || postContent.length > 500) return;
   if (category === "Poll" && options.length < 2) {
     setStatus("Add at least two poll choices.", true);
     return;
   }
+  if (category !== "Poll" && !postContent && !pendingPostImage) return;
   const expiryHours = Number(postExpiry.value);
 
   const submit = form.querySelector("button[type='submit']");
@@ -1777,7 +1794,7 @@ form.addEventListener("submit", async (event) => {
     await addDoc(collection(db, "posts"), buildOriginalPost({
       authorId: currentUser.uid,
       username: profileUsername,
-      content: postContent,
+      content: postContent || "Poll",
       imageData: pendingPostImage,
       category,
       options: category === "Poll" ? options : [],

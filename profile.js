@@ -44,6 +44,7 @@ let targetPosts = [];
 let targetCommunityPosts = [];
 let users = [];
 let moderationClient;
+let reportReasonExpanded = false;
 let targetBlocked = false;
 let targetBlockedByViewer = false;
 let blockTracker = createViewerBlockTracker();
@@ -278,10 +279,16 @@ const renderFollowControl = () => {
   blockButton.disabled = false;
   const reported = moderationClient?.cachedReported(userReportTarget());
   reportButton.hidden = targetBlocked;
-  reportReason.hidden = targetBlocked;
+  reportReason.hidden = targetBlocked || !reportReasonExpanded;
   reportButton.disabled = targetBlocked || reported !== false;
   reportReason.disabled = targetBlocked || reported === true;
-  reportButton.textContent = reported === true ? "Reported" : reported === false ? "Report user" : "Checking report…";
+  reportButton.textContent = reported === true
+    ? "Reported"
+    : reported !== false
+      ? "Checking report…"
+      : reportReasonExpanded
+        ? "Submit report"
+        : "Report user";
   if (!targetBlocked) loadReportedState(userReportTarget(), renderFollowControl);
 };
 
@@ -576,10 +583,18 @@ followButton.addEventListener("click", async () => {
 });
 
 reportButton.addEventListener("click", async () => {
+  if (!reportReasonExpanded) {
+    reportReasonExpanded = true;
+    renderFollowControl();
+    reportReason.focus();
+    return;
+  }
   reportButton.disabled = true;
   try {
     await moderationClient.report(userReportTarget(), reportReason.value);
+    reportReasonExpanded = false;
     reportButton.textContent = "Reported";
+    reportReason.hidden = true;
     reportReason.disabled = true;
     setStatus("Report sent. Thank you for helping keep AnonChat safe.");
   } catch (error) {

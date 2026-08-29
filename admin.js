@@ -169,7 +169,10 @@ function restoreReportFocus({ sourceFocusKey, reportId } = {}) {
 }
 
 async function queueModerationAction(item, action, control) {
-  const trustedServiceReady = moderationControlsReady();
+  if (!moderationControlsReady()) {
+    setStatus("Moderation actions are paused until the trusted service is healthy.", true);
+    return;
+  }
   const user = reportUser(item), existingAction = reportAction(item), intendedFocus = { sourceFocusKey: control.dataset.focusKey, reportId: item.id };
   const actionState = moderationActionState({ caseRecord: item, action: existingAction, deletionPending: reportDeletionPending(item), username: user?.username });
   if (actionState[action]?.disabled || pendingModerationActions.has(item.id)) return;
@@ -177,37 +180,9 @@ async function queueModerationAction(item, action, control) {
   pendingModerationActions.set(item.id, pending); control.disabled = true; renderReports(intendedFocus);
   try {
     const requestedAt = serverTimestamp(), terminalRetry = isTerminalModerationAction(existingAction);
-    const immediatelyActionable = ["post", "communityPost", "roomMessage", "user"].includes(item.targetKind);
-    if (immediatelyActionable && action === "restore") {
-      if (item.targetKind !== "user") {
-        await setDoc(doc(db, item.targetCollection, item.targetId), {
-          moderationState: "visible", restoredAt: requestedAt, restoredBy: adminUid
-        }, { merge: true });
-      }
-      pendingModerationActions.delete(item.id);
-      setStatus(item.targetKind === "user" ? "Profile report reviewed. The profile stayed active." : "Material restored immediately.");
-      renderReports(intendedFocus);
-      return;
-    } else if (immediatelyActionable && action === "deleteMaterial" && item.targetKind !== "user") {
-      await deleteDoc(doc(db, item.targetCollection, item.targetId));
-      pendingModerationActions.delete(item.id);
-      evictModerationEvidence(item.id); evictRoomTranscript(item.id);
-      setStatus("Material deleted immediately.");
-      renderReports(intendedFocus);
-      return;
-    }
-
-    if (!trustedServiceReady) {
-      pendingModerationActions.delete(item.id);
-      setStatus("This action needs the trusted moderation service, which is currently unavailable.", true);
-      renderReports(intendedFocus);
-      return;
-    }
-    if (!(immediatelyActionable && (action === "restore" || (action === "deleteMaterial" && item.targetKind !== "user")))) {
-      await setDoc(doc(db, "moderationActions", item.id), terminalRetry
+    await setDoc(doc(db, "moderationActions", item.id), terminalRetry
       ? moderationActionRetryPayload({ caseRecord: item, action, existingAction, requestedAt })
       : moderationActionPayload({ caseRecord: item, action, requestedBy: adminUid, requestedAt }));
-    }
     if (action === "deleteMaterial") { evictModerationEvidence(item.id); evictRoomTranscript(item.id); }
     setStatus(terminalRetry ? "Material action queued for another attempt."
       : item.targetKind === "room" && action === "restore" ? "Room resume queued."

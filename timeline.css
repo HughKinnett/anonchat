@@ -1103,3 +1103,26 @@ button:not(.avatar-button):not(.banner-button):hover,
 @media (max-width: 560px) {
   .view-profile-content { padding-right: 18px; padding-left: 18px; }
 }
+
+
+/* Follow-up sizing and profile spacing */
+button:not(.avatar-button):not(.banner-button),
+.primary-button,
+.secondary-button,
+.reaction-button,
+.share-button,
+.delete-button,
+.feed-tab,
+.follow-button,
+.nav-button,
+.my-profile-link {
+  min-height: 34px !important;
+  padding: 0 12px !important;
+  font-size: 0.82rem !important;
+  line-height: 1.1;
+}
+.view-profile-avatar { margin-top: -30px; }
+.interaction-load-button {
+  width: fit-content;
+  margin-top: 14px;
+}
