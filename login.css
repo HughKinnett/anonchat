@@ -222,3 +222,15 @@ input:focus {
 .password-toggle{position:absolute;top:50%;right:7px;min-height:36px;padding:6px 10px;transform:translateY(-50%);border:1px solid rgba(255,255,255,.13);border-radius:9px;background:rgba(255,255,255,.07);color:var(--text);font-size:.78rem;font-weight:750}
 .password-toggle:hover{background:rgba(139,92,246,.18)}
 .device-signin-note{display:block;margin-top:10px;color:var(--muted);line-height:1.45;text-align:center}
+
+
+.signup-closed-notice {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(167, 139, 250, .55);
+  border-radius: 14px;
+  background: rgba(139, 92, 246, .16);
+  color: #ddd6fe;
+  font-weight: 750;
+  line-height: 1.45;
+}

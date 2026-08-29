@@ -100,8 +100,17 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
   }
 });
 
-document.getElementById("sign-up-form").addEventListener("submit", async (event) => {
+const SIGNUPS_OPEN = false;
+const signUpForm = document.getElementById("sign-up-form");
+signUpForm.hidden = !SIGNUPS_OPEN;
+signUpForm.setAttribute("aria-hidden", String(!SIGNUPS_OPEN));
+
+signUpForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!SIGNUPS_OPEN) {
+    setStatus("New account registration is temporarily closed.", true);
+    return;
+  }
   const username = document.getElementById("username").value.trim();
   const normalizedUsername = username.toLowerCase();
   const email = document.getElementById("sign-up-email").value.trim().toLowerCase();

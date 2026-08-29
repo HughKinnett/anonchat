@@ -44,8 +44,9 @@
 
       <section class="auth-card" aria-labelledby="sign-up-title">
         <h2 id="sign-up-title">Create an account</h2>
-        <p>Choose a handle that does not identify you.</p>
-        <form id="sign-up-form">
+        <p>New account registration is temporarily closed.</p>
+        <p class="signup-closed-notice" role="status">Existing users can continue signing in normally.</p>
+        <form id="sign-up-form" hidden aria-hidden="true">
           <label for="username">Anonymous username</label>
           <input id="username" type="text" placeholder="hidden_voice" autocomplete="username" minlength="3" maxlength="30" required>
           <label for="sign-up-email">Email</label>
