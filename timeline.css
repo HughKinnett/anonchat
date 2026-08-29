@@ -1126,3 +1126,30 @@ button:not(.avatar-button):not(.banner-button),
   width: fit-content;
   margin-top: 14px;
 }
+
+
+/* Exact View Profile button theme */
+button:not(.avatar-button):not(.banner-button), .primary-button, .secondary-button,
+.reaction-button, .share-button, .delete-button, .feed-tab, .follow-button,
+.nav-button, .my-profile-link, .post-interaction-summary > summary {
+  min-height: 34px !important; padding: 0 12px !important;
+  border: 1px solid rgba(167, 139, 250, 0.55) !important;
+  border-radius: 999px !important; background: rgba(139, 92, 246, 0.16) !important;
+  color: #ddd6fe !important; font-size: 0.82rem !important; font-weight: 800 !important;
+}
+button:not(.avatar-button):not(.banner-button):hover, .nav-button:hover,
+.my-profile-link:hover, .post-interaction-summary > summary:hover {
+  background: rgba(139, 92, 246, 0.28) !important;
+}
+.view-profile-avatar { position: relative; z-index: 2; margin-top: 18px !important; }
+.post-interaction-summary { position: relative; width: fit-content; margin-top: 10px; }
+.post-interaction-summary > summary { display: inline-flex; align-items: center; cursor: pointer; list-style: none; }
+.post-interaction-summary > summary::-webkit-details-marker { display: none; }
+.post-interaction-summary > ul {
+  position: absolute; z-index: 24; top: calc(100% + 7px); left: 0;
+  width: max-content; min-width: 220px; max-width: min(340px, 84vw);
+  margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 16px;
+  background: var(--surface); box-shadow: 0 14px 34px rgba(0,0,0,.4); list-style: none;
+}
+.post-interaction-summary li + li { margin-top: 8px; }
+.post-interaction-summary a { color: #ddd6fe; font-weight: 800; }

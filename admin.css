@@ -21,3 +21,13 @@ button:hover,
 .admin-action:hover {
   background: var(--accent-hover, #7c3aed) !important;
 }
+
+
+/* Match View Profile controls exactly */
+button, .admin-action, .nav-button {
+  min-height: 34px !important; padding: 0 12px !important;
+  border: 1px solid rgba(167, 139, 250, 0.55) !important;
+  border-radius: 999px !important; background: rgba(139, 92, 246, 0.16) !important;
+  color: #ddd6fe !important; font-size: 0.82rem !important; font-weight: 800 !important;
+}
+button:hover, .admin-action:hover, .nav-button:hover { background: rgba(139, 92, 246, 0.28) !important; }

@@ -1029,14 +1029,39 @@ const renderPost = (postDoc) => {
     }
   }
 
+  const interactionSummary = document.createElement("details");
+  interactionSummary.className = "post-interaction-summary";
+  const interactionSummaryLabel = document.createElement("summary");
+  interactionSummaryLabel.textContent = `${reactionDocs.length} interaction${reactionDocs.length === 1 ? "" : "s"}`;
+  interactionSummaryLabel.title = "Show who interacted with this post";
+  const interactionPeople = document.createElement("ul");
+  if (!reactionDocs.length) {
+    const emptyInteraction = document.createElement("li");
+    emptyInteraction.textContent = "No interactions yet.";
+    interactionPeople.append(emptyInteraction);
+  } else {
+    const reactionEmoji = { heart: "❤️", middle_finger: "🖕", laugh: "😂", sad: "😢" };
+    reactionDocs.forEach((reaction) => {
+      const row = document.createElement("li");
+      const profile = users.find((user) => user.id === reaction.data().uid)?.data();
+      const link = document.createElement("a");
+      link.href = `profile.html?uid=${encodeURIComponent(reaction.data().uid)}`;
+      link.textContent = `@${profile?.username || "anonymous"}`;
+      row.append(link, document.createTextNode(` reacted ${reactionEmoji[reaction.data().type] || "•"}`));
+      interactionPeople.append(row);
+    });
+  }
+  interactionSummary.append(interactionSummaryLabel, interactionPeople);
+
   const poll = document.createElement("div");
   poll.className = "timeline-poll";
   if (post.category === "Poll" && Array.isArray(post.options)) {
     const voteParent = parent;
-    const votes = pollVotes.filter((vote) =>
+    const rawVotes = pollVotes.filter((vote) =>
       vote.data().postCollection === voteParent.collection
       && vote.data().postId === voteParent.id
     );
+    const votes = [...new Map(rawVotes.map((vote) => [vote.data().uid, vote])).values()];
     const mine = votes.find((vote) => vote.data().uid === currentUser.uid);
     post.options.forEach((option, index) => {
       const count = votes.filter((vote) => vote.data().option === index).length;
@@ -1266,6 +1291,7 @@ const renderPost = (postDoc) => {
   item.append(time);
   if (poll.childElementCount) item.append(poll);
   if (reactionsBar.childElementCount) item.append(reactionsBar);
+  if (interactionState === "bounded") item.append(interactionSummary);
   item.append(commentsSection, actions);
   return item;
 };
@@ -1515,22 +1541,20 @@ const syncPollVoteListeners = () => {
   clearPollVoteListeners();
   const generation = pollVoteGeneration;
   const votesByChunk = new Map();
-  for (const postCollection of ["posts", "communityPosts"]) {
-    const visiblePostIds = visiblePollTargets().filter((target) => target.collection === postCollection).map((target) => target.id);
-    for (let offset = 0; offset < visiblePostIds.length; offset += 30) {
-      const chunk = visiblePostIds.slice(offset, offset + 30);
-      const chunkKey = `${postCollection}:${offset}`;
-      pollVoteListeners.push(onSnapshot(
-        query(collection(db, "communityVotes"), where("postCollection", "==", postCollection), where("postId", "in", chunk)),
-        (snapshot) => {
-          if (generation !== pollVoteGeneration) return;
-          votesByChunk.set(chunkKey, snapshot.docs);
-          pollVotes = [...votesByChunk.values()].flat();
-          renderFeed();
-        },
-        () => setStatus("Could not load poll votes.", true)
-      ));
-    }
+  const visiblePostIds = [...new Set(visiblePollTargets().map((target) => target.id))];
+  for (let offset = 0; offset < visiblePostIds.length; offset += 30) {
+    const chunk = visiblePostIds.slice(offset, offset + 30);
+    const chunkKey = String(offset);
+    pollVoteListeners.push(onSnapshot(
+      query(collection(db, "communityVotes"), where("postId", "in", chunk)),
+      (snapshot) => {
+        if (generation !== pollVoteGeneration) return;
+        votesByChunk.set(chunkKey, snapshot.docs);
+        pollVotes = [...votesByChunk.values()].flat();
+        renderFeed();
+      },
+      () => setStatus("Could not load poll votes.", true)
+    ));
   }
 };
 
