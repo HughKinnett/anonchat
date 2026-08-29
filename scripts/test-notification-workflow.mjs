@@ -23,7 +23,7 @@ reject((value) => { value.permissions.contents = "write"; }, "permission escalat
 reject((value) => { value.on.schedule[0].cron = "0 * * * *"; }, "wrong schedule");
 reject((value) => { value.concurrency.group = "wrong"; }, "wrong concurrency");
 reject((value) => { value.concurrency["cancel-in-progress"] = true; }, "cancelling concurrency");
-reject((value) => { value.jobs.process.steps[1].with["node-version"] = "22"; }, "wrong runtime");
+reject((value) => { value.jobs.process.steps[1].with["node-version"] = "20"; }, "wrong runtime");
 reject((value) => { value.jobs.process.steps[3].uses = "google-github-actions/auth@v2"; }, "wrong auth action");
 reject((value) => { value.jobs.process.steps[3].with.credentials_json = "${{ secrets.WRONG }}"; }, "wrong service-account secret");
 reject((value) => { value.jobs.process.steps[4].run = "node scripts/other.mjs"; }, "wrong processor command");

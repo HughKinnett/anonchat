@@ -45,7 +45,7 @@ export const validateNotificationWorkflow = (workflow) => {
   ];
   if (steps.map(stepSignature).join("\u0000") !== expectedSignatures.join("\u0000")) errors.push("workflow steps are not exact");
   validateExactStep(errors, steps[0], { uses: "actions/checkout@v4" }, "checkout step");
-  validateExactStep(errors, steps[1], { uses: "actions/setup-node@v4", with: { "node-version": "20" } }, "Node step");
+  validateExactStep(errors, steps[1], { uses: "actions/setup-node@v4", with: { "node-version": "22" } }, "Node step");
   validateExactStep(errors, steps[2], { run: "npm ci" }, "install step");
   validateExactStep(errors, steps[3], { id: "auth", uses: "google-github-actions/auth@v3", with: { credentials_json: SERVICE_ACCOUNT_SECRET } }, "authentication step");
   validateExactStep(errors, steps[4], {
