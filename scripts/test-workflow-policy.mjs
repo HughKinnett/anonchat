@@ -237,7 +237,7 @@ delete deployWithoutDispatch.on.workflow_dispatch;
 assertRejected(validateDeployWorkflow, deployWithoutDispatch, "deploy without manual dispatch");
 
 const deployWithoutIndexes = clone(deployWorkflow);
-deployWithoutIndexes.jobs.deploy.steps = deployWithoutIndexes.jobs.deploy.steps.filter((step) => step.name !== "Deploy Firestore indexes");
+deployWithoutIndexes.jobs.deploy.steps = deployWithoutIndexes.jobs.deploy.steps.filter((step) => step.name !== "Ensure required Firestore indexes");
 assertRejected(validateDeployWorkflow, deployWithoutIndexes, "deploy without Firestore indexes");
 
 const deployWaitAfterProcessor = clone(deployWorkflow);

@@ -9,7 +9,7 @@ export const MODERATION_WORKFLOW_PATH = ".github/workflows/process-moderation.ym
 const deletionCron = "*/5 * * * *";
 const secretReference = "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}";
 const credentialPathReference = "${{ steps.auth.outputs.credentials_file_path }}";
-const deployIndexesCommand = "npx --no-install firebase deploy --project anonchatlogin --only firestore:indexes --non-interactive";
+const deployIndexesCommand = "npm run rollout:ensure-indexes";
 const waitIndexesCommand = "npm run rollout:wait-indexes";
 const processRolloutCommand = "npm run rollout:process-moderation";
 const verifyRolloutCommand = "npm run rollout:verify";
@@ -225,7 +225,7 @@ export const validateDeployWorkflow = (workflow) => {
     name: "Set up Google Cloud CLI",
     uses: "google-github-actions/setup-gcloud@v3"
   }, "deploy Google Cloud CLI step");
-  validateStep(errors, steps[5], { name: "Deploy Firestore indexes", run: deployIndexesCommand }, "deploy index step");
+  validateStep(errors, steps[5], { name: "Ensure required Firestore indexes", run: deployIndexesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "deploy index step");
   validateStep(errors, steps[6], {
     name: "Wait for required Firestore indexes",
     run: waitIndexesCommand,
@@ -295,6 +295,7 @@ export const validatePackageScripts = (packageJson) => {
   exactly(errors, packageJson.scripts?.["test:community-lifecycle"], "node scripts/test-community-lifecycle.mjs", "community lifecycle test package script");
   exactly(errors, packageJson.scripts?.["test:timeline-query-compatibility"], "node scripts/test-timeline-moderation-ui.mjs", "timeline query compatibility package script");
   exactly(errors, packageJson.scripts?.["test:rollout-policy"], "node scripts/test-production-rollout.mjs", "rollout policy test package script");
+  exactly(errors, packageJson.scripts?.["rollout:ensure-indexes"], "node scripts/ensure-firestore-indexes.mjs", "additive index deployment package script");
   exactly(errors, packageJson.scripts?.["rollout:wait-indexes"], "node scripts/wait-firestore-indexes.mjs", "index readiness package script");
   exactly(errors, packageJson.scripts?.["rollout:process-moderation"], "node scripts/process-production-moderation.mjs", "production moderation package script");
   exactly(errors, packageJson.scripts?.["rollout:verify"], "node scripts/verify-production-rollout.mjs", "production verification package script");

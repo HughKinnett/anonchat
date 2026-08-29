@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import {
   assertSettledModerationResult,
+  gcloudCompositeIndexCreateArguments,
   gcloudCompositeIndexListArguments,
+  missingRequiredIndexes,
   requiredIndexesReady,
   verifyProductionRolloutState,
   waitForRequiredIndexes
@@ -43,6 +45,22 @@ assert.deepEqual(gcloudCompositeIndexListArguments("anonchatlogin"), [
   "--database", "(default)",
   "--format=json"
 ], "the readiness gate uses the official gcloud Firestore composite-index list command");
+assert.deepEqual(gcloudCompositeIndexCreateArguments("anonchatlogin", required[0]), [
+  "firestore", "indexes", "composite", "create",
+  "--project", "anonchatlogin",
+  "--database", "(default)",
+  "--collection-group", "posts",
+  "--query-scope", "collection",
+  "--field-config", "field-path=moderationState,order=ascending",
+  "--field-config", "field-path=createdAt,order=descending",
+  "--async", "--quiet"
+], "missing indexes are created additively without a deletion flag");
+assert.deepEqual(missingRequiredIndexes(required, [ready[0]]), [required[1]], "only missing required indexes are created");
+assert.deepEqual(missingRequiredIndexes(required, [...ready, remoteIndex("unmanaged", [], "READY")]), [],
+  "unmanaged indexes are preserved");
+assert.throws(() => gcloudCompositeIndexCreateArguments("anonchatlogin", {
+  ...required[0], collectionGroup: "unsafe,group"
+}), (error) => error.code === "INVALID_INDEX_DEFINITION");
 assert.equal(requiredIndexesReady(required, ready), true, "all configured indexes are ready");
 assert.equal(requiredIndexesReady(required, [{ ...ready[0], state: "CREATING" }, ready[1]]), false,
   "a creating required index keeps the rollout closed");

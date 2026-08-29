@@ -47,6 +47,7 @@
     "test:community-lifecycle": "node scripts/test-community-lifecycle.mjs",
     "test:timeline-query-compatibility": "node scripts/test-timeline-moderation-ui.mjs",
     "test:rollout-policy": "node scripts/test-production-rollout.mjs",
+    "rollout:ensure-indexes": "node scripts/ensure-firestore-indexes.mjs",
     "rollout:wait-indexes": "node scripts/wait-firestore-indexes.mjs",
     "rollout:process-moderation": "node scripts/process-production-moderation.mjs",
     "rollout:verify": "node scripts/verify-production-rollout.mjs",
