@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 
 const testEnv = await initializeTestEnvironment({
   projectId: "anonchat-message-request-rules-test",
@@ -90,6 +90,10 @@ try {
   await assertSucceeds(getDoc(doc(userA, "directMessages", "accepted-message")));
   await assertSucceeds(getDoc(doc(userB, "directMessages", "accepted-message")));
   await assertFails(getDoc(doc(userC, "directMessages", "accepted-message")));
+  await assertSucceeds(getDocs(query(
+    collection(userA, "directMessages"),
+    where("participants", "==", ["user-a", "user-b"])
+  )));
 
   // Participants cannot read messages until the request is accepted.
   await testEnv.clearFirestore();

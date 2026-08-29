@@ -166,3 +166,24 @@
   text-decoration: none;
 }
 .main-menu-panel #sign-out { color: #fca5a5; }
+
+
+/* Keep the Community hamburger panel as a vertical dropdown on every screen. */
+.main-menu-panel:not([hidden]) {
+  display: grid;
+  grid-auto-flow: row;
+}
+@media (max-width: 760px) {
+  .topbar .main-menu-panel {
+    position: fixed;
+    top: 64px;
+    right: 14px;
+    left: auto;
+    order: initial;
+    width: min(290px, calc(100vw - 28px));
+    max-height: calc(100vh - 78px);
+    flex-basis: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}

@@ -28,6 +28,13 @@ let activeCommunitySession = 0;
 let clearRoomExpiryTimer = () => {};
 let clearDirectMessageExpiryTimer = () => {};
 let stopRoomMessageListener = () => {};
+const directMessageListeners = new Map();
+const directMessageBuckets = new Map();
+const stopDirectMessageListeners = () => {
+  directMessageListeners.forEach((unsubscribe) => unsubscribe());
+  directMessageListeners.clear();
+  directMessageBuckets.clear();
+};
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
   $("status").classList.toggle("danger", error);
@@ -790,6 +797,7 @@ const stopCommunityResources = () => {
   clearRoomExpiryTimer = () => {};
   stopRoomMessageListener();
   stopRoomMessageListener = () => {};
+  stopDirectMessageListeners();
   state.moderation?.destroy();
   Object.assign(state, {
     profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
@@ -836,6 +844,47 @@ onAuthStateChanged(auth, async (user) => {
     state[key] = snapshot.docs;
     render?.();
   }, () => setStatus("A community section could not load.", true));
+  const syncDirectMessageListeners = () => {
+    const acceptedIds = new Set(state.requests.flatMap((request) => {
+      const data = request.data();
+      if (data.status !== "accepted") return [];
+      if (data.fromId === user.uid) return [data.toId];
+      if (data.toId === user.uid) return [data.fromId];
+      return [];
+    }).filter((uid) => uid && !isBlockedUid(uid)));
+
+    directMessageListeners.forEach((unsubscribe, otherId) => {
+      if (acceptedIds.has(otherId)) return;
+      unsubscribe();
+      directMessageListeners.delete(otherId);
+      directMessageBuckets.delete(otherId);
+    });
+
+    acceptedIds.forEach((otherId) => {
+      if (directMessageListeners.has(otherId)) return;
+      const pair = [user.uid, otherId].sort();
+      const unsubscribe = onSnapshot(
+        query(collection(db, "directMessages"), where("participants", "==", pair)),
+        (snapshot) => {
+          if (!sessionIsCurrent()) return;
+          directMessageBuckets.set(otherId, snapshot.docs);
+          state.messages = [...directMessageBuckets.values()].flat();
+          renderDirectMessages();
+        },
+        () => {
+          if (!sessionIsCurrent()) return;
+          directMessageBuckets.delete(otherId);
+          state.messages = [...directMessageBuckets.values()].flat();
+          renderDirectMessages();
+          setStatus("Could not load one of your private conversations.", true);
+        }
+      );
+      directMessageListeners.set(otherId, unsubscribe);
+    });
+
+    state.messages = [...directMessageBuckets.values()].flat();
+    renderDirectMessages();
+  };
   const profile = await getDoc(doc(db, "users", user.uid));
   if (!sessionIsCurrent()) return;
   if (!profile.exists() || profile.data().banned) {
@@ -909,10 +958,9 @@ onAuthStateChanged(auth, async (user) => {
     "requests",
     query(collection(db, "messageRequests"), where("fromId", "==", user.uid)),
     query(collection(db, "messageRequests"), where("toId", "==", user.uid)),
-    () => { renderRequests(); renderMessageUsers(); },
-    () => { state.requestsLoaded = true; renderRequestAction(); }
+    () => { renderRequests(); renderMessageUsers(); syncDirectMessageListeners(); },
+    () => { state.requestsLoaded = true; renderRequestAction(); syncDirectMessageListeners(); }
   );
-  listen(query(collection(db, "directMessages"), where("participants", "array-contains", user.uid)), "messages", renderDirectMessages);
   mergePrivate(
     "reveals",
     query(collection(db, "reveals"), where("fromId", "==", user.uid)),
