@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 
 const testEnv = await initializeTestEnvironment({
   projectId: "anonchat-push-subscription-rules-test",
@@ -97,11 +97,14 @@ try {
   await assertSucceeds(deleteDoc(doc(selfDeleting, "pushSubscriptions", IDS.selfDeleting)));
 
   await assertSucceeds(setDoc(doc(selfDeleteFlow, "pushSubscriptions", IDS.selfDeleteFlow), data("self-delete-flow")));
-  await assertSucceeds(setDoc(doc(selfDeleteFlow, "accountDeletionRequests", "self-delete-flow"), {
-    uid: "self-delete-flow",
-    username: "self_delete_flow",
-    createdAt: serverTimestamp()
-  }));
+  const deletionTime = serverTimestamp(), deletionBatch = writeBatch(selfDeleteFlow);
+  deletionBatch.set(doc(selfDeleteFlow, "accountDeletionRequests", "self-delete-flow"), {
+    uid: "self-delete-flow", username: "self_delete_flow", createdAt: deletionTime
+  });
+  deletionBatch.set(doc(selfDeleteFlow, "adminDeletionJobs", "self-delete-flow"), {
+    targetUid: "self-delete-flow", requesterUid: "self-delete-flow", requestedAt: deletionTime, requestType: "self", status: "queued"
+  });
+  await assertSucceeds(deletionBatch.commit());
   const sameUserOtherDevice = testEnv.authenticatedContext("self-delete-flow").firestore();
   await assertFails(setDoc(doc(sameUserOtherDevice, "pushSubscriptions", IDS.selfDeleteRace), data("self-delete-flow", "race-create")));
   await assertFails(updateDoc(doc(sameUserOtherDevice, "pushSubscriptions", IDS.selfDeleteFlow), {

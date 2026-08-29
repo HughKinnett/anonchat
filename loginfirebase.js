@@ -30,6 +30,9 @@ const setStatus = (message, isError = false) => {
 if (new URLSearchParams(window.location.search).get("accountDeleted") === "1") {
   setStatus("Your account and AnonChat login were permanently deleted.");
 }
+if (new URLSearchParams(window.location.search).get("accountDeletionQueued") === "1") {
+  setStatus("Your account is locked and permanent deletion is continuing automatically.");
+}
 
 const invalidCredentialCodes = ["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found", "auth/invalid-email"];
 
@@ -103,14 +106,21 @@ document.getElementById("sign-up-form").addEventListener("submit", async (event)
   const normalizedUsername = username.toLowerCase();
   const email = document.getElementById("sign-up-email").value.trim().toLowerCase();
   const password = document.getElementById("sign-up-password").value;
+  const ageConfirmation = document.getElementById("age-confirmation");
+  const termsConfirmation = document.getElementById("terms-confirmation");
 
   if (!/^[A-Za-z0-9_]{3,30}$/.test(username)) {
     setStatus("Username must be 3–30 letters, numbers, or underscores.", true);
     return;
   }
 
+  if (!ageConfirmation.checked || !termsConfirmation.checked) {
+    setStatus("Confirm that you are at least 18 and accept the Terms and Privacy Policy before creating an account.", true);
+    return;
+  }
+
   authInProgress = true;
-  setStatus("Creating your anonymous account…");
+  setStatus("Creating your account…");
   let newUser;
   try {
     await chooseDurablePersistence(setPersistence, auth, [

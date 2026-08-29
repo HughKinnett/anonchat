@@ -22,8 +22,8 @@
 
   <main class="auth-shell">
     <section class="intro" aria-labelledby="welcome-title">
-      <p class="eyebrow">Say it without saying who you are</p>
-      <h1 id="welcome-title">Your thoughts.<br>Your anonymous handle.</h1>
+      <p class="eyebrow">Share under a pseudonym</p>
+      <h1 id="welcome-title">Your thoughts.<br>Your pseudonymous handle.</h1>
       <p>Post under a pseudonym, react honestly, and keep your email private from other users.</p>
     </section>
 
@@ -52,6 +52,8 @@
           <input id="sign-up-email" type="email" placeholder="you@example.com" autocomplete="email" required>
           <label for="sign-up-password">Password</label>
           <input id="sign-up-password" type="password" placeholder="At least 8 characters" autocomplete="new-password" minlength="8" required>
+          <label class="signup-confirmation"><input id="age-confirmation" type="checkbox" required> I confirm that I am at least 18 years old.</label>
+          <label class="signup-confirmation"><input id="terms-confirmation" type="checkbox" required> I accept the <a href="terms.html">Terms of Use</a> and <a href="privacy.html">Privacy Policy</a>.</label>
           <button class="primary-button" id="sign-up" type="submit">Create Account</button>
         </form>
       </section>
@@ -59,10 +61,12 @@
 
     <section class="privacy-boundary" aria-labelledby="privacy-boundary-title">
       <div class="privacy-boundary-icon" aria-hidden="true">🛡️</div>
-      <div><p class="eyebrow">Privacy boundary</p><h2 id="privacy-boundary-title">Your private information stays private.</h2>
-      <p>Other users can see your anonymous username, public profile, posts, comments, reactions, and follows. They cannot see your email or password.</p>
-      <p>Admins can review public community activity and account health, but private-message contents, private profile details, passwords, and authentication credentials are deliberately excluded.</p></div>
+      <div><p class="eyebrow">Privacy boundary</p><h2 id="privacy-boundary-title">Your email stays private from other users.</h2>
+      <p>Other users can see your pseudonymous username, public profile, posts, comments, reactions, and follows. They cannot see your email or password.</p>
+      <p>Authorized admins can review public community activity, reports, and account health for safety. Read our <a href="privacy.html">Privacy Policy</a> for the full boundary.</p></div>
     </section>
+
+    <p class="public-links"><a href="terms.html">Terms of Use</a> · <a href="privacy.html">Privacy Policy</a> · <a href="support.html">Support</a> · <a href="delete-account.html">Delete account</a></p>
 
     <p id="auth-status" role="status" aria-live="polite"></p>
     <p class="install-help" role="status" aria-live="polite"></p>

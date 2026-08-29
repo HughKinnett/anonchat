@@ -134,7 +134,8 @@ export const scanTrustedNotificationSources = async ({ adapter, budget, limits =
       const actorUid = actorFor(state.type, source.data);
       const recipients = await recipientsFor(adapter, state.type, source);
       const availableRecipients = [];
-      for (const recipientUid of recipients) {
+      const unblockedRecipients = await adapter.unblockedRecipients(actorUid, recipients);
+      for (const recipientUid of unblockedRecipients) {
         if (runtimeReached(adapter, invocation)) {
           markBudgetReached(invocation);
           break sourceScan;
@@ -269,6 +270,7 @@ export const deliverNotificationEvents = async ({
         const subscriptions = await listCurrentSubscriptions();
         let transientFailure = false;
         let recipientUnavailable = false;
+        let blockedPair = false;
         let invocationDeferred = false;
         for (const subscription of subscriptions) {
           await adapter.renewEvent(claim.id, claim.token);
@@ -283,6 +285,10 @@ export const deliverNotificationEvents = async ({
           }
           if (!(await adapter.recipientAvailable(claim.data.recipientUid))) {
             recipientUnavailable = true;
+            break;
+          }
+          if (await adapter.pairBlocked(claim.data.actorUid, claim.data.recipientUid)) {
+            blockedPair = true;
             break;
           }
           let pushError;
@@ -336,6 +342,12 @@ export const deliverNotificationEvents = async ({
           safeLog(logger, "info", "RECIPIENT_UNAVAILABLE");
           continue;
         }
+        if (blockedPair) {
+          await adapter.suppressEvent(claim.id, claim.token, "BLOCKED_PAIR");
+          result.suppressed += 1;
+          safeLog(logger, "info", "BLOCKED_PAIR");
+          continue;
+        }
         if (invocationDeferred) {
           await adapter.deferEvent(claim.id, claim.token);
           result.deferred += 1;
@@ -348,6 +360,12 @@ export const deliverNotificationEvents = async ({
           const { deliveryId } = await deliveryIdentity(subscription);
           const settled = await adapter.getDelivery(deliveryId);
           if (!["delivered", "expired"].includes(settled?.status)) transientFailure = true;
+        }
+        if (await adapter.pairBlocked(claim.data.actorUid, claim.data.recipientUid)) {
+          await adapter.suppressEvent(claim.id, claim.token, "BLOCKED_PAIR");
+          result.suppressed += 1;
+          safeLog(logger, "info", "BLOCKED_PAIR");
+          continue;
         }
         if (transientFailure) {
           const status = await adapter.failEvent(claim.id, claim.token, "DELIVERY_TRANSIENT");

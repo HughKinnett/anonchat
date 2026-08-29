@@ -35,7 +35,19 @@
           </div>
           <a id="profile-admin-link" class="my-profile-link admin-link" href="admin.html" hidden>Admin dashboard</a>
         </div>
-        <button id="profile-follow-button" class="follow-button" type="button" hidden>Follow</button>
+        <div id="profile-social-actions" class="profile-social-actions" hidden>
+          <button id="profile-follow-button" class="follow-button" type="button" hidden>Follow</button>
+          <select id="profile-report-reason" aria-label="Reason for reporting this user">
+            <option value="harassment">Harassment</option>
+            <option value="hate-threats">Hate or threats</option>
+            <option value="sexual-content">Sexual content</option>
+            <option value="spam-scam">Spam or scam</option>
+            <option value="privacy-impersonation">Privacy or impersonation</option>
+            <option value="other">Other</option>
+          </select>
+          <button id="profile-report-button" class="secondary-button" type="button">Report user</button>
+          <button id="profile-block-button" class="secondary-button" type="button">Block user</button>
+        </div>
       </div>
     </section>
 

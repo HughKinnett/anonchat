@@ -63,7 +63,10 @@ const shellPages = [
   "connections.html",
   "community.html",
   "delete-account.html",
-  "admin.html"
+  "admin.html",
+  "terms.html",
+  "privacy.html",
+  "support.html"
 ];
 const localDependencies = new Set(shellPages);
 const pendingDependencies = [...shellPages];

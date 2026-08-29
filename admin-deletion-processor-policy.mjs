@@ -23,6 +23,9 @@ export const isTrustedRequester = (uid, profile, reservation) => profile?.uid ==
 export const isExactQueuedJob = (job, targetUid) => hasExactKeys(job, ["targetUid", "requesterUid", "requestedAt", "status"])
   && job.targetUid === targetUid && typeof job.requesterUid === "string" && job.requesterUid.length > 0
   && Number.isFinite(timestampMillis(job.requestedAt)) && job.status === "queued";
+export const isExactSelfQueuedJob = (job, targetUid) => hasExactKeys(job, ["targetUid", "requesterUid", "requestedAt", "requestType", "status"])
+  && job.targetUid === targetUid && job.requesterUid === targetUid && job.requestType === "self"
+  && Number.isFinite(timestampMillis(job.requestedAt)) && job.status === "queued";
 export const isClaimableJob = (job, nowMillis) => Boolean(job && (
   job.status === "queued" || job.status === "failed" || (job.status === "processing"
     && Number.isFinite(timestampMillis(job.leaseExpiresAt)) && timestampMillis(job.leaseExpiresAt) <= nowMillis)
@@ -38,7 +41,7 @@ export const isValidAccountStats = (stats) => hasExactKeys(stats, ["count", "lim
   && Number.isInteger(stats.count) && stats.count >= 1 && stats.limit === 500
   && Number.isFinite(timestampMillis(stats.updatedAt));
 
-const direct = (name, collection, path) => ({ name, collection, path, limit: PAGE_LIMIT });
+const direct = (name, collection, path, extra = {}) => ({ name, collection, path, limit: PAGE_LIMIT, ...extra });
 const field = (name, collection, fieldName, value, extra = {}) => ({
   name, collection, field: fieldName, value, limit: PAGE_LIMIT, ...extra
 });
@@ -46,8 +49,8 @@ export const cleanupQueries = (targetUid) => Object.freeze([
   field("owned-posts", "posts", "authorId", targetUid, { cascade: "post" }),
   field("reposts-of-target", "posts", "originalAuthorId", targetUid, { cascade: "post" }),
   field("owned-community-posts", "communityPosts", "authorId", targetUid, { cascade: "post" }),
-  field("comments-by-target", "comments", "uid", targetUid, { group: true }),
-  field("replies-by-target", "replies", "uid", targetUid, { group: true }),
+  field("comments-by-target", "comments", "uid", targetUid, { group: true, cascade: "document" }),
+  field("replies-by-target", "replies", "uid", targetUid, { group: true, cascade: "document" }),
   field("reactions-by-target", "reactions", "uid", targetUid, { group: true }),
   field("votes-by-target", "communityVotes", "uid", targetUid),
   field("timeline-votes-by-target", "timelineVotes", "uid", targetUid),
@@ -61,16 +64,20 @@ export const cleanupQueries = (targetUid) => Object.freeze([
   field("reveals-to-target", "reveals", "toId", targetUid),
   field("owned-rooms", "rooms", "ownerId", targetUid, { cascade: "room" }),
   field("room-memberships", "roomMembers", "uid", targetUid),
-  field("room-messages", "roomMessages", "senderId", targetUid),
+  field("room-messages", "roomMessages", "senderId", targetUid, { cascade: "roomMessage" }),
   field("owned-circles", "circles", "ownerId", targetUid, { cascade: "circle" }),
   field("circle-memberships", "circleMembers", "uid", targetUid),
   direct("preferences", "userPreferences", targetUid),
   direct("private-profile", "userPrivate", targetUid),
-  field("reports-by-target", "reports", "reporterId", targetUid),
-  field("reports-about-target", "reports", "targetUid", targetUid),
-  field("reports-about-user", "reports", "reportedUserId", targetUid),
-  field("blocks-by-target", "blocks", "blockerId", targetUid),
-  field("blocks-of-target", "blocks", "blockedId", targetUid),
+  field("report-intakes-by-target", "reportIntakes", "reporterUid", targetUid),
+  field("report-intakes-about-target", "reportIntakes", "reportedUserId", targetUid),
+  field("case-reports-by-target", "reports", "reporterUid", targetUid, { group: true }),
+  field("moderation-cases-about-target", "moderationCases", "reportedUserId", targetUid, { cascade: "moderation-case" }),
+  direct("report-receipts", "reportReceipts", targetUid, {
+    cascade: "document", subcollections: ["post", "communityPost", "roomMessage", "user"]
+  }),
+  field("blocks-by-target", "blocks", "blockerUid", targetUid),
+  field("blocks-of-target", "blocks", "blockedUid", targetUid),
   direct("push-subscription-document", "pushSubscriptions", targetUid),
   field("push-subscriptions", "pushSubscriptions", "uid", targetUid),
   field("notification-events", "notificationEvents", "targetUid", targetUid),
@@ -78,8 +85,7 @@ export const cleanupQueries = (targetUid) => Object.freeze([
   field("notification-events-by-target", "notificationEvents", "actorUid", targetUid),
   field("notification-deliveries", "notificationDeliveries", "uid", targetUid),
   field("notification-deliveries-for-target", "notificationDeliveries", "recipientUid", targetUid),
-  field("notification-reads", "notificationReads", "uid", targetUid),
-  direct("self-deletion-request", "accountDeletionRequests", targetUid)
+  field("notification-reads", "notificationReads", "uid", targetUid)
 ]);
 
 const ERROR_CODES = new Map([
@@ -87,6 +93,7 @@ const ERROR_CODES = new Map([
   ["lease-lost", "LEASE_LOST"], ["untrusted-requester", "UNTRUSTED_REQUESTER"],
   ["invalid-job", "INVALID_JOB"], ["protected-target", "PROTECTED_TARGET"],
   ["profile-recreated", "PROFILE_RECREATED"], ["cleanup-limit", "CLEANUP_LIMIT"],
+  ["action-limit", "CLEANUP_LIMIT"], ["unsettled-intake", "UNSETTLED_INTAKE"],
   ["account-stats-invalid", "ACCOUNT_STATS_INVALID"],
   ["heartbeat-failed", "HEARTBEAT_ERROR"], ["malformed-marker", "MALFORMED_MARKER"]
 ]);

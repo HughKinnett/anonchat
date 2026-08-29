@@ -140,6 +140,8 @@ input:focus {
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.24);
 }
 
+.signup-confirmation{display:flex;align-items:flex-start;gap:9px;margin-top:8px;font-weight:500;line-height:1.45}.signup-confirmation input{width:18px;min-width:18px;min-height:18px;margin:2px 0 0;accent-color:var(--accent)}.signup-confirmation a{color:#c4b5fd}.public-links{max-width:820px;margin:24px 0 0;color:var(--muted);font-size:.9rem}.public-links a{color:#c4b5fd}
+
 .primary-button {
   min-height: 48px;
   margin-top: 14px;

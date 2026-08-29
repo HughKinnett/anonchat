@@ -6,7 +6,7 @@ const exitPolicy = {
   "admin.js": { authenticated: 1, authLoss: 1 },
   "community.js": { authenticated: 2, authLoss: 1 },
   "connections.js": { authenticated: 1, authLoss: 1 },
-  "delete-account.js": { authenticated: 1, authLoss: 1 },
+  "delete-account.js": { authenticated: 2, authLoss: 1 },
   "loginfirebase.js": { authenticated: 2, authLoss: 1 },
   "profile.js": { authenticated: 1, authLoss: 1 },
   "timeline.js": { authenticated: 2, authLoss: 1 },
@@ -46,6 +46,7 @@ for (const [name, source] of runtimeSources) {
 }
 
 const pushExit = runtimeSources.get("push-exit.js");
+assert.doesNotMatch(runtimeSources.get("loginfirebase.js"), /getElementById\(["']login-status["']\)/, "queued deletion feedback uses the real auth status surface");
 assert.ok(pushExit, "the shared browser push-exit integration exists");
 assert.doesNotMatch(pushExit, /requestPermission|\.subscribe\s*\(|enableFromGesture|reconcileExisting/, "exit integration cannot prompt, subscribe, or reconcile");
 assert.match(pushExit, /cleanupForSignOut/, "exit integration delegates only to cleanup behavior");

@@ -1,3 +1,13 @@
+export function selfDeletionQueuePayloads({ uid, username, timestamp } = {}) {
+  if (typeof uid !== "string" || !uid || typeof username !== "string" || !username || timestamp === undefined) {
+    throw new TypeError("A valid account deletion request is required");
+  }
+  return {
+    request: { uid, username, createdAt: timestamp },
+    job: { targetUid: uid, requesterUid: uid, requestedAt: timestamp, requestType: "self", status: "queued" }
+  };
+}
+
 export async function preparePushForAccountDeletion({
   uid,
   ensureDeletionRequest,

@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
@@ -7,13 +8,28 @@ import { applyPushAlertState } from "./push-alert-ui.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { markNotificationsSeen, readSeenNotificationIds } from "./notification-storage.mjs";
 import { buildInAppNotifications, notificationUiId } from "./notification-ui-policy.mjs";
+import { createModerationClient } from "./moderation-client.mjs";
+import { REPORT_REASONS } from "./moderation-policy.mjs";
+import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
+import { interactionParentForPost } from "./interaction-parent-policy.mjs";
+import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
+import { createViewerBlockTracker, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
+import { createSessionGeneration } from "./session-generation-policy.mjs";
+import {
+  boundedInteractionCount,
+  interactionParentLoadState,
+  interactionParentStateMessage,
+  MAX_INTERACTION_ITEMS_PER_PARENT,
+  MAX_INTERACTION_PARENTS,
+  timelineInteractionPlan
+} from "./timeline-interaction-policy.mjs";
 import { onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
-  collectionGroup,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
   increment,
   limit,
@@ -25,7 +41,8 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
-  where
+  where,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const feed = document.getElementById("feed");
@@ -44,11 +61,20 @@ let users = [];
 let notificationReads = [];
 let communityPostDocs = [];
 let pollVotes = [];
+let pollVoteListeners = [];
+let pollVoteGeneration = 0;
 let messageRequests = [];
 let roomMessages = [];
 let roomMemberships = [];
-let rooms = [];
 let reveals = [];
+let blockTracker = createViewerBlockTracker();
+let viewerBlocks = blockTracker.current();
+const interactionSubscriptions = new Map();
+let interactionGeneration = 0;
+let interactionRenderQueued = false;
+const sessionGeneration = createSessionGeneration();
+let activeTimelineSession = 0;
+let clearNotificationExpiryTimer = () => {};
 let showingProfile = false;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -61,6 +87,7 @@ let currentNotificationIds = [];
 let seenNotificationIds = new Set();
 let pendingPostImage = "";
 const postImageInput = document.getElementById("post-image-upload");
+const postImageLabel = document.querySelector("label[for='post-image-upload']");
 const postImagePreviewWrap = document.getElementById("post-image-preview-wrap");
 const postImagePreview = document.getElementById("post-image-preview");
 const alertsButton = document.getElementById("enable-alerts");
@@ -76,6 +103,20 @@ const spotifyStatus = document.getElementById("spotify-song-status");
 const postCategory = document.getElementById("post-category");
 const postExpiry = document.getElementById("post-expiry");
 const pollOptions = document.getElementById("poll-options");
+let moderationClient;
+let reportDialog;
+let activeReportTarget;
+let reportSubmitting = false;
+const reportCardStatuses = new Map();
+const pendingPostDeletes = new Set();
+const postDeleteStatuses = new Map();
+
+const blockedUid = (uid) => isBlockedActor(uid, viewerBlocks);
+const visibleTimelinePosts = () => allTimelinePosts()
+  .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
+  .filter((post) => isBlockedPost(post, viewerBlocks));
+const visibleUsers = () => visibleRecords(users, viewerBlocks, ["uid"]);
+const visibleFollows = () => visibleRecords(follows, viewerBlocks, ["followerId", "followingId"]);
 
 postCategory?.addEventListener("change", () => {
   pollOptions.hidden = postCategory.value !== "Poll";
@@ -255,6 +296,17 @@ const compressPostImage = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+const setPhotoSelected = (selected) => {
+  postImageLabel?.classList.toggle("is-selected", selected);
+  postImageLabel?.setAttribute("aria-pressed", String(selected));
+};
+
+postImageLabel?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  postImageInput.click();
+});
+
 postImageInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -263,9 +315,11 @@ postImageInput.addEventListener("change", async (event) => {
     pendingPostImage = await compressPostImage(file);
     postImagePreview.src = pendingPostImage;
     postImagePreviewWrap.hidden = false;
+    setPhotoSelected(true);
     setStatus("Photo ready.");
   } catch (error) {
     pendingPostImage = "";
+    setPhotoSelected(false);
     setStatus(error.message || "Could not prepare that photo.", true);
   }
 });
@@ -274,6 +328,7 @@ document.getElementById("remove-post-image").addEventListener("click", () => {
   pendingPostImage = "";
   postImageInput.value = "";
   postImagePreviewWrap.hidden = true;
+  setPhotoSelected(false);
 });
 
 const closeSearch = () => {
@@ -283,7 +338,11 @@ const closeSearch = () => {
 
 const findPostElement = (postId) =>
   document.getElementById(`post-posts-${postId}`) ||
-  document.getElementById(`post-communityPosts-${postId}`);
+  document.getElementById(`post-communityPosts-${postId}`) ||
+  visibleTimelinePosts().map((post) => ({ post, parent: interactionParentForPost(post) }))
+    .filter(({ parent }) => parent.id === postId)
+    .map(({ post }) => document.getElementById(`post-${post.ref.parent.id}-${post.id}`))
+    .find(Boolean);
 
 const openPostFromSearch = (postId) => {
   searchInput.value = "";
@@ -298,16 +357,20 @@ const openPostFromSearch = (postId) => {
 };
 
 const renderSearchResults = () => {
+  if (!viewerBlocks.ready) {
+    closeSearch();
+    return;
+  }
   const term = searchInput.value.trim().toLowerCase();
   if (term.length < 2) {
     closeSearch();
     return;
   }
 
-  const matchedUsers = users
+  const matchedUsers = visibleUsers()
     .filter((profile) => profile.data().username?.toLowerCase().includes(term))
     .slice(0, 5);
-  const matchedPosts = allTimelinePosts()
+  const matchedPosts = visibleTimelinePosts()
     .filter((post) =>
       post.data().content?.toLowerCase().includes(term) ||
       post.data().username?.toLowerCase().includes(term)
@@ -378,7 +441,7 @@ const appendLinkedText = (container, value) => {
       return;
     }
     const handle = part.slice(1).toLowerCase();
-    const profile = users.find((entry) => entry.data().username?.toLowerCase() === handle);
+    const profile = visibleUsers().find((entry) => entry.data().username?.toLowerCase() === handle);
     if (!profile) {
       container.append(document.createTextNode(part));
       return;
@@ -426,7 +489,7 @@ const attachMentionAutocomplete = (input) => {
       return;
     }
     const queryText = match[1].toLowerCase();
-    const matches = users
+    const matches = visibleUsers()
       .filter((entry) => entry.data().username?.toLowerCase().startsWith(queryText))
       .slice(0, 6);
     if (!matches.length) {
@@ -469,28 +532,66 @@ const mentionsCurrentUser = (value) => {
 };
 
 const allTimelinePosts = () => [...postDocs, ...communityPostDocs];
+const allNotificationPosts = () => {
+  const byPath = new Map(allTimelinePosts().map((post) => [post.ref.path, post]));
+  interactionSubscriptions.forEach((entry) => {
+    if (entry.parentDoc) byPath.set(entry.parentDoc.ref.path, entry.parentDoc);
+  });
+  return [...byPath.values()];
+};
+const fullyLoadedInteractionRecords = (records) => records.filter((record) =>
+  interactionParentLoadState(interactionSubscriptions.get(record.ref.parent.parent?.path)) === "bounded"
+);
+
+const compareNotificationsNewestFirst = (left, right) => compareNewestFirst(
+  { path: `notificationReads/${left.id}`, data: { createdAt: left.createdAt } },
+  { path: `notificationReads/${right.id}`, data: { createdAt: right.createdAt } }
+);
 
 const renderNotifications = () => {
-  if (!currentUser) return;
+  if (!currentUser) { clearNotificationExpiryTimer(); return; }
+  if (!viewerBlocks.ready) {
+    clearNotificationExpiryTimer();
+    currentNotificationIds = [];
+    notificationBadge.hidden = true;
+    const loading = document.createElement("li");
+    loading.className = "notification-empty";
+    loading.textContent = "Loading privacy choices…";
+    notificationList.replaceChildren(loading);
+    return;
+  }
   const readIds = new Set(notificationReads.map((read) => read.data().eventId ?? read.data().reactionId));
+  const loadedReactions = fullyLoadedInteractionRecords(reactions);
+  const loadedComments = fullyLoadedInteractionRecords(comments);
   const notificationItems = buildInAppNotifications({
     currentUid: currentUser.uid,
-    posts: allTimelinePosts(),
-    reactions,
-    comments,
+    posts: allNotificationPosts(),
+    reactions: loadedReactions,
+    comments: loadedComments,
     messageRequests,
     roomMessages,
     roomMemberships,
+    blockedUids: viewerBlocks.blockedUids,
     reveals
   });
+  const joinedRoomIds = new Set(roomMemberships.map((membership) => membership.data().roomId));
+  const blockedUids = new Set(viewerBlocks.blockedUids);
+  clearNotificationExpiryTimer();
+  clearNotificationExpiryTimer = scheduleExpiryBoundary({
+    expiries: roomMessages.filter((message) => {
+      const data = message.data();
+      return data.senderId !== currentUser.uid && joinedRoomIds.has(data.roomId) && !blockedUids.has(data.senderId);
+    }).map((message) => message.data().expiresAt),
+    onBoundary: renderNotifications
+  });
 
-  const ownedPostIds = new Set(allTimelinePosts()
+  const ownedPostIds = new Set(allNotificationPosts()
     .filter((post) => post.data().type !== "repost" && post.data().authorId === currentUser.uid)
     .map((post) => post.id));
-  comments.forEach((comment) => {
+  loadedComments.forEach((comment) => {
     const data = comment.data();
     const postId = comment.ref.parent.parent?.id;
-    if (data.uid === currentUser.uid || ownedPostIds.has(postId) || !mentionsCurrentUser(data.text)) return;
+    if (data.uid === currentUser.uid || blockedUid(data.uid) || ownedPostIds.has(postId) || !mentionsCurrentUser(data.text)) return;
     notificationItems.push({
       id: notificationUiId("comment-mention", comment.ref.path, data.createdAt),
       postId,
@@ -499,11 +600,12 @@ const renderNotifications = () => {
     });
   });
 
-  allTimelinePosts().forEach((postDoc) => {
+  allNotificationPosts().forEach((postDoc) => {
     const post = postDoc.data();
     if (
       post.type === "repost" ||
       post.authorId === currentUser.uid ||
+      blockedUid(post.authorId) ||
       !mentionsCurrentUser(post.content)
     ) return;
     notificationItems.push({
@@ -516,9 +618,7 @@ const renderNotifications = () => {
 
   const items = notificationItems
     .filter((item) => !readIds.has(item.id))
-    .sort((a, b) =>
-      (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
-    );
+    .sort(compareNotificationsNewestFirst);
 
   currentNotificationIds = items.map((item) => item.id);
   const unseenCount = currentNotificationIds.filter((id) => !seenNotificationIds.has(id)).length;
@@ -601,24 +701,125 @@ const setStatus = (message, isError = false) => {
   status.style.color = isError ? "#fca5a5" : "inherit";
 };
 
+const createReportDialog = () => {
+  if (reportDialog) return reportDialog;
+  const dialog = document.createElement("dialog");
+  dialog.className = "report-dialog";
+  dialog.setAttribute("aria-labelledby", "report-dialog-title");
+  const form = document.createElement("form");
+  form.method = "dialog";
+  const title = document.createElement("h2");
+  title.id = "report-dialog-title";
+  title.textContent = "Report content";
+  const reasonLabel = document.createElement("label");
+  reasonLabel.textContent = "Reason";
+  const reason = document.createElement("select");
+  reason.name = "reason";
+  reason.setAttribute("aria-label", "Report reason");
+  REPORT_REASONS.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    reason.append(option);
+  });
+  reasonLabel.append(reason);
+  const dialogStatus = document.createElement("p");
+  dialogStatus.className = "report-dialog-status";
+  dialogStatus.setAttribute("role", "status");
+  const actions = document.createElement("div");
+  actions.className = "report-dialog-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Submit report";
+  cancel.addEventListener("click", () => {
+    if (!reportSubmitting) dialog.close();
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (reportSubmitting || !activeReportTarget) return;
+    const target = activeReportTarget;
+    reportSubmitting = true;
+    submit.disabled = true;
+    cancel.disabled = true;
+    dialogStatus.textContent = "Submitting report…";
+    try {
+      await moderationClient.report(target, reason.value);
+      reportCardStatuses.set(target.path, { message: "Report submitted.", isError: false });
+      dialog.close();
+      activeReportTarget = undefined;
+      renderFeed();
+    } catch (error) {
+      if (error?.code === "already-reported") {
+        reportCardStatuses.set(target.path, { message: "This item has already been reported.", isError: false });
+        dialog.close();
+        activeReportTarget = undefined;
+      } else {
+        reportCardStatuses.set(target.path, { message: "Could not submit this report. Please try again.", isError: true });
+        dialogStatus.textContent = "Could not submit this report. Please try again.";
+      }
+      renderFeed();
+    } finally {
+      reportSubmitting = false;
+      submit.disabled = false;
+      cancel.disabled = false;
+    }
+  });
+  dialog.addEventListener("close", () => {
+    if (!reportSubmitting) activeReportTarget = undefined;
+  });
+  actions.append(cancel, submit);
+  form.append(title, reasonLabel, dialogStatus, actions);
+  dialog.append(form);
+  document.body.append(dialog);
+  reportDialog = dialog;
+  return dialog;
+};
+
+const openReportDialog = async (target) => {
+  try {
+    if (await moderationClient.hasReported(target)) {
+      reportCardStatuses.set(target.path, { message: "This item has already been reported.", isError: false });
+      renderFeed();
+      return;
+    }
+    activeReportTarget = target;
+    const dialog = createReportDialog();
+    dialog.querySelector("form").reset();
+    dialog.querySelector(".report-dialog-status").textContent = "";
+    dialog.showModal();
+  } catch {
+    reportCardStatuses.set(target.path, { message: "Could not check report status. Please try again.", isError: true });
+    renderFeed();
+  }
+};
+
 const originalPostId = (postDoc) =>
   postDoc.data().type === "repost" ? postDoc.data().originalPostId : postDoc.id;
 
-const postReactions = (postId) => reactions.filter((reaction) =>
-  reaction.ref.parent.parent?.id === postId
-);
+const postReactions = (postDoc) => {
+  const parent = interactionParentForPost(postDoc);
+  return visibleRecords(reactions, viewerBlocks, ["uid"])
+    .filter((reaction) => reaction.ref.parent.parent?.path === parent.path);
+};
 
-const postComments = (postId) => comments
-  .filter((comment) => comment.ref.parent.parent?.id === postId)
-  .sort((a, b) =>
-    (a.data().createdAt?.toMillis?.() || 0) - (b.data().createdAt?.toMillis?.() || 0)
-  );
+const interactionIsTruncated = (parentPath, kind) =>
+  Boolean(interactionSubscriptions.get(parentPath)?.truncated[kind]);
+
+const postComments = (postDoc) => {
+  const parent = interactionParentForPost(postDoc);
+  return visibleRecords(comments, viewerBlocks, ["uid"])
+    .filter((comment) => comment.ref.parent.parent?.path === parent.path)
+    .sort(compareOldestFirst);
+};
 
 const followerCount = (userId) =>
-  follows.filter((follow) => follow.data().followingId === userId).length;
+  visibleFollows().filter((follow) => follow.data().followingId === userId).length;
 
 const isFollowing = (userId) =>
-  follows.some((follow) =>
+  visibleFollows().some((follow) =>
     follow.data().followerId === currentUser.uid && follow.data().followingId === userId
   );
 
@@ -648,6 +849,8 @@ const createFollowControl = (userId) => {
     return wrapper;
   }
 
+  if (blockedUid(userId)) return wrapper;
+
   const button = document.createElement("button");
   button.className = "follow-button";
   button.type = "button";
@@ -667,8 +870,8 @@ const createFollowControl = (userId) => {
   return wrapper;
 };
 
-const toggleReaction = async (postId, type, currentType) => {
-  const reactionRef = doc(db, "posts", postId, "reactions", currentUser.uid);
+const toggleReaction = async (parent, type, currentType) => {
+  const reactionRef = doc(db, parent.collection, parent.id, "reactions", currentUser.uid);
   if (currentType === type) {
     await deleteDoc(reactionRef);
     return;
@@ -680,7 +883,7 @@ const toggleReaction = async (postId, type, currentType) => {
   });
 };
 
-const reactionButton = (postId, type, emoji, reactionDocs) => {
+const reactionButton = (parent, type, emoji, reactionDocs, reactionsTruncated) => {
   const count = reactionDocs.filter((reaction) => reaction.data().type === type).length;
   const myReaction = reactionDocs.find((reaction) => reaction.data().uid === currentUser.uid);
   const currentType = myReaction?.data().type;
@@ -688,7 +891,7 @@ const reactionButton = (postId, type, emoji, reactionDocs) => {
   const button = document.createElement("button");
   button.className = "reaction-button";
   button.type = "button";
-  button.textContent = `${emoji} ${count}`;
+  button.textContent = `${emoji} ${boundedInteractionCount(count, reactionsTruncated)}`;
   button.setAttribute("aria-pressed", String(selected));
   button.title = selected
     ? "Remove this reaction"
@@ -698,7 +901,7 @@ const reactionButton = (postId, type, emoji, reactionDocs) => {
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await toggleReaction(postId, type, currentType);
+      await toggleReaction(parent, type, currentType);
     } catch {
       setStatus("Could not update your reaction.", true);
       button.disabled = false;
@@ -714,22 +917,23 @@ const sharePost = async (postDoc) => {
   const sourceUsername = post.type === "repost" ? post.originalUsername : post.username;
   const repostRef = doc(db, "posts", `repost_${currentUser.uid}_${sourceId}`);
 
-  await setDoc(repostRef, {
-    type: "repost",
+  await setDoc(repostRef, buildRepost({
     authorId: currentUser.uid,
     username: profileUsername,
+    sourceCollection: interactionParentForPost(postDoc).collection,
     originalPostId: sourceId,
     originalAuthorId: sourceAuthorId,
     originalUsername: sourceUsername,
     content: post.content,
     imageData: post.imageData || "",
     createdAt: serverTimestamp()
-  });
+  }));
 };
 
 const renderPost = (postDoc) => {
   const post = postDoc.data();
   const sourceId = originalPostId(postDoc);
+  const parent = interactionParentForPost(postDoc);
   const collectionName = postDoc.ref.parent.id;
   const sourceCollection = collectionName === "communityPosts" ? "communityPosts" : "posts";
   const item = document.createElement("li");
@@ -773,16 +977,20 @@ const renderPost = (postDoc) => {
     item.append(category);
   }
 
-  const reactionDocs = postReactions(sourceId);
+  const reactionDocs = postReactions(postDoc);
+  const interactionState = interactionParentLoadState(interactionSubscriptions.get(parent.path));
+  const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");
   const reactionsBar = document.createElement("div");
   reactionsBar.className = "reactions";
-  if (sourceCollection === "posts") {
-    reactionsBar.append(
-      reactionButton(sourceId, "heart", "❤️", reactionDocs),
-      reactionButton(sourceId, "middle_finger", "🖕", reactionDocs),
-      reactionButton(sourceId, "laugh", "😂", reactionDocs),
-      reactionButton(sourceId, "sad", "😢", reactionDocs)
-    );
+  if (interactionState === "bounded") {
+    if (sourceCollection === "posts") {
+      reactionsBar.append(
+        reactionButton(parent, "heart", "❤️", reactionDocs, reactionsTruncated),
+        reactionButton(parent, "middle_finger", "🖕", reactionDocs, reactionsTruncated),
+        reactionButton(parent, "laugh", "😂", reactionDocs, reactionsTruncated),
+        reactionButton(parent, "sad", "😢", reactionDocs, reactionsTruncated)
+      );
+    }
   }
 
   const poll = document.createElement("div");
@@ -815,11 +1023,15 @@ const renderPost = (postDoc) => {
     });
   }
 
-  const commentDocs = postComments(sourceId);
-  const commentsSection = document.createElement("details");
+  let commentsSection;
+  if (interactionState === "bounded") {
+    const commentDocs = postComments(postDoc);
+    commentsSection = document.createElement("details");
   commentsSection.className = "comments-section";
   const commentsSummary = document.createElement("summary");
-  commentsSummary.textContent = `Comments · ${commentDocs.length}`;
+  commentsSummary.textContent = `Comments · ${boundedInteractionCount(
+    commentDocs.length, interactionIsTruncated(parent.path, "comments")
+  )}`;
   const commentsList = document.createElement("ul");
   commentsList.className = "comments-list";
 
@@ -888,7 +1100,7 @@ const renderPost = (postDoc) => {
     if (!text) return;
     commentSubmit.disabled = true;
     try {
-      await addDoc(collection(db, sourceCollection, sourceId, "comments"), {
+      await addDoc(collection(db, parent.collection, parent.id, "comments"), {
         uid: currentUser.uid,
         username: profileUsername,
         text,
@@ -904,6 +1116,11 @@ const renderPost = (postDoc) => {
   });
 
   commentsSection.append(commentsSummary, commentsList, commentForm);
+  } else {
+    commentsSection = document.createElement("p");
+    commentsSection.className = "interaction-load-state muted";
+    commentsSection.textContent = interactionParentStateMessage(interactionState);
+  }
 
   const actions = document.createElement("div");
   actions.className = "post-actions";
@@ -932,17 +1149,61 @@ const renderPost = (postDoc) => {
     const remove = document.createElement("button");
     remove.className = "delete-button";
     remove.type = "button";
-    remove.textContent = post.type === "repost" ? "Remove from profile" : "Delete";
+    remove.textContent = "Delete";
+    const path = postDoc.ref.path;
+    remove.disabled = pendingPostDeletes.has(path);
+    const deleteStatus = postDeleteStatuses.get(path);
+    if (deleteStatus) {
+      const message = document.createElement("p");
+      message.className = "post-action-status";
+      message.setAttribute("role", "status");
+      message.textContent = deleteStatus.message;
+      if (deleteStatus.isError) message.classList.add("is-error");
+      actions.append(message);
+    }
     remove.addEventListener("click", async () => {
+      if (pendingPostDeletes.has(path)) return;
+      if (!window.confirm("Permanently delete this post? This cannot be undone.")) return;
+      pendingPostDeletes.add(path);
+      postDeleteStatuses.delete(path);
       remove.disabled = true;
       try {
-        await deleteDoc(doc(db, collectionName, postDoc.id));
+        await deleteDoc(postDoc.ref);
       } catch {
-        setStatus("Could not remove that post.", true);
-        remove.disabled = false;
+        pendingPostDeletes.delete(path);
+        postDeleteStatuses.set(path, { message: "Could not delete this post. Please try again.", isError: true });
+        renderFeed();
       }
     });
     actions.append(remove);
+  } else {
+    const path = postDoc.ref.path;
+    const reportStatus = reportCardStatuses.get(path);
+    const report = document.createElement("button");
+    report.className = "report-button";
+    report.type = "button";
+    report.textContent = "Report";
+    report.disabled = Boolean(reportStatus && !reportStatus.isError);
+    report.addEventListener("click", async () => {
+      report.disabled = true;
+      await openReportDialog({
+        targetKind: sourceCollection === "communityPosts" ? "communityPost" : "post",
+        targetCollection: sourceCollection,
+        targetId: postDoc.id,
+        reportedUserId: post.authorId,
+        path
+      });
+      if (item.isConnected && !reportCardStatuses.has(path)) report.disabled = false;
+    });
+    actions.append(report);
+    if (reportStatus) {
+      const message = document.createElement("p");
+      message.className = "post-action-status";
+      message.setAttribute("role", "status");
+      message.textContent = reportStatus.message;
+      if (reportStatus.isError) message.classList.add("is-error");
+      actions.append(message);
+    }
   }
 
   item.append(authorRow, text);
@@ -955,9 +1216,13 @@ const renderPost = (postDoc) => {
 };
 
 const renderFeed = () => {
-  const unexpiredPosts = allTimelinePosts()
-    .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
-    .sort((a, b) => (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0));
+  if (!viewerBlocks.ready) {
+    feed.replaceChildren();
+    renderNotifications();
+    setStatus("Loading privacy choices…");
+    return;
+  }
+  const unexpiredPosts = visibleTimelinePosts().sort(compareNewestFirst);
   const visiblePosts = showingProfile
     ? unexpiredPosts.filter((post) => post.data().authorId === currentUser.uid)
     : unexpiredPosts;
@@ -971,6 +1236,235 @@ const renderFeed = () => {
       : "No posts yet. Start the conversation.");
 };
 
+const clearInteractionListeners = () => {
+  interactionGeneration += 1;
+  interactionSubscriptions.forEach((entry) => {
+    entry.sourceUnsubscribe?.();
+    entry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
+  });
+  interactionSubscriptions.clear();
+  reactions = [];
+  comments = [];
+  interactionRenderQueued = false;
+};
+
+const queueInteractionRender = () => {
+  if (interactionRenderQueued) return;
+  interactionRenderQueued = true;
+  const generation = interactionGeneration;
+  queueMicrotask(() => {
+    interactionRenderQueued = false;
+    if (generation !== interactionGeneration) return;
+    const loadedEntries = [...interactionSubscriptions.values()]
+      .filter((entry) => interactionParentLoadState(entry) === "bounded");
+    reactions = loadedEntries.flatMap((entry) => {
+      if (!entry.viewerReaction) return entry.reactions;
+      return [
+        ...entry.reactions.filter((reaction) => reaction.ref.path !== entry.viewerReaction.ref.path),
+        entry.viewerReaction
+      ];
+    });
+    comments = loadedEntries.flatMap((entry) => entry.comments);
+    renderFeed();
+  });
+};
+
+const stopInteractionEntry = (entry) => {
+  entry.sourceUnsubscribe?.();
+  entry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
+  entry.sourceUnsubscribe = undefined;
+  entry.childUnsubscribes = [];
+  entry.childrenStarted = false;
+  entry.reactions = [];
+  entry.comments = [];
+  entry.viewerReaction = undefined;
+  entry.truncated = { reactions: false, comments: false };
+  entry.ready = { reactions: false, comments: false, viewerReaction: false };
+  entry.unavailable = false;
+  entry.parentDoc = undefined;
+};
+
+const startInteractionChildren = (entry) => {
+  if (entry.childrenStarted) return;
+  entry.childrenStarted = true;
+  const callbackIsCurrent = () => interactionSubscriptions.get(entry.parent.path) === entry
+    && entry.generation === interactionGeneration
+    && sessionGeneration.isCurrent(entry.session, entry.uid);
+  for (const kind of ["reactions", "comments"]) {
+    entry.childUnsubscribes.push(onSnapshot(
+      query(
+        collection(db, entry.parent.collection, entry.parent.id, kind),
+        orderBy("createdAt", "desc"),
+        orderBy(documentId(), "desc"),
+        limit(MAX_INTERACTION_ITEMS_PER_PARENT)
+      ),
+      (snapshot) => {
+        if (!callbackIsCurrent()) return;
+        entry[kind] = snapshot.docs;
+        entry.truncated[kind] = snapshot.size === MAX_INTERACTION_ITEMS_PER_PARENT;
+        entry.ready[kind] = true;
+        queueInteractionRender();
+      },
+      () => {
+        if (!callbackIsCurrent()) return;
+        entry[kind] = [];
+        entry.truncated[kind] = false;
+        entry.ready[kind] = false;
+        entry.unavailable = true;
+        queueInteractionRender();
+        setStatus(`Could not load ${kind}.`, true);
+      }
+    ));
+  }
+  entry.childUnsubscribes.push(onSnapshot(
+    doc(db, entry.parent.collection, entry.parent.id, "reactions", entry.uid),
+    (snapshot) => {
+      if (!callbackIsCurrent()) return;
+      entry.viewerReaction = snapshot.exists() ? snapshot : undefined;
+      entry.ready.viewerReaction = true;
+      queueInteractionRender();
+    },
+    () => {
+      if (!callbackIsCurrent()) return;
+      entry.viewerReaction = undefined;
+      entry.ready.viewerReaction = false;
+      entry.unavailable = true;
+      queueInteractionRender();
+      setStatus("Could not load your reaction.", true);
+    }
+  ));
+};
+
+const syncInteractionListeners = () => {
+  if (!viewerBlocks.ready) {
+    clearInteractionListeners();
+    queueInteractionRender();
+    return;
+  }
+  const posts = visibleTimelinePosts().sort(compareNewestFirst);
+  const visibleParents = new Map(posts.map((post) => [post.ref.path, post]));
+  const desired = new Map(timelineInteractionPlan(posts, MAX_INTERACTION_PARENTS)
+    .map((parent) => [parent.path, parent]));
+  interactionSubscriptions.forEach((entry, path) => {
+    if (desired.has(path)) return;
+    stopInteractionEntry(entry);
+    interactionSubscriptions.delete(path);
+  });
+  desired.forEach((parent, path) => {
+    const existing = interactionSubscriptions.get(path);
+    const visibleParent = visibleParents.get(path);
+    if (existing) {
+      if (visibleParent && !existing.childrenStarted) {
+        existing.sourceUnsubscribe?.();
+        existing.sourceUnsubscribe = undefined;
+        existing.parentDoc = visibleParent;
+        startInteractionChildren(existing);
+      }
+      return;
+    }
+    const entry = {
+      parent,
+      parentDoc: visibleParent,
+      reactions: [],
+      comments: [],
+      viewerReaction: undefined,
+      truncated: { reactions: false, comments: false },
+      ready: { reactions: false, comments: false, viewerReaction: false },
+      unavailable: false,
+      sourceUnsubscribe: undefined,
+      childUnsubscribes: [],
+      childrenStarted: false,
+      generation: interactionGeneration,
+      session: activeTimelineSession,
+      uid: currentUser.uid
+    };
+    interactionSubscriptions.set(path, entry);
+    if (visibleParent) {
+      startInteractionChildren(entry);
+      return;
+    }
+    entry.sourceUnsubscribe = onSnapshot(
+      doc(db, parent.collection, parent.id),
+      (snapshot) => {
+        if (interactionSubscriptions.get(path) !== entry
+          || entry.generation !== interactionGeneration
+          || !sessionGeneration.isCurrent(entry.session, entry.uid)) return;
+        if (!snapshot.exists() || !isBlockedPost(snapshot, viewerBlocks)) {
+          entry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
+          entry.childUnsubscribes = [];
+          entry.childrenStarted = false;
+          entry.parentDoc = undefined;
+          entry.reactions = [];
+          entry.comments = [];
+          entry.viewerReaction = undefined;
+          entry.truncated = { reactions: false, comments: false };
+          entry.ready = { reactions: false, comments: false, viewerReaction: false };
+          entry.unavailable = true;
+          queueInteractionRender();
+          return;
+        }
+        entry.parentDoc = snapshot;
+        entry.unavailable = false;
+        startInteractionChildren(entry);
+        queueInteractionRender();
+      },
+      () => {
+        if (interactionSubscriptions.get(path) !== entry
+          || entry.generation !== interactionGeneration
+          || !sessionGeneration.isCurrent(entry.session, entry.uid)) return;
+        entry.parentDoc = undefined;
+        entry.reactions = [];
+        entry.comments = [];
+        entry.viewerReaction = undefined;
+        entry.truncated = { reactions: false, comments: false };
+        entry.ready = { reactions: false, comments: false, viewerReaction: false };
+        entry.unavailable = true;
+        queueInteractionRender();
+      }
+    );
+  });
+  queueInteractionRender();
+};
+
+const refreshViewerBlocks = () => {
+  viewerBlocks = blockTracker.current();
+  syncInteractionListeners();
+  syncPollVoteListeners();
+  renderFeed();
+  renderSearchResults();
+  renderNotifications();
+};
+
+const clearPollVoteListeners = () => {
+  pollVoteGeneration += 1;
+  pollVoteListeners.forEach((unsubscribe) => unsubscribe());
+  pollVoteListeners = [];
+  pollVotes = [];
+};
+
+const syncPollVoteListeners = () => {
+  clearPollVoteListeners();
+  const generation = pollVoteGeneration;
+  const visiblePostIds = communityPostDocs
+    .filter((post) => post.data().category === "Poll" && isBlockedPost(post, viewerBlocks))
+    .map((post) => post.id);
+  const votesByChunk = new Map();
+  for (let offset = 0; offset < visiblePostIds.length; offset += 30) {
+    const chunk = visiblePostIds.slice(offset, offset + 30);
+    const chunkKey = String(offset);
+    pollVoteListeners.push(onSnapshot(
+      query(collection(db, "communityVotes"), where("postId", "in", chunk)),
+      (snapshot) => {
+        if (generation !== pollVoteGeneration) return;
+        votesByChunk.set(chunkKey, snapshot.docs);
+        pollVotes = [...votesByChunk.values()].flat();
+        renderFeed();
+      },
+      () => setStatus("Could not load poll votes.", true)
+    ));
+  }
+};
+
 const setFeedView = (profileOnly) => {
   showingProfile = profileOnly;
   allPostsButton.setAttribute("aria-pressed", String(!profileOnly));
@@ -982,8 +1476,49 @@ const setFeedView = (profileOnly) => {
 allPostsButton.addEventListener("click", () => setFeedView(false));
 profilePostsButton.addEventListener("click", () => setFeedView(true));
 
+const stopTimelineResources = () => {
+  listeners.splice(0).forEach((unsubscribe) => unsubscribe());
+  clearNotificationExpiryTimer();
+  clearNotificationExpiryTimer = () => {};
+  moderationClient?.destroy();
+  moderationClient = null;
+  clearPollVoteListeners();
+  clearInteractionListeners();
+  postDocs = [];
+  communityPostDocs = [];
+  follows = [];
+  users = [];
+  notificationReads = [];
+  messageRequests = [];
+  roomMessages = [];
+  roomMemberships = [];
+  reveals = [];
+  blockTracker.reset(currentUser?.uid);
+  viewerBlocks = blockTracker.current();
+  profileUsername = "";
+  seenNotificationIds = new Set();
+  renderSpotifySong("");
+  document.getElementById("display-name").textContent = "Loading profile…";
+  document.getElementById("user-handle").textContent = "";
+  document.getElementById("my-profile-link").removeAttribute("href");
+  document.getElementById("admin-link").hidden = true;
+  renderFeed();
+  renderSearchResults();
+  renderNotifications();
+};
+const invalidateTimelineSession = () => {
+  sessionGeneration.invalidate();
+  stopTimelineResources();
+};
+
 onAuthStateChanged(auth, async (user) => {
+  activeTimelineSession = sessionGeneration.begin(user?.uid);
+  const session = activeTimelineSession;
+  const sessionIsCurrent = () => sessionGeneration.isCurrent(session, user?.uid);
+  stopTimelineResources();
   if (!user) {
+    currentUser = undefined;
+    stopTimelineResources();
     await exitAfterAuthLoss({
       redirect: () => window.location.replace("index.html")
     });
@@ -991,14 +1526,23 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  blockTracker = createViewerBlockTracker(user.uid);
+  viewerBlocks = blockTracker.current();
+  moderationClient = createModerationClient({
+    db,
+    firestore: { deleteDoc, doc, getDoc, setDoc, writeBatch },
+    currentUid: user.uid,
+    timestamp: serverTimestamp
+  });
   seenNotificationIds = readSeenNotificationIds({ getStorage: () => window.localStorage, uid: user.uid });
   const profileRef = doc(db, "users", user.uid);
   let profile = await getDoc(profileRef);
+  if (!sessionIsCurrent()) return;
   if (profile.exists() && profile.data().banned === true) {
     setStatus("This account has been banned.", true);
     await exitAuthenticatedSession({
       user,
-      stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+      stopListeners: invalidateTimelineSession,
       redirect: () => window.location.replace("index.html")
     });
     return;
@@ -1006,6 +1550,7 @@ onAuthStateChanged(auth, async (user) => {
   if (!profile.exists() || !validProfile(profile.data(), user.uid)) {
     profileUsername = await ensureUserProfile(user, db);
     profile = await getDoc(profileRef);
+    if (!sessionIsCurrent()) return;
   } else {
     profileUsername = profile.data().username;
   }
@@ -1025,7 +1570,9 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("admin-link").hidden =
     !["i_love_you_h", "cybercapone"].includes(profileUsername.toLowerCase());
   const statsRef = doc(db, "system", "accountStats");
-  if (!(await getDoc(statsRef)).exists()) {
+  const statsSnapshot = await getDoc(statsRef);
+  if (!sessionIsCurrent()) return;
+  if (!statsSnapshot.exists()) {
     await setDoc(statsRef, {
       count: 5,
       limit: 500,
@@ -1038,54 +1585,37 @@ onAuthStateChanged(auth, async (user) => {
     views: increment(1),
     updatedAt: serverTimestamp()
   }, { merge: true }).catch(() => {});
+  listeners.push(clearPollVoteListeners);
+  listeners.push(clearInteractionListeners);
+  const listenForSession = (reference, next, failed) => onSnapshot(
+    reference,
+    (snapshot) => { if (sessionIsCurrent()) next(snapshot); },
+    (error) => { if (sessionIsCurrent()) failed?.(error); }
+  );
 
-  listeners.push(onSnapshot(
-    query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(100)),
+  listeners.push(listenForSession(
+    query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(100)),
     (snapshot) => {
       postDocs = snapshot.docs;
+      syncInteractionListeners();
       renderFeed();
       renderSearchResults();
     },
     () => setStatus("Could not load posts.", true)
   ));
 
-  listeners.push(onSnapshot(
-    query(collection(db, "communityPosts"), orderBy("createdAt", "desc"), limit(100)),
+  listeners.push(listenForSession(
+    query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(100)),
     (snapshot) => {
       communityPostDocs = snapshot.docs;
+      syncPollVoteListeners();
+      syncInteractionListeners();
       renderFeed();
     },
     () => setStatus("Could not load earlier community posts.", true)
   ));
 
-  listeners.push(onSnapshot(
-    collection(db, "communityVotes"),
-    (snapshot) => {
-      pollVotes = snapshot.docs;
-      renderFeed();
-    },
-    () => setStatus("Could not load poll votes.", true)
-  ));
-
-  listeners.push(onSnapshot(
-    collectionGroup(db, "reactions"),
-    (snapshot) => {
-      reactions = snapshot.docs;
-      renderFeed();
-    },
-    () => setStatus("Could not load reactions.", true)
-  ));
-
-  listeners.push(onSnapshot(
-    collectionGroup(db, "comments"),
-    (snapshot) => {
-      comments = snapshot.docs;
-      renderFeed();
-    },
-    () => setStatus("Could not load comments.", true)
-  ));
-
-  listeners.push(onSnapshot(
+  listeners.push(listenForSession(
     collection(db, "users"),
     (snapshot) => {
       users = snapshot.docs;
@@ -1095,7 +1625,7 @@ onAuthStateChanged(auth, async (user) => {
     () => setStatus("Could not load notification names.", true)
   ));
 
-  listeners.push(onSnapshot(
+  listeners.push(listenForSession(
     query(collection(db, "notificationReads"), where("uid", "==", user.uid)),
     (snapshot) => {
       notificationReads = snapshot.docs;
@@ -1104,7 +1634,7 @@ onAuthStateChanged(auth, async (user) => {
     () => setStatus("Could not load cleared notifications.", true)
   ));
 
-  listeners.push(onSnapshot(
+  listeners.push(listenForSession(
     collection(db, "follows"),
     (snapshot) => {
       follows = snapshot.docs;
@@ -1113,7 +1643,7 @@ onAuthStateChanged(auth, async (user) => {
     () => setStatus("Could not load follower counts.", true)
   ));
 
-  listeners.push(onSnapshot(
+  listeners.push(listenForSession(
     query(collection(db, "messageRequests"), where("toId", "==", user.uid)),
     (snapshot) => {
       messageRequests = snapshot.docs;
@@ -1122,7 +1652,7 @@ onAuthStateChanged(auth, async (user) => {
     () => setStatus("Could not load message-request notifications.", true)
   ));
 
-  listeners.push(onSnapshot(
+  listeners.push(listenForSession(
     query(collection(db, "roomMembers"), where("uid", "==", user.uid)),
     (snapshot) => {
       roomMemberships = snapshot.docs;
@@ -1131,17 +1661,38 @@ onAuthStateChanged(auth, async (user) => {
     () => setStatus("Could not load room memberships.", true)
   ));
 
-  listeners.push(onSnapshot(collection(db, "rooms"), (snapshot) => {
-    rooms = snapshot.docs;
-    renderNotifications();
-  }));
+  listeners.push(listenForSession(
+    query(collection(db, "blocks"), where("blockerUid", "==", user.uid)),
+    (snapshot) => {
+      viewerBlocks = blockTracker.update("outgoing", snapshot.docs);
+      refreshViewerBlocks();
+    },
+    () => {
+      viewerBlocks = blockTracker.fail("outgoing");
+      refreshViewerBlocks();
+      setStatus("Could not load block preferences.", true);
+    }
+  ));
 
-  listeners.push(onSnapshot(collection(db, "roomMessages"), (snapshot) => {
+  listeners.push(listenForSession(
+    query(collection(db, "blocks"), where("blockedUid", "==", user.uid)),
+    (snapshot) => {
+      viewerBlocks = blockTracker.update("incoming", snapshot.docs);
+      refreshViewerBlocks();
+    },
+    () => {
+      viewerBlocks = blockTracker.fail("incoming");
+      refreshViewerBlocks();
+      setStatus("Could not load block preferences.", true);
+    }
+  ));
+
+  listeners.push(listenForSession(query(collection(db, "roomMessages"), where("moderationState", "==", "visible")), (snapshot) => {
     roomMessages = snapshot.docs;
     renderNotifications();
   }));
 
-  listeners.push(onSnapshot(
+  listeners.push(listenForSession(
     query(collection(db, "reveals"), where("toId", "==", user.uid)),
     (snapshot) => {
       reveals = snapshot.docs;
@@ -1169,8 +1720,7 @@ form.addEventListener("submit", async (event) => {
   const submit = form.querySelector("button[type='submit']");
   submit.disabled = true;
   try {
-    await addDoc(collection(db, "posts"), {
-      type: "original",
+    await addDoc(collection(db, "posts"), buildOriginalPost({
       authorId: currentUser.uid,
       username: profileUsername,
       content: postContent,
@@ -1179,11 +1729,12 @@ form.addEventListener("submit", async (event) => {
       options: category === "Poll" ? options : [],
       expiresAt: expiryHours ? Timestamp.fromMillis(Date.now() + expiryHours * 3600000) : null,
       createdAt: serverTimestamp()
-    });
+    }));
     content.value = "";
     pendingPostImage = "";
     postImageInput.value = "";
     postImagePreviewWrap.hidden = true;
+    setPhotoSelected(false);
     postCategory.value = "Post";
     postExpiry.value = "0";
     pollOptions.hidden = true;
@@ -1197,7 +1748,16 @@ form.addEventListener("submit", async (event) => {
 document.getElementById("sign-out").addEventListener("click", async () => {
   await exitAuthenticatedSession({
     user: currentUser,
-    stopListeners: () => listeners.forEach((unsubscribe) => unsubscribe()),
+    stopListeners: invalidateTimelineSession,
     redirect: () => window.location.replace("index.html")
   });
 });
+
+addEventListener("pagehide", (event) => {
+  clearNotificationExpiryTimer();
+  if (!event.persisted) {
+    sessionGeneration.invalidate();
+    stopTimelineResources();
+  }
+});
+addEventListener("pageshow", (event) => { if (event.persisted) renderNotifications(); });

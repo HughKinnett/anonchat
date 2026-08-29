@@ -13,8 +13,22 @@
       "package.json",
       "package-lock.json",
       "scripts/**",
-      "**/.*",
-      "**/node_modules/**"
+      "docs/**",
+      ".git/**",
+      ".github/**",
+      ".worktrees/**",
+      ".superpowers/**",
+      ".npm-cache/**",
+      ".firebase/**",
+      "node_modules/**",
+      "**/node_modules/**",
+      "*.md",
+      "gha-creds-*.json",
+      "**/gha-creds-*.json",
+      "**/service-account*.json",
+      "**/serviceAccount*.json",
+      "**/*.pem",
+      "**/*.key"
     ],
     "headers": [
       {

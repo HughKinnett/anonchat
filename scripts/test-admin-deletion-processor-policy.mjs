@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {
   BATCH_LIMIT, COMPLETION_RETENTION_MS, PAGE_LIMIT, cleanupQueries, completionMarker,
   fixedErrorCode, isClaimableJob, isExactCompletionMarker, isExactQueuedJob,
-  isProtectedAdministrator, isTrustedRequester, isValidAccountStats
+  isExactSelfQueuedJob, isProtectedAdministrator, isTrustedRequester, isValidAccountStats
 } from "../admin-deletion-processor-policy.mjs";
 const instant = (milliseconds) => ({ toMillis: () => milliseconds });
 const requestedAt = instant(1_000);
@@ -11,6 +11,10 @@ assert.equal(PAGE_LIMIT, 200); assert.equal(BATCH_LIMIT, 400);
 assert.equal(isExactQueuedJob(queued, "target"), true);
 assert.equal(isExactQueuedJob({ ...queued, extra: true }, "target"), false);
 assert.equal(isExactQueuedJob({ ...queued, targetUid: "other" }, "target"), false);
+const selfQueued = { targetUid: "target", requesterUid: "target", requestedAt, requestType: "self", status: "queued" };
+assert.equal(isExactSelfQueuedJob(selfQueued, "target"), true);
+assert.equal(isExactSelfQueuedJob({ ...selfQueued, requesterUid: "other" }, "target"), false);
+assert.equal(isExactSelfQueuedJob({ ...selfQueued, extra: true }, "target"), false);
 assert.equal(isProtectedAdministrator("\u00a0 I_LOVE_YOU_H \ufeff"), true);
 assert.equal(isProtectedAdministrator("CyberCapone"), true);
 assert.equal(isProtectedAdministrator("ownerCyberCapone"), false,
@@ -37,13 +41,23 @@ for (const required of [
   "owned-posts", "reposts-of-target", "comments-by-target", "replies-by-target", "reactions-by-target",
   "votes-by-target", "timeline-votes-by-target", "follows-from-target", "follows-to-target", "direct-messages",
   "message-requests-from-target", "message-requests-to-target", "reveals-from-target", "reveals-to-target",
-  "owned-rooms", "room-memberships", "owned-circles", "circle-memberships", "preferences", "private-profile",
-  "reports-by-target", "reports-about-target", "blocks-by-target", "blocks-of-target", "push-subscriptions",
-  "notification-events", "notification-deliveries", "self-deletion-request"
+  "owned-rooms", "room-memberships", "room-messages", "owned-circles", "circle-memberships", "preferences", "private-profile",
+  "report-intakes-by-target", "report-intakes-about-target", "case-reports-by-target", "moderation-cases-about-target",
+  "report-receipts",
+  "blocks-by-target", "blocks-of-target", "push-subscriptions",
+  "notification-events", "notification-deliveries"
 ]) assert.ok(queries.some((entry) => entry.name === required), `missing ${required}`);
+assert.deepEqual(queries.find((entry) => entry.name === "report-receipts")?.subcollections,
+  ["post", "communityPost", "roomMessage", "user"], "private receipt kinds are explicit beneath the virtual reporter root");
 assert.ok(queries.some((entry) => entry.cascade === "post"));
 assert.ok(queries.some((entry) => entry.cascade === "circle"));
 assert.ok(queries.some((entry) => entry.cascade === "room"));
+assert.ok(queries.some((entry) => entry.cascade === "moderation-case"));
+assert.equal(queries.find((entry) => entry.name === "comments-by-target").cascade, "document");
+assert.equal(queries.find((entry) => entry.name === "replies-by-target").cascade, "document");
+assert.equal(queries.find((entry) => entry.name === "room-messages").cascade, "roomMessage");
+assert.deepEqual(queries.filter((entry) => entry.collection === "blocks").map((entry) => entry.field), ["blockerUid", "blockedUid"]);
+assert.ok(queries.some((entry) => entry.cascade === "document"));
 assert.equal(
   queries.some((entry) => ["username", "originalUsername"].includes(entry.field)),
   false,
@@ -56,6 +70,7 @@ assert.equal(
 );
 assert.equal(fixedErrorCode({ code: "auth/user-not-found" }), "AUTH_NOT_FOUND");
 assert.equal(fixedErrorCode({ code: "lease-lost", message: "secret-uid" }), "LEASE_LOST");
+assert.equal(fixedErrorCode({ code: "unsettled-intake" }), "UNSETTLED_INTAKE");
 assert.equal(fixedErrorCode(new Error("secret-uid")), "PROCESSOR_FAILURE");
 assert.equal(isValidAccountStats({ count: 5, limit: 500, updatedAt: instant(1_000) }), true);
 assert.equal(isValidAccountStats({ count: 0, limit: 500, updatedAt: instant(1_000) }), false);

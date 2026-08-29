@@ -52,6 +52,14 @@ try {
     fromId: "user-b", toId: "user-a", status: "pending", createdAt: serverTimestamp(), injected: true
   }));
 
+  await testEnv.withSecurityRulesDisabled(async (context) => setDoc(
+    doc(context.firestore(), "blocks", "user-a_user-b"),
+    { blockerUid: "user-a", blockedUid: "user-b", createdAt: new Date(0) }
+  ));
+  await assertFails(updateDoc(doc(userB, requestPath), {
+    fromId: "user-b", toId: "user-a", status: "pending", createdAt: serverTimestamp()
+  }));
+
   await testEnv.clearFirestore();
   await seed({ ...declinedRequest, status: "pending" });
   await assertSucceeds(updateDoc(doc(userB, requestPath), {

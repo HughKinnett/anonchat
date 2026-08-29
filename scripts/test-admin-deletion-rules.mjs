@@ -47,6 +47,13 @@ const queue = (firestore, options = {}) => {
   batch.set(doc(firestore, "adminDeletionJobs", options.jobId ?? targetUid), options.job ?? jobFields(targetUid, requesterUid, options.jobTimestamp ?? options.timestamp, options.jobStatus ?? options.status));
   return batch.commit();
 };
+const selfQueue = (firestore, uid = "member", username = "member", overrides = {}) => {
+  const timestamp = serverTimestamp();
+  const batch = writeBatch(firestore);
+  batch.set(doc(firestore, "accountDeletionRequests", uid), overrides.request ?? { uid, username, createdAt: timestamp });
+  batch.set(doc(firestore, "adminDeletionJobs", uid), overrides.job ?? { targetUid: uid, requesterUid: uid, requestedAt: timestamp, requestType: "self", status: "queued" });
+  return batch.commit();
+};
 
 try {
   await seed();
@@ -55,6 +62,31 @@ try {
   const formerHandle = testEnv.authenticatedContext("former-handle").firestore();
   const member = testEnv.authenticatedContext("member").firestore();
   const target = testEnv.authenticatedContext("target").firestore();
+
+  await assertSucceeds(selfQueue(member));
+  await assertSucceeds(getDoc(doc(member, "accountDeletionRequests", "member")));
+  await assertSucceeds(getDoc(doc(member, "adminDeletionJobs", "member")));
+  await assertFails(setDoc(doc(member, "posts", "after-self-lock"), {
+    type: "original", authorId: "member", username: "member", content: "blocked", imageData: "", category: "Post", options: [], expiresAt: null, moderationState: "visible", createdAt: serverTimestamp()
+  }));
+  await assertFails(deleteDoc(doc(member, "adminDeletionJobs", "member")));
+
+  await testEnv.clearFirestore(); await seed();
+  const memberAgain = testEnv.authenticatedContext("member").firestore();
+  await assertFails(selfQueue(memberAgain, "target", "target"));
+  await assertFails(selfQueue(memberAgain, "member", "member", { job: { targetUid: "member", requesterUid: "member", requestedAt: serverTimestamp(), requestType: "admin", status: "queued" } }));
+  await assertFails(selfQueue(testEnv.authenticatedContext("protected-one").firestore(), "protected-one", "  I_LOVE_YOU_H  "));
+
+  await testEnv.clearFirestore(); await seed();
+  const legacyCreatedAt = new Date(1234);
+  await testEnv.withSecurityRulesDisabled(async (context) => setDoc(doc(context.firestore(), "accountDeletionRequests", "member"), {
+    uid: "member", username: "member", createdAt: legacyCreatedAt
+  }));
+  const legacyMember = testEnv.authenticatedContext("member").firestore();
+  await assertSucceeds(setDoc(doc(legacyMember, "adminDeletionJobs", "member"), {
+    targetUid: "member", requesterUid: "member", requestedAt: legacyCreatedAt, requestType: "self", status: "queued"
+  }));
+  await assertFails(deleteDoc(doc(legacyMember, "accountDeletionRequests", "member")), "a queued job keeps its validated request anchor immutable");
 
   await assertSucceeds(updateDoc(doc(adminTwo, "users", "target"), { banned: true }));
   await assertSucceeds(updateDoc(doc(adminTwo, "users", "target"), { banned: false }));

@@ -110,6 +110,10 @@
                 <option value="720">After 30 days</option>
               </select>
             </label>
+            <label class="photo-bubble" for="post-image-upload" aria-label="Add photo" aria-pressed="false" role="button" tabindex="0" title="Add photo">
+              <span aria-hidden="true">📷＋</span>
+            </label>
+            <input id="post-image-upload" type="file" accept="image/*" hidden>
           </div>
           <div id="poll-options" class="timeline-poll-options" hidden>
             <label>Poll choices<input class="poll-option" maxlength="80" placeholder="Choice 1"></label>
@@ -122,8 +126,6 @@
             <button id="remove-post-image" type="button" aria-label="Remove selected photo">Remove photo</button>
           </div>
           <div class="composer-footer">
-            <label class="photo-upload-button modern-photo-button" for="post-image-upload"><span class="photo-button-icon" aria-hidden="true">＋</span><span><strong>Add photo</strong><small>Upload from your device</small></span></label>
-            <input id="post-image-upload" type="file" accept="image/*" hidden>
             <span>500 characters max</span>
             <button class="primary-button" type="submit">Post</button>
           </div>

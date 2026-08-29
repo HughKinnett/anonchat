@@ -12,3 +12,4 @@
 .primary:disabled,.secondary:disabled{cursor:not-allowed}
 .primary[aria-busy=true],.secondary[aria-busy=true]{cursor:wait}
 @media(max-width:620px){.topbar{padding:10px 14px}.community-header-actions{gap:6px}.topbar .secondary{padding:9px 11px}}
+.message-report{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem;margin-top:.45rem}.message-report select,.message-report button{min-height:2.75rem}.message-report span{min-height:1.25rem}@media(max-width:520px){.message-report{align-items:stretch}.message-report select,.message-report button{flex:1 1 9rem}}

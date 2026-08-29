@@ -4,11 +4,17 @@ export const DELETION_WORKFLOW_PATH = ".github/workflows/process-admin-deletions
 export const DELETION_WORKFLOW_URL = "https://github.com/HughKinnett/anonchat/actions/workflows/process-admin-deletions.yml";
 export const DEPLOY_WORKFLOW_PATH = ".github/workflows/deploy-firebase.yml";
 export const RULES_WORKFLOW_PATH = ".github/workflows/firestore-rules-ci.yml";
+export const MODERATION_WORKFLOW_PATH = ".github/workflows/process-moderation.yml";
 
 const deletionCron = "*/5 * * * *";
 const secretReference = "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}";
 const credentialPathReference = "${{ steps.auth.outputs.credentials_file_path }}";
-const deployCommand = "npx --yes firebase-tools@15.28.1 deploy --project anonchatlogin --only \"firestore:rules,firestore:indexes,hosting\" --non-interactive";
+const deployIndexesCommand = "npx --no-install firebase deploy --project anonchatlogin --only firestore:indexes --non-interactive";
+const waitIndexesCommand = "npm run rollout:wait-indexes";
+const processRolloutCommand = "npm run rollout:process-moderation";
+const verifyRolloutCommand = "npm run rollout:verify";
+const deployRulesCommand = "npx --no-install firebase deploy --project anonchatlogin --only firestore:rules --non-interactive";
+const deployHostingCommand = "npx --no-install firebase deploy --project anonchatlogin --only hosting --non-interactive";
 const rulesPaths = [
   "firestore.rules",
   "firestore.indexes.json",
@@ -23,8 +29,12 @@ const rulesPaths = [
   "*.webmanifest",
   "scripts/**"
 ];
-const firestoreCiCommand = "npm run test:rules && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm test";
+const firestoreCiCommand = "npm run test:legal-signup && npm run test:moderation-client && npm run test:content-writer && npm run test:moderation-backfill && npm run test:moderation-indexes && npm run test:profile-render && npm run test:moderation-policy && npm run test:community-lifecycle && npm run test:timeline-query-compatibility && npm run test:viewer-block-policy && npm run test:viewer-block-surfaces && npm run test:rules && npm run test:moderation-rules && npm run test:block-rules && npm run test:timeline-query-rules && npm run test:room-expiry-rules && npm run test:moderation-processor && npm run test:moderation-firestore-integration && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm test";
+const workflowPolicyTestCommand = "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs && node scripts/test-production-rollout.mjs";
 const notificationTestCommand = "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes && node scripts/test-push-service-worker.mjs";
+const moderationProcessorTestCommand = "node scripts/test-moderation-processor-policy.mjs && node scripts/test-moderation-firestore-adapter.mjs && node scripts/test-moderation-processor.mjs";
+const moderationIntegrationTestCommand = "firebase emulators:exec --only firestore \"node scripts/test-moderation-firestore-integration.mjs\"";
+const moderationProcessCommand = "node scripts/moderation-processor.mjs";
 
 export const parseWorkflow = (source, label = "workflow") => {
   const document = parseDocument(source, { version: "1.2" });
@@ -124,6 +134,36 @@ export const validateDeletionWorkflow = (workflow) => {
   return errors;
 };
 
+export const validateModerationWorkflow = (workflow) => {
+  const errors = [];
+  exactlyKeys(errors, workflow, ["name", "on", "permissions", "concurrency", "jobs"], "moderation workflow");
+  exactly(errors, workflow.name, "Process moderation and room expiry", "moderation workflow name");
+  const triggers = workflowTriggers(workflow);
+  if (!sameKeys(triggers, ["schedule", "workflow_dispatch"])) errors.push("moderation workflow triggers must be schedule and workflow_dispatch only");
+  exactly(errors, triggers?.workflow_dispatch, null, "moderation workflow dispatch trigger");
+  if (!sameArray(triggers?.schedule?.map((entry) => entry?.cron), [deletionCron]) || !triggers?.schedule?.every((entry) => hasExactValues(entry, { cron: deletionCron }))) errors.push(`moderation workflow schedule must be ${deletionCron} with no extra keys`);
+  if (!hasReadOnlyPermissions(workflow.permissions)) errors.push("moderation workflow permissions must be contents: read only");
+  exactlyKeys(errors, workflow.concurrency, ["group", "cancel-in-progress"], "moderation workflow concurrency");
+  if (workflow.concurrency?.group !== "anonchat-moderation" || workflow.concurrency?.["cancel-in-progress"] !== false) errors.push("moderation workflow concurrency must preserve every queued run");
+  const job = workflowJob(workflow, "process", errors);
+  if (!sameKeys(workflow.jobs, ["process"])) errors.push("moderation workflow must contain the process job only");
+  exactlyKeys(errors, job, ["runs-on", "steps"], "moderation process job");
+  effectiveReadOnlyPermissions(errors, workflow, job, "moderation workflow");
+  exactly(errors, job["runs-on"], "ubuntu-latest", "moderation workflow runner");
+  const steps = jobSteps(job, errors, "jobs.process");
+  exactlyOrderedSteps(errors, steps, ["uses:actions/checkout@v4", "uses:actions/setup-node@v4", "run:npm ci", "uses:google-github-actions/auth@v3", "run:npm run moderation:process"], "moderation workflow steps");
+  const node = singleStep(errors, steps, "uses", "actions/setup-node@v4", "moderation Node setup");
+  const install = singleStep(errors, steps, "run", "npm ci", "moderation npm ci");
+  const auth = singleStep(errors, steps, "uses", "google-github-actions/auth@v3", "moderation Google authentication");
+  const processor = singleStep(errors, steps, "run", "npm run moderation:process", "moderation processor command");
+  validateStep(errors, steps[0], { uses: "actions/checkout@v4" }, "moderation checkout step");
+  validateStep(errors, node, { uses: "actions/setup-node@v4", with: { "node-version": "20" } }, "moderation Node step");
+  validateStep(errors, install, { run: "npm ci" }, "moderation install step");
+  validateStep(errors, auth, { id: "auth", uses: "google-github-actions/auth@v3", with: { credentials_json: secretReference } }, "moderation authentication step");
+  validateStep(errors, processor, { run: "npm run moderation:process", env: { GCLOUD_PROJECT: "anonchatlogin", GOOGLE_APPLICATION_CREDENTIALS: credentialPathReference } }, "moderation processor step");
+  return errors;
+};
+
 export const validateDeployWorkflow = (workflow) => {
   const errors = [];
   exactlyKeys(errors, workflow, ["name", "on", "permissions", "concurrency", "jobs"], "deploy workflow");
@@ -143,16 +183,24 @@ export const validateDeployWorkflow = (workflow) => {
 
   const job = workflowJob(workflow, "deploy", errors);
   if (!sameKeys(workflow.jobs, ["deploy"])) errors.push("deploy workflow must contain the deploy job only");
-  exactlyKeys(errors, job, ["name", "runs-on", "steps"], "deploy job");
-  exactly(errors, job.name, "Deploy Hosting, Firestore rules, and indexes", "deploy job name");
+  exactlyKeys(errors, job, ["name", "runs-on", "timeout-minutes", "steps"], "deploy job");
+  exactly(errors, job.name, "Stage Firebase production rollout", "deploy job name");
   exactly(errors, job["runs-on"], "ubuntu-latest", "deploy workflow runner");
+  exactly(errors, job["timeout-minutes"], 40, "deploy workflow timeout");
   effectiveReadOnlyPermissions(errors, workflow, job, "deploy workflow");
   const steps = jobSteps(job, errors, "jobs.deploy");
   exactlyOrderedSteps(errors, steps, [
     "uses:actions/checkout@v4",
     "uses:actions/setup-node@v4",
+    "run:npm ci",
     "uses:google-github-actions/auth@v3",
-    `run:${deployCommand}`
+    "uses:google-github-actions/setup-gcloud@v3",
+    `run:${deployIndexesCommand}`,
+    `run:${waitIndexesCommand}`,
+    `run:${processRolloutCommand}`,
+    `run:${verifyRolloutCommand}`,
+    `run:${deployRulesCommand}`,
+    `run:${deployHostingCommand}`
   ], "deploy workflow steps");
   validateStep(errors, steps[0], {
     name: "Check out repository",
@@ -164,14 +212,38 @@ export const validateDeployWorkflow = (workflow) => {
     with: { "node-version": "20" }
   }, "deploy Node step");
   validateStep(errors, steps[2], {
-    name: "Authenticate to Google Cloud",
-    uses: "google-github-actions/auth@v3",
-    with: { credentials_json: secretReference }
-  }, "deploy authentication step");
+    name: "Install trusted dependencies",
+    run: "npm ci"
+  }, "deploy install step");
   validateStep(errors, steps[3], {
-    name: "Deploy Firebase production",
-    run: deployCommand
-  }, "deploy command step");
+    name: "Authenticate to Google Cloud",
+    id: "auth",
+    uses: "google-github-actions/auth@v3",
+    with: { credentials_json: secretReference, create_credentials_file: true }
+  }, "deploy authentication step");
+  validateStep(errors, steps[4], {
+    name: "Set up Google Cloud CLI",
+    uses: "google-github-actions/setup-gcloud@v3"
+  }, "deploy Google Cloud CLI step");
+  validateStep(errors, steps[5], { name: "Deploy Firestore indexes", run: deployIndexesCommand }, "deploy index step");
+  validateStep(errors, steps[6], {
+    name: "Wait for required Firestore indexes",
+    run: waitIndexesCommand,
+    "timeout-minutes": 22,
+    env: { GCLOUD_PROJECT: "anonchatlogin", FIRESTORE_INDEX_TIMEOUT_SECONDS: "1200" }
+  }, "index readiness step");
+  validateStep(errors, steps[7], {
+    name: "Run moderation processor and backfills",
+    run: processRolloutCommand,
+    env: { GCLOUD_PROJECT: "anonchatlogin" }
+  }, "production moderation step");
+  validateStep(errors, steps[8], {
+    name: "Verify production rollout gates",
+    run: verifyRolloutCommand,
+    env: { GCLOUD_PROJECT: "anonchatlogin" }
+  }, "production gate verification step");
+  validateStep(errors, steps[9], { name: "Deploy Firestore rules", run: deployRulesCommand }, "deploy rules step");
+  validateStep(errors, steps[10], { name: "Deploy Firebase Hosting", run: deployHostingCommand }, "deploy Hosting step");
   return errors;
 };
 
@@ -215,18 +287,60 @@ export const validatePackageScripts = (packageJson) => {
   const errors = [];
   if (packageJson.devDependencies?.yaml !== "2.9.0") errors.push("yaml must be pinned to 2.9.0");
   if (packageJson.devDependencies?.["firebase-tools"] !== "13.35.1") errors.push("firebase-tools must remain pinned to 13.35.1");
-  exactly(errors, packageJson.scripts?.["test:workflow-policy"], "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs", "workflow policy package script");
+  exactly(errors, packageJson.scripts?.["test:workflow-policy"], workflowPolicyTestCommand, "workflow policy package script");
   exactly(errors, packageJson.scripts?.["test:notification"], notificationTestCommand, "notification test package script");
+  exactly(errors, packageJson.scripts?.["test:moderation-processor"], moderationProcessorTestCommand, "moderation processor test package script");
+  exactly(errors, packageJson.scripts?.["test:moderation-firestore-integration"], moderationIntegrationTestCommand, "moderation integration test package script");
+  exactly(errors, packageJson.scripts?.["moderation:process"], moderationProcessCommand, "moderation process package script");
+  exactly(errors, packageJson.scripts?.["test:community-lifecycle"], "node scripts/test-community-lifecycle.mjs", "community lifecycle test package script");
+  exactly(errors, packageJson.scripts?.["test:timeline-query-compatibility"], "node scripts/test-timeline-moderation-ui.mjs", "timeline query compatibility package script");
+  exactly(errors, packageJson.scripts?.["test:rollout-policy"], "node scripts/test-production-rollout.mjs", "rollout policy test package script");
+  exactly(errors, packageJson.scripts?.["rollout:wait-indexes"], "node scripts/wait-firestore-indexes.mjs", "index readiness package script");
+  exactly(errors, packageJson.scripts?.["rollout:process-moderation"], "node scripts/process-production-moderation.mjs", "production moderation package script");
+  exactly(errors, packageJson.scripts?.["rollout:verify"], "node scripts/verify-production-rollout.mjs", "production verification package script");
   exactly(errors, packageJson.scripts?.["test:firestore-ci"], firestoreCiCommand, "Firestore CI package script");
+  return errors;
+};
+
+const requiredHostingIgnores = [
+  "firebase.json", "firestore.rules", "firestore.indexes.json", "README.md",
+  "package.json", "package-lock.json", "scripts/**", "docs/**", ".git/**",
+  ".github/**", ".worktrees/**", ".superpowers/**", ".npm-cache/**",
+  ".firebase/**", "node_modules/**", "**/node_modules/**",
+  "gha-creds-*.json", "**/gha-creds-*.json",
+  "**/service-account*.json", "**/serviceAccount*.json", "**/*.pem", "**/*.key"
+];
+
+export const validateHostingConfig = (firebaseJson) => {
+  const errors = [];
+  const hosting = firebaseJson?.hosting;
+  if (!hosting || typeof hosting !== "object" || Array.isArray(hosting)) {
+    errors.push("Firebase Hosting configuration must exist");
+    return errors;
+  }
+  if (hosting.public !== ".") errors.push("Firebase Hosting public directory must remain the app root");
+  if (!Array.isArray(hosting.ignore)) {
+    errors.push("Firebase Hosting ignore list must be an array");
+    return errors;
+  }
+  for (const path of requiredHostingIgnores) {
+    if (!hosting.ignore.includes(path)) errors.push(`Firebase Hosting must ignore ${path}`);
+  }
+  if (hosting.ignore.some((path) => path === "**/.*" || path === ".well-known/**" || path.startsWith(".well-known/"))) {
+    errors.push("Firebase Hosting must allow .well-known Android asset links");
+  }
   return errors;
 };
 
 export const workflowPolicy = {
   deletionCron,
-  deployCommand,
+  deployIndexesCommand,
+  deployRulesCommand,
+  deployHostingCommand,
   rulesPaths,
   firestoreCiCommand,
   notificationTestCommand,
   secretReference,
-  credentialPathReference
+  credentialPathReference,
+  moderationWorkflowPath: MODERATION_WORKFLOW_PATH
 };

@@ -31,6 +31,8 @@ service cloud.firestore {
 
     function contentAvailableAfter(documentPath) {
       return existsAfter(/databases/$(database)/documents/$(documentPath))
+        && getAfter(/databases/$(database)/documents/$(documentPath)).data
+          .get('moderationState', 'visible') != 'hidden'
         && linkedContentAvailableAfter(
           getAfter(/databases/$(database)/documents/$(documentPath)).data
         );
@@ -49,10 +51,14 @@ service cloud.firestore {
 
     function postAvailableAfter(postId) {
       return (existsAfter(/databases/$(database)/documents/posts/$(postId))
+          && getAfter(/databases/$(database)/documents/posts/$(postId)).data
+            .get('moderationState', 'visible') != 'hidden'
           && linkedContentAvailableAfter(
             getAfter(/databases/$(database)/documents/posts/$(postId)).data
           ))
         || (existsAfter(/databases/$(database)/documents/communityPosts/$(postId))
+          && getAfter(/databases/$(database)/documents/communityPosts/$(postId)).data
+            .get('moderationState', 'visible') != 'hidden'
           && linkedContentAvailableAfter(
             getAfter(/databases/$(database)/documents/communityPosts/$(postId)).data
           ));
@@ -65,7 +71,10 @@ service cloud.firestore {
 
     function roomAvailableAfter(roomId) {
       return existsAfter(/databases/$(database)/documents/rooms/$(roomId))
-        && accountAvailableAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId);
+        && accountAvailableAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId)
+        && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data
+          .get('moderationState', 'visible') != 'hidden'
+        && roomIsActive(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data);
     }
 
     function linkedCircleAvailableAfter(circleId) {
@@ -75,7 +84,10 @@ service cloud.firestore {
 
     function linkedRoomAvailableAfter(roomId) {
       return existsAfter(/databases/$(database)/documents/rooms/$(roomId))
-        && hasNoDeletionBarrierAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId);
+        && hasNoDeletionBarrierAfter(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerId)
+        && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data
+          .get('moderationState', 'visible') != 'hidden'
+        && roomIsActive(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data);
     }
 
     function isAdmin() {
@@ -85,6 +97,205 @@ service cloud.firestore {
         && hasMatchingAdminReservation(
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data
         );
+    }
+
+    function blockPath(left, right) {
+      return /databases/$(database)/documents/blocks/$(left + '_' + right);
+    }
+
+    function pairIsBlocked(left, right) {
+      return exists(blockPath(left, right)) || exists(blockPath(right, left));
+    }
+
+    function visibleOrAdmin() {
+      return isAdmin() || resource.data.get('moderationState', 'visible') != 'hidden';
+    }
+
+    function visibleContentOrAdmin(documentPath) {
+      return isAdmin()
+        || (exists(/databases/$(database)/documents/$(documentPath))
+          && get(/databases/$(database)/documents/$(documentPath)).data
+            .get('moderationState', 'visible') != 'hidden');
+    }
+
+    function communityVoteVisibleOrAdmin() {
+      return isAdmin()
+        || (exists(/databases/$(database)/documents/communityPosts/$(resource.data.postId))
+          && get(/databases/$(database)/documents/communityPosts/$(resource.data.postId)).data
+            .get('moderationState', 'visible') != 'hidden');
+    }
+
+    function roomIsActive(room) {
+      return room.expiresAt is timestamp && room.expiresAt > request.time;
+    }
+
+    function validRoomExpiry() {
+      return request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt >= request.time + duration.value(23, 'h')
+          + duration.value(55, 'm')
+        && request.resource.data.expiresAt <= request.time + duration.value(24, 'h')
+          + duration.value(5, 'm');
+    }
+
+    function validRoomMessageExpiry(roomId) {
+      return (getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.keys()
+          .hasAny(['expiresAt'])
+          && request.resource.data.expiresAt
+            == getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.expiresAt)
+        || (!getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.keys()
+          .hasAny(['expiresAt'])
+          && !request.resource.data.keys().hasAny(['expiresAt']));
+    }
+
+    function validReportTarget() {
+      return (request.resource.data.targetKind == 'post'
+          && request.resource.data.targetCollection == 'posts'
+          && request.resource.data.targetPath == 'posts/' + request.resource.data.targetId
+          && exists(/databases/$(database)/documents/posts/$(request.resource.data.targetId))
+          && get(/databases/$(database)/documents/posts/$(request.resource.data.targetId)).data.authorId
+            == request.resource.data.reportedUserId)
+        || (request.resource.data.targetKind == 'communityPost'
+          && request.resource.data.targetCollection == 'communityPosts'
+          && request.resource.data.targetPath == 'communityPosts/' + request.resource.data.targetId
+          && exists(/databases/$(database)/documents/communityPosts/$(request.resource.data.targetId))
+          && get(/databases/$(database)/documents/communityPosts/$(request.resource.data.targetId)).data.authorId
+            == request.resource.data.reportedUserId)
+        || (request.resource.data.targetKind == 'roomMessage'
+          && request.resource.data.targetCollection == 'roomMessages'
+          && request.resource.data.targetPath == 'roomMessages/' + request.resource.data.targetId
+          && exists(/databases/$(database)/documents/roomMessages/$(request.resource.data.targetId))
+          && get(/databases/$(database)/documents/roomMessages/$(request.resource.data.targetId)).data.senderId
+            == request.resource.data.reportedUserId
+          && exists(/databases/$(database)/documents/rooms/$(get(/databases/$(database)/documents/roomMessages/$(request.resource.data.targetId)).data.roomId))
+          && get(/databases/$(database)/documents/rooms/$(get(/databases/$(database)/documents/roomMessages/$(request.resource.data.targetId)).data.roomId)).data.get('cleanupState', 'open') != 'closing')
+        || (request.resource.data.targetKind == 'user'
+          && request.resource.data.targetCollection == 'users'
+          && request.resource.data.targetId == request.resource.data.reportedUserId
+          && request.resource.data.targetPath == 'users/' + request.resource.data.targetId
+          && exists(/databases/$(database)/documents/users/$(request.resource.data.targetId)));
+    }
+
+    function reportReceiptTargetExists(targetKind, targetId) {
+      return (targetKind == 'post'
+          && exists(/databases/$(database)/documents/posts/$(targetId)))
+        || (targetKind == 'communityPost'
+          && exists(/databases/$(database)/documents/communityPosts/$(targetId)))
+        || (targetKind == 'roomMessage'
+          && exists(/databases/$(database)/documents/roomMessages/$(targetId)))
+        || (targetKind == 'user'
+          && exists(/databases/$(database)/documents/users/$(targetId)));
+    }
+
+    function exactReceiptAfterIntake() {
+      let receipt = getAfter(/databases/$(database)/documents/reportReceipts/$(request.auth.uid)/$(request.resource.data.targetKind)/$(request.resource.data.targetId));
+      return !exists(/databases/$(database)/documents/reportReceipts/$(request.auth.uid)/$(request.resource.data.targetKind)/$(request.resource.data.targetId))
+        && existsAfter(/databases/$(database)/documents/reportReceipts/$(request.auth.uid)/$(request.resource.data.targetKind)/$(request.resource.data.targetId))
+        && receipt.data.keys().hasOnly(['reporterUid', 'targetKind', 'targetId', 'createdAt'])
+        && receipt.data.reporterUid == request.auth.uid
+        && receipt.data.targetKind == request.resource.data.targetKind
+        && receipt.data.targetId == request.resource.data.targetId
+        && receipt.data.createdAt == request.resource.data.createdAt;
+    }
+
+    function exactIntakeAfterReceipt(reporterUid, targetKind, targetId) {
+      let intake = getAfter(/databases/$(database)/documents/reportIntakes/$(reporterUid + '_' + targetKind + '_' + targetId));
+      return !exists(/databases/$(database)/documents/reportIntakes/$(reporterUid + '_' + targetKind + '_' + targetId))
+        && existsAfter(/databases/$(database)/documents/reportIntakes/$(reporterUid + '_' + targetKind + '_' + targetId))
+        && intake.data.reporterUid == reporterUid
+        && intake.data.targetKind == targetKind
+        && intake.data.targetId == targetId
+        && intake.data.createdAt == request.resource.data.createdAt;
+    }
+
+    function validReportIntake(reportId) {
+      return request.resource.data.keys().hasOnly([
+          'reporterUid', 'targetKind', 'targetCollection', 'targetId', 'targetPath',
+          'reportedUserId', 'reason', 'createdAt', 'status'
+        ])
+        && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.targetId is string
+        && request.resource.data.targetId.size() > 0
+        && !request.resource.data.targetId.matches('.*[/].*')
+        && request.resource.data.reportedUserId is string
+        && request.resource.data.reportedUserId.size() > 0
+        && request.resource.data.reporterUid != request.resource.data.reportedUserId
+        && reportId == request.auth.uid + '_' + request.resource.data.targetKind + '_'
+          + request.resource.data.targetId
+        && request.resource.data.targetKind in ['post', 'communityPost', 'roomMessage', 'user']
+        && request.resource.data.reason in [
+          'harassment', 'hate-threats', 'sexual-content', 'spam-scam',
+          'privacy-impersonation', 'other'
+        ]
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.status == 'queued'
+        && validReportTarget();
+    }
+
+    function validQueuedModerationAction(caseId) {
+      return existsAfter(/databases/$(database)/documents/moderationCases/$(caseId))
+        && request.resource.data.keys().hasOnly([
+          'action', 'requestedAt', 'requestedBy', 'status'
+        ])
+        && request.resource.data.action in ['restore', 'deleteMaterial']
+        && request.resource.data.requestedAt == request.time
+        && request.resource.data.requestedBy == request.auth.uid
+        && request.resource.data.status == 'queued';
+    }
+
+    function validAdminDeletionCase(caseId) {
+      return isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'targetKind', 'targetCollection', 'targetId', 'targetPath', 'reportedUserId',
+          'snapshot', 'status', 'reportCount', 'reasonTotals', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.targetKind in ['post', 'communityPost']
+        && caseId == request.resource.data.targetKind + '_' + request.resource.data.targetId
+        && request.resource.data.targetCollection == (request.resource.data.targetKind == 'post' ? 'posts' : 'communityPosts')
+        && request.resource.data.targetPath == request.resource.data.targetCollection + '/' + request.resource.data.targetId
+        && exists(/databases/$(database)/documents/$(request.resource.data.targetCollection)/$(request.resource.data.targetId))
+        && get(/databases/$(database)/documents/$(request.resource.data.targetCollection)/$(request.resource.data.targetId)).data.authorId
+          == request.resource.data.reportedUserId
+        && request.resource.data.snapshot.keys().hasOnly(['kind'])
+        && request.resource.data.snapshot.kind == 'queuedAdminDeletion'
+        && request.resource.data.status == 'deleteQueued'
+        && request.resource.data.reportCount == 0
+        && request.resource.data.reasonTotals == {}
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/moderationActions/$(caseId))
+        && getAfter(/databases/$(database)/documents/moderationActions/$(caseId)).data.action == 'deleteMaterial'
+        && getAfter(/databases/$(database)/documents/moderationActions/$(caseId)).data.requestedBy == request.auth.uid
+        && getAfter(/databases/$(database)/documents/moderationActions/$(caseId)).data.requestedAt == request.time
+        && getAfter(/databases/$(database)/documents/moderationActions/$(caseId)).data.status == 'queued';
+    }
+
+    function validTerminalModerationActionRetry(caseId) {
+      return exists(/databases/$(database)/documents/moderationCases/$(caseId))
+        && resource.data.status in ['failed', 'terminal']
+        && resource.data.attempts is int
+        && resource.data.attempts >= 8
+        && request.resource.data.keys().hasOnly([
+          'action', 'requestedAt', 'requestedBy', 'status'
+        ])
+        && request.resource.data.action == resource.data.action
+        && request.resource.data.requestedAt == request.time
+        && request.resource.data.requestedBy == resource.data.requestedBy
+        && request.resource.data.status == 'queued';
+    }
+
+    function validLegacyRoomAction() {
+      return request.resource.data.keys().hasOnly([
+          'roomId', 'action', 'requestedAt', 'requestedBy', 'status'
+        ])
+        && request.resource.data.roomId is string
+        && request.resource.data.roomId.size() > 0
+        && !request.resource.data.roomId.matches('.*[/].*')
+        && request.resource.data.action in ['retryCleanup', 'approveCleanup', 'release']
+        && request.resource.data.requestedAt == request.time
+        && request.resource.data.requestedBy == request.auth.uid
+        && request.resource.data.status == 'queued'
+        && exists(/databases/$(database)/documents/legacyRoomQuarantine/$(request.resource.data.roomId))
+        && get(/databases/$(database)/documents/legacyRoomQuarantine/$(request.resource.data.roomId)).data.status == 'manualReview';
     }
 
     function isProtectedAdministrator(username) {
@@ -119,6 +330,16 @@ service cloud.firestore {
         && job.targetUid == targetUid
         && job.requesterUid == request.auth.uid
         && job.requestedAt == request.time
+        && job.status == 'queued';
+    }
+
+    function matchingSelfDeletionQueueJob(job, targetUid, requestedAt) {
+      return job.keys().hasOnly(['targetUid', 'requesterUid', 'requestedAt', 'requestType', 'status'])
+        && targetUid == request.auth.uid
+        && job.targetUid == targetUid
+        && job.requesterUid == targetUid
+        && job.requestedAt == requestedAt
+        && job.requestType == 'self'
         && job.status == 'queued';
     }
 
@@ -168,7 +389,8 @@ service cloud.firestore {
     }
 
     function selfDeletingPushUser() {
-      return activeUser()
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
     }
 
@@ -204,7 +426,7 @@ service cloud.firestore {
     }
 
     function validOriginalPost() {
-      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'imageData', 'category', 'options', 'expiresAt', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'imageData', 'category', 'options', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.type == 'original'
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
@@ -220,18 +442,20 @@ service cloud.firestore {
           || request.resource.data.get('options', []).size() >= 2)
         && (request.resource.data.get('expiresAt', null) == null
           || (request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt > request.time))
+        && request.resource.data.moderationState == 'visible'
         && request.resource.data.createdAt == request.time;
     }
 
     function validRepost(postId) {
       let original = getAfter(/databases/$(database)/documents/posts/$(request.resource.data.originalPostId));
       return request.resource.data.keys().hasOnly([
-          'type', 'authorId', 'username', 'originalPostId',
-          'originalAuthorId', 'originalUsername', 'content', 'imageData', 'createdAt'
+          'type', 'authorId', 'username', 'sourceCollection', 'originalPostId',
+          'originalAuthorId', 'originalUsername', 'content', 'imageData', 'moderationState', 'createdAt'
         ])
         && request.resource.data.type == 'repost'
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
+        && request.resource.data.sourceCollection == 'posts'
         && postId == 'repost_' + request.auth.uid + '_' + request.resource.data.originalPostId
         && original.data.type == 'original'
         && request.resource.data.originalAuthorId == original.data.authorId
@@ -239,6 +463,7 @@ service cloud.firestore {
         && accountAvailableAfter(original.data.authorId)
         && request.resource.data.content == original.data.content
         && request.resource.data.get('imageData', '') == original.data.get('imageData', '')
+        && request.resource.data.moderationState == 'visible'
         && request.resource.data.createdAt == request.time;
     }
 
@@ -285,6 +510,87 @@ service cloud.firestore {
 
     match /system/notificationProcessor {
       allow read, create, update, delete: if false;
+    }
+
+    match /system/moderationProcessor {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /reportIntakes/{reportId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
+      allow create: if activeUserAfter()
+        && validReportIntake(reportId)
+        && exactReceiptAfterIntake();
+      allow update, delete: if false;
+    }
+
+    match /reportReceipts/{reporterUid}/{targetKind}/{targetId} {
+      allow get: if signedIn()
+        && reporterUid == request.auth.uid
+        && targetKind in ['post', 'communityPost', 'roomMessage', 'user']
+        && reportReceiptTargetExists(targetKind, targetId);
+      allow list: if false;
+      allow create: if activeUserAfter()
+        && reporterUid == request.auth.uid
+        && targetKind in ['post', 'communityPost', 'roomMessage', 'user']
+        && request.resource.data.keys().hasOnly(['reporterUid', 'targetKind', 'targetId', 'createdAt'])
+        && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.targetKind == targetKind
+        && request.resource.data.targetId == targetId
+        && request.resource.data.createdAt == request.time
+        && exactIntakeAfterReceipt(reporterUid, targetKind, targetId);
+      allow update, delete: if false;
+    }
+
+    match /moderationCases/{caseId} {
+      allow read: if isAdmin();
+      allow create: if validAdminDeletionCase(caseId);
+      allow update, delete: if false;
+
+      match /reports/{reportId} {
+        allow read: if isAdmin();
+        allow create, update, delete: if false;
+      }
+
+      match /evidence/{evidenceId} {
+        allow read: if isAdmin();
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /moderationActions/{caseId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && validQueuedModerationAction(caseId);
+      allow update: if isAdmin() && validTerminalModerationActionRetry(caseId);
+      allow delete: if false;
+    }
+
+    match /legacyRoomQuarantine/{roomId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /legacyRoomActions/{actionId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && validLegacyRoomAction();
+      allow update, delete: if false;
+    }
+
+    match /blocks/{blockId} {
+      allow read: if isAdmin() || (signedIn()
+        && (resource.data.blockerUid == request.auth.uid
+          || resource.data.blockedUid == request.auth.uid));
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['blockerUid', 'blockedUid', 'createdAt'])
+        && request.resource.data.blockerUid == request.auth.uid
+        && request.resource.data.blockedUid is string
+        && request.resource.data.blockedUid != request.auth.uid
+        && accountAvailableAfter(request.resource.data.blockedUid)
+        && blockId == request.auth.uid + '_' + request.resource.data.blockedUid
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.blockerUid == request.auth.uid;
     }
 
     match /pageViews/{day} {
@@ -413,8 +719,8 @@ service cloud.firestore {
     }
 
     match /adminDeletionJobs/{targetUid} {
-      allow read: if isAdmin();
-      allow create: if isAdmin()
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == targetUid && resource.data.get('requestType', '') == 'self');
+      allow create: if (isAdmin()
         && exists(/databases/$(database)/documents/users/$(targetUid))
         && !isProtectedAdministrator(
           get(/databases/$(database)/documents/users/$(targetUid)).data.username
@@ -436,21 +742,45 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.adminDeletionRequestedBy
           == request.auth.uid
         && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.adminDeletionStatus
-          == 'queued';
+          == 'queued')
+        || (signedIn()
+          && request.auth.uid == targetUid
+          && exists(/databases/$(database)/documents/users/$(targetUid))
+          && !isProtectedAdministrator(get(/databases/$(database)/documents/users/$(targetUid)).data.username)
+          && !exists(/databases/$(database)/documents/adminDeletionJobs/$(targetUid))
+          && existsAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid))
+          && getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.keys()
+            .hasOnly(['uid', 'username', 'createdAt'])
+          && getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.uid == targetUid
+          && getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.username
+            == get(/databases/$(database)/documents/users/$(targetUid)).data.username
+          && getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.createdAt is timestamp
+          && matchingSelfDeletionQueueJob(
+            request.resource.data,
+            targetUid,
+            getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.createdAt
+          ));
       allow update, delete: if false;
     }
 
     match /accountDeletionRequests/{userId} {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
-      allow create: if activeUserAfter()
+      allow create: if activeUser()
         && request.auth.uid == userId
         && !isProtectedAdministrator(currentUsername())
         && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username == currentUsername()
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId))
+        && matchingSelfDeletionQueueJob(
+          getAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId)).data,
+          userId,
+          request.time
+        );
       allow update: if false;
-      allow delete: if signedIn() && request.auth.uid == userId;
+      allow delete: if signedIn() && request.auth.uid == userId
+        && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId));
     }
 
     match /follows/{followId} {
@@ -461,6 +791,7 @@ service cloud.firestore {
         && request.resource.data.followingId is string
         && request.resource.data.followingId != request.auth.uid
         && accountAvailableAfter(request.resource.data.followingId)
+        && !pairIsBlocked(request.auth.uid, request.resource.data.followingId)
         && followId == request.auth.uid + '_' + request.resource.data.followingId
         && request.resource.data.createdAt == request.time;
       allow update: if false;
@@ -490,7 +821,7 @@ service cloud.firestore {
     }
 
     match /{documentPath=**}/comments/{commentId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && visibleContentOrAdmin(documentPath);
       allow create: if activeUserAfter()
         && contentAvailableAfter(documentPath)
         && request.resource.data.keys().hasOnly(['uid', 'username', 'text', 'createdAt'])
@@ -505,7 +836,7 @@ service cloud.firestore {
     }
 
     match /{documentPath=**}/reactions/{reactionId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && visibleContentOrAdmin(documentPath);
       allow create: if activeUserAfter()
         && contentAvailableAfter(documentPath)
         && reactionId == request.auth.uid
@@ -528,14 +859,16 @@ service cloud.firestore {
     }
 
     function acceptedChat(otherId) {
-      return (exists(/databases/$(database)/documents/messageRequests/$(request.auth.uid + '_' + otherId))
+      return !pairIsBlocked(request.auth.uid, otherId)
+        && ((exists(/databases/$(database)/documents/messageRequests/$(request.auth.uid + '_' + otherId))
           && get(/databases/$(database)/documents/messageRequests/$(request.auth.uid + '_' + otherId)).data.status == 'accepted')
         || (exists(/databases/$(database)/documents/messageRequests/$(otherId + '_' + request.auth.uid))
-          && get(/databases/$(database)/documents/messageRequests/$(otherId + '_' + request.auth.uid)).data.status == 'accepted');
+          && get(/databases/$(database)/documents/messageRequests/$(otherId + '_' + request.auth.uid)).data.status == 'accepted'));
     }
 
     function mutualReveal(otherId) {
-      return exists(/databases/$(database)/documents/reveals/$(request.auth.uid + '_' + otherId))
+      return !pairIsBlocked(request.auth.uid, otherId)
+        && exists(/databases/$(database)/documents/reveals/$(request.auth.uid + '_' + otherId))
         && exists(/databases/$(database)/documents/reveals/$(otherId + '_' + request.auth.uid))
         && get(/databases/$(database)/documents/reveals/$(request.auth.uid + '_' + otherId)).data.status == 'accepted'
         && get(/databases/$(database)/documents/reveals/$(otherId + '_' + request.auth.uid)).data.status == 'accepted';
@@ -596,9 +929,9 @@ service cloud.firestore {
     }
 
     match /communityPosts/{postId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['authorId', 'username', 'content', 'category', 'circleId', 'options', 'expiresAt', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['authorId', 'username', 'content', 'category', 'circleId', 'options', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
         && request.resource.data.content is string
@@ -609,13 +942,14 @@ service cloud.firestore {
         && circleAvailableAfter(request.resource.data.circleId)
         && request.resource.data.options is list
         && request.resource.data.options.size() <= 4
+        && request.resource.data.moderationState == 'visible'
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
     match /communityVotes/{voteId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && communityVoteVisibleOrAdmin();
       allow create, update: if activeUserAfter()
         && postAvailableAfter(request.resource.data.postId)
         && voteId == request.resource.data.postId + '_' + request.auth.uid
@@ -629,18 +963,20 @@ service cloud.firestore {
     }
 
     match /rooms/{roomId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'createdAt', 'expiresAt', 'moderationState'])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 3
         && request.resource.data.name.size() <= 40
         && request.resource.data.topic is string
         && request.resource.data.topic.size() <= 100
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.moderationState == 'visible'
+        && validRoomExpiry();
       allow update: if false;
-      allow delete: if isAdmin() || (signedIn() && resource.data.ownerId == request.auth.uid);
+      allow delete: if false;
     }
 
     match /roomMembers/{memberId} {
@@ -650,6 +986,8 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['roomId', 'uid', 'joinedAt'])
         && request.resource.data.uid == request.auth.uid
         && roomAvailableAfter(request.resource.data.roomId)
+        && !pairIsBlocked(request.auth.uid,
+          getAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.ownerId)
         && request.resource.data.joinedAt == request.time;
       allow update: if activeUserAfter()
         && roomAvailableAfter(request.resource.data.roomId)
@@ -657,21 +995,27 @@ service cloud.firestore {
         && request.resource.data.roomId == resource.data.roomId
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinedAt'])
+        && !pairIsBlocked(request.auth.uid,
+          getAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.ownerId)
         && request.resource.data.joinedAt == request.time;
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
     match /roomMessages/{messageId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'text', 'expiresAt', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'text', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.senderId == request.auth.uid
         && roomAvailableAfter(request.resource.data.roomId)
+        && !pairIsBlocked(request.auth.uid,
+          getAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.ownerId)
         && request.resource.data.tempName is string
         && request.resource.data.tempName.size() <= 40
         && request.resource.data.text is string
         && request.resource.data.text.size() >= 1
         && request.resource.data.text.size() <= 280
+        && request.resource.data.moderationState == 'visible'
+        && validRoomMessageExpiry(request.resource.data.roomId)
         && request.resource.data.createdAt == request.time;
       allow update: if false;
       allow delete: if isAdmin() || (signedIn() && resource.data.senderId == request.auth.uid);
@@ -685,6 +1029,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['fromId', 'toId', 'status', 'createdAt'])
         && request.resource.data.fromId == request.auth.uid
         && request.resource.data.toId != request.auth.uid
+        && !pairIsBlocked(request.auth.uid, request.resource.data.toId)
         && request.resource.data.status == 'pending'
         && (requestId == request.resource.data.fromId + '_' + request.resource.data.toId
           || requestId == request.resource.data.toId + '_' + request.resource.data.fromId)
@@ -692,6 +1037,7 @@ service cloud.firestore {
       allow update: if activeUserAfter()
         && accountAvailableAfter(request.resource.data.fromId)
         && accountAvailableAfter(request.resource.data.toId)
+        && !pairIsBlocked(request.resource.data.fromId, request.resource.data.toId)
         && (
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
             && resource.data.toId == request.auth.uid
@@ -729,6 +1075,7 @@ service cloud.firestore {
         && accountAvailableAfter(request.resource.data.participants[1])
         && request.auth.uid in request.resource.data.participants
         && request.resource.data.senderId == request.auth.uid
+        && !pairIsBlocked(request.resource.data.participants[0], request.resource.data.participants[1])
         && acceptedChat(request.resource.data.participants[0] == request.auth.uid
           ? request.resource.data.participants[1] : request.resource.data.participants[0])
         && request.resource.data.text is string
@@ -746,6 +1093,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['fromId', 'toId', 'fields', 'status', 'createdAt'])
         && request.resource.data.fromId == request.auth.uid
         && accountAvailableAfter(request.resource.data.toId)
+        && !pairIsBlocked(request.auth.uid, request.resource.data.toId)
         && acceptedChat(request.resource.data.toId)
         && request.resource.data.fields.keys().hasOnly(['interests', 'region', 'ageRange'])
         && request.resource.data.status == 'pending'
@@ -754,6 +1102,7 @@ service cloud.firestore {
       allow update: if activeUserAfter()
         && accountAvailableAfter(resource.data.fromId)
         && accountAvailableAfter(resource.data.toId)
+        && !pairIsBlocked(resource.data.fromId, resource.data.toId)
         && resource.data.toId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
         && request.resource.data.status == 'accepted'
@@ -778,10 +1127,10 @@ service cloud.firestore {
     }
 
     match /posts/{postId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter() && (validOriginalPost() || validRepost(postId));
       allow update: if false;
-      allow delete: if (signedIn() && resource.data.authorId == request.auth.uid) || isAdmin();
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
   }
 }
