@@ -1013,12 +1013,15 @@ const renderPost = (postDoc) => {
     item.append(category);
   }
 
+  const interactionEntry = interactionSubscriptions.get(parent.path);
   const reactionDocs = postReactions(postDoc);
-  const interactionState = interactionParentLoadState(interactionSubscriptions.get(parent.path));
+  const interactionState = interactionParentLoadState(interactionEntry);
+  const reactionsReady = Boolean(interactionEntry?.ready?.reactions && interactionEntry?.ready?.viewerReaction);
+  const commentsReady = Boolean(interactionEntry?.ready?.comments);
   const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");
   const reactionsBar = document.createElement("div");
   reactionsBar.className = "reactions";
-  if (interactionState === "bounded") {
+  if (reactionsReady) {
     if (sourceCollection === "posts") {
       reactionsBar.append(
         reactionButton(parent, "heart", "❤️", reactionDocs, reactionsTruncated),
@@ -1093,7 +1096,7 @@ const renderPost = (postDoc) => {
   }
 
   let commentsSection;
-  if (interactionState === "bounded") {
+  if (commentsReady) {
     const commentDocs = postComments(postDoc);
     commentsSection = document.createElement("details");
   commentsSection.className = "comments-section";
@@ -1283,7 +1286,7 @@ const renderPost = (postDoc) => {
   item.append(time);
   if (poll.childElementCount) item.append(poll);
   if (reactionsBar.childElementCount) item.append(reactionsBar);
-  if (interactionState === "bounded") item.append(interactionSummary);
+  if (reactionsReady) item.append(interactionSummary);
   item.append(commentsSection, actions);
   return item;
 };
@@ -1329,16 +1332,16 @@ const queueInteractionRender = () => {
   queueMicrotask(() => {
     interactionRenderQueued = false;
     if (generation !== interactionGeneration) return;
-    const loadedEntries = [...interactionSubscriptions.values()]
-      .filter((entry) => interactionParentLoadState(entry) === "bounded");
+    const loadedEntries = [...interactionSubscriptions.values()];
     reactions = loadedEntries.flatMap((entry) => {
+      if (!entry.ready?.reactions) return [];
       if (!entry.viewerReaction) return entry.reactions;
       return [
         ...entry.reactions.filter((reaction) => reaction.ref.path !== entry.viewerReaction.ref.path),
         entry.viewerReaction
       ];
     });
-    comments = loadedEntries.flatMap((entry) => entry.comments);
+    comments = loadedEntries.flatMap((entry) => entry.ready?.comments ? entry.comments : []);
     renderFeed();
   });
 };
@@ -1368,8 +1371,6 @@ const startInteractionChildren = (entry) => {
     entry.childUnsubscribes.push(onSnapshot(
       query(
         collection(db, entry.parent.collection, entry.parent.id, kind),
-        orderBy("createdAt", "desc"),
-        orderBy(documentId(), "desc"),
         limit(MAX_INTERACTION_ITEMS_PER_PARENT)
       ),
       (snapshot) => {
