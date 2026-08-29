@@ -996,6 +996,38 @@ service cloud.firestore {
         || isAdmin();
     }
 
+    function acceptedConversationMessage(requestId, message) {
+      let conversation = get(/databases/$(database)/documents/messageRequests/$(requestId));
+      return exists(/databases/$(database)/documents/messageRequests/$(requestId))
+        && conversation.data.status == 'accepted'
+        && (requestId == conversation.data.fromId + '_' + conversation.data.toId
+          || requestId == conversation.data.toId + '_' + conversation.data.fromId)
+        && (conversation.data.fromId == request.auth.uid
+          || conversation.data.toId == request.auth.uid)
+        && !pairIsBlocked(conversation.data.fromId, conversation.data.toId)
+        && message.participants is list
+        && message.participants.size() == 2
+        && conversation.data.fromId in message.participants
+        && conversation.data.toId in message.participants
+        && message.senderId in message.participants;
+    }
+
+    function acceptedConversationMessageAfter(requestId, message) {
+      let conversation = getAfter(/databases/$(database)/documents/messageRequests/$(requestId));
+      return existsAfter(/databases/$(database)/documents/messageRequests/$(requestId))
+        && conversation.data.status == 'accepted'
+        && (requestId == conversation.data.fromId + '_' + conversation.data.toId
+          || requestId == conversation.data.toId + '_' + conversation.data.fromId)
+        && (conversation.data.fromId == request.auth.uid
+          || conversation.data.toId == request.auth.uid)
+        && !pairIsBlocked(conversation.data.fromId, conversation.data.toId)
+        && message.participants is list
+        && message.participants.size() == 2
+        && conversation.data.fromId in message.participants
+        && conversation.data.toId in message.participants
+        && message.senderId == request.auth.uid;
+    }
+
     function acceptedChat(otherId) {
       return !pairIsBlocked(request.auth.uid, otherId)
         && ((exists(/databases/$(database)/documents/messageRequests/$(request.auth.uid + '_' + otherId))
@@ -1216,6 +1248,29 @@ service cloud.firestore {
           || request.resource.data.respondedAt == request.time);
       allow delete: if signedIn()
         && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
+    }
+
+    match /messageRequests/{requestId}/messages/{messageId} {
+      allow read: if activeUser()
+        && acceptedConversationMessage(requestId, resource.data);
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly([
+          'participants', 'senderId', 'text', 'createdAt', 'expiresAt'
+        ])
+        && acceptedConversationMessageAfter(requestId, request.resource.data)
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 500
+        && request.resource.data.createdAt == request.time
+        && (!request.resource.data.keys().hasAny(['expiresAt'])
+          || (request.resource.data.expiresAt is timestamp
+            && request.resource.data.expiresAt >= request.time + duration.value(23, 'h')
+              + duration.value(55, 'm')
+            && request.resource.data.expiresAt <= request.time + duration.value(24, 'h')
+              + duration.value(5, 'm')));
+      allow update: if false;
+      allow delete: if signedIn()
+        && request.auth.uid in resource.data.participants;
     }
 
     match /directMessages/{messageId} {

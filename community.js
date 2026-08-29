@@ -694,7 +694,12 @@ $("direct-message-form").addEventListener("submit", async (event) => {
   }
   try {
     const disappear = $("direct-message-disappear").checked;
-    await addDoc(collection(db, "directMessages"), {
+    const acceptedRequest = requestFor(other);
+    if (!acceptedRequest || acceptedRequest.data().status !== "accepted") {
+      setStatus("This conversation request is no longer accepted.", true);
+      return;
+    }
+    await addDoc(collection(db, "messageRequests", acceptedRequest.id, "messages"), {
       participants: [state.user.uid, other].sort(),
       senderId: state.user.uid,
       text,
@@ -872,26 +877,29 @@ onAuthStateChanged(auth, async (user) => {
     render?.();
   }, () => setStatus("A community section could not load.", true));
   const syncDirectMessageListeners = () => {
-    const acceptedIds = new Set(state.requests.flatMap((request) => {
+    const acceptedRequests = new Map();
+    state.requests.forEach((request) => {
       const data = request.data();
-      if (data.status !== "accepted") return [];
-      if (data.fromId === user.uid) return [data.toId];
-      if (data.toId === user.uid) return [data.fromId];
-      return [];
-    }).filter((uid) => uid && !isBlockedUid(uid)));
+      if (data.status !== "accepted") return;
+      const otherId = data.fromId === user.uid
+        ? data.toId
+        : data.toId === user.uid
+          ? data.fromId
+          : "";
+      if (otherId && !isBlockedUid(otherId)) acceptedRequests.set(otherId, request.id);
+    });
 
     directMessageListeners.forEach((unsubscribe, otherId) => {
-      if (acceptedIds.has(otherId)) return;
+      if (acceptedRequests.has(otherId)) return;
       unsubscribe();
       directMessageListeners.delete(otherId);
       directMessageBuckets.delete(otherId);
     });
 
-    acceptedIds.forEach((otherId) => {
+    acceptedRequests.forEach((requestId, otherId) => {
       if (directMessageListeners.has(otherId)) return;
-      const pair = [user.uid, otherId].sort();
       const unsubscribe = onSnapshot(
-        query(collection(db, "directMessages"), where("participants", "==", pair)),
+        query(collection(db, "messageRequests", requestId, "messages"), orderBy("createdAt", "asc")),
         (snapshot) => {
           if (!sessionIsCurrent()) return;
           directMessageBuckets.set(otherId, snapshot.docs);

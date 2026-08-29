@@ -79,7 +79,7 @@ try {
   await testEnv.clearFirestore();
   await seed({ ...declinedRequest, status: "accepted" });
   await testEnv.withSecurityRulesDisabled(async (context) => setDoc(
-    doc(context.firestore(), "directMessages", "accepted-message"),
+    doc(context.firestore(), "messageRequests", "user-a_user-b", "messages", "accepted-message"),
     {
       participants: ["user-a", "user-b"],
       senderId: "user-a",
@@ -87,19 +87,18 @@ try {
       createdAt: new Date(2)
     }
   ));
-  await assertSucceeds(getDoc(doc(userA, "directMessages", "accepted-message")));
-  await assertSucceeds(getDoc(doc(userB, "directMessages", "accepted-message")));
-  await assertFails(getDoc(doc(userC, "directMessages", "accepted-message")));
+  await assertSucceeds(getDoc(doc(userA, "messageRequests", "user-a_user-b", "messages", "accepted-message")));
+  await assertSucceeds(getDoc(doc(userB, "messageRequests", "user-a_user-b", "messages", "accepted-message")));
+  await assertFails(getDoc(doc(userC, "messageRequests", "user-a_user-b", "messages", "accepted-message")));
   await assertSucceeds(getDocs(query(
-    collection(userA, "directMessages"),
-    where("participants", "==", ["user-a", "user-b"])
+    collection(userA, "messageRequests", "user-a_user-b", "messages")
   )));
 
   // Participants cannot read messages until the request is accepted.
   await testEnv.clearFirestore();
   await seed({ ...declinedRequest, status: "pending" });
   await testEnv.withSecurityRulesDisabled(async (context) => setDoc(
-    doc(context.firestore(), "directMessages", "pending-message"),
+    doc(context.firestore(), "messageRequests", "user-a_user-b", "messages", "pending-message"),
     {
       participants: ["user-a", "user-b"],
       senderId: "user-a",
@@ -107,8 +106,8 @@ try {
       createdAt: new Date(2)
     }
   ));
-  await assertFails(getDoc(doc(userA, "directMessages", "pending-message")));
-  await assertFails(getDoc(doc(userB, "directMessages", "pending-message")));
+  await assertFails(getDoc(doc(userA, "messageRequests", "user-a_user-b", "messages", "pending-message")));
+  await assertFails(getDoc(doc(userB, "messageRequests", "user-a_user-b", "messages", "pending-message")));
 
   console.log("Firestore message request authorization regressions passed");
 } finally {
