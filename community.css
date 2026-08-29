@@ -148,3 +148,21 @@
   .direct-message-entry-row { grid-template-columns: 1fr; }
   .direct-message-entry-row button { width: 100%; }
 }
+
+
+/* Match the View Profile dropdown header */
+.topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.topbar-actions .nav-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid rgba(167,139,250,.55);
+  border-radius: 999px;
+  background: rgba(139,92,246,.16);
+  color: #ddd6fe;
+  font-size: .82rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+.main-menu-panel #sign-out { color: #fca5a5; }

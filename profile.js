@@ -3,7 +3,7 @@ import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { createModerationClient } from "./moderation-client.mjs";
-import { REPORT_BUTTON_CLASS } from "./moderation-policy.mjs";
+import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst } from "./content-ordering.mjs";
 import { blockedProfileStatus, commentsForPost, interactionParentForPost } from "./profile-render-policy.mjs";
 import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
@@ -33,7 +33,6 @@ const status = document.getElementById("profile-status");
 const followButton = document.getElementById("profile-follow-button");
 const socialActions = document.getElementById("profile-social-actions");
 const reportButton = document.getElementById("profile-report-button");
-const reportReason = document.getElementById("profile-report-reason");
 const blockButton = document.getElementById("profile-block-button");
 let currentUser;
 let currentProfileUsername;
@@ -44,7 +43,6 @@ let targetPosts = [];
 let targetCommunityPosts = [];
 let users = [];
 let moderationClient;
-let reportReasonExpanded = false;
 let targetBlocked = false;
 let targetBlockedByViewer = false;
 let blockTracker = createViewerBlockTracker();
@@ -279,16 +277,12 @@ const renderFollowControl = () => {
   blockButton.disabled = false;
   const reported = moderationClient?.cachedReported(userReportTarget());
   reportButton.hidden = targetBlocked;
-  reportReason.hidden = targetBlocked || !reportReasonExpanded;
   reportButton.disabled = targetBlocked || reported !== false;
-  reportReason.disabled = targetBlocked || reported === true;
   reportButton.textContent = reported === true
     ? "Reported"
     : reported !== false
       ? "Checking report…"
-      : reportReasonExpanded
-        ? "Submit report"
-        : "Report user";
+      : "Report user";
   if (!targetBlocked) loadReportedState(userReportTarget(), renderFollowControl);
 };
 
@@ -582,28 +576,71 @@ followButton.addEventListener("click", async () => {
   }
 });
 
-reportButton.addEventListener("click", async () => {
-  if (!reportReasonExpanded) {
-    reportReasonExpanded = true;
-    renderFollowControl();
-    reportReason.focus();
-    return;
-  }
-  reportButton.disabled = true;
-  try {
-    await moderationClient.report(userReportTarget(), reportReason.value);
-    reportReasonExpanded = false;
-    reportButton.textContent = "Reported";
-    reportReason.hidden = true;
-    reportReason.disabled = true;
-    setStatus("Report sent. Thank you for helping keep AnonChat safe.");
-  } catch (error) {
-    setStatus(error?.code === "already-reported" ? "You have already reported this user." : "Could not report this user.", true);
-    const duplicate = moderationClient.cachedReported(userReportTarget()) === true;
-    reportButton.textContent = duplicate ? "Reported" : "Report user";
-    reportReason.disabled = duplicate;
-    reportButton.disabled = duplicate;
-  }
+const createUserReportDialog = () => {
+  const dialog = document.createElement("dialog");
+  dialog.className = "report-dialog";
+  const form = document.createElement("form");
+  form.method = "dialog";
+  const title = document.createElement("h2");
+  title.textContent = "Report user";
+  const label = document.createElement("label");
+  label.textContent = "Why are you reporting this user?";
+  const reason = document.createElement("select");
+  reason.required = true;
+  REPORT_REASONS.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value.replaceAll("-", " ");
+    reason.append(option);
+  });
+  label.append(reason);
+  const dialogStatus = document.createElement("p");
+  dialogStatus.className = "report-dialog-status";
+  dialogStatus.setAttribute("role", "status");
+  const actions = document.createElement("div");
+  actions.className = "report-dialog-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = "Submit report";
+  cancel.addEventListener("click", () => dialog.close());
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    cancel.disabled = true;
+    dialogStatus.textContent = "Submitting report…";
+    try {
+      await moderationClient.report(userReportTarget(), reason.value);
+      dialog.close();
+      setStatus("Report sent. Thank you for helping keep AnonChat safe.");
+      renderFollowControl();
+    } catch (error) {
+      if (error?.code === "already-reported") {
+        dialog.close();
+        setStatus("You have already reported this user.");
+        renderFollowControl();
+      } else {
+        dialogStatus.textContent = "Could not report this user. Please try again.";
+        submit.disabled = false;
+        cancel.disabled = false;
+      }
+    }
+  });
+  actions.append(cancel, submit);
+  form.append(title, label, dialogStatus, actions);
+  dialog.append(form);
+  document.body.append(dialog);
+  return dialog;
+};
+
+let userReportDialog;
+reportButton.addEventListener("click", () => {
+  userReportDialog ||= createUserReportDialog();
+  userReportDialog.querySelector("form").reset();
+  userReportDialog.querySelector(".report-dialog-status").textContent = "";
+  userReportDialog.showModal();
 });
 
 const startProfileContent = () => {
