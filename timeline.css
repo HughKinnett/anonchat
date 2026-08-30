@@ -283,6 +283,11 @@ button:disabled { cursor: wait; opacity: 0.6; }
   opacity: 0.62;
 }
 
+.banner-button img.has-custom-photo,
+.view-profile-cover.has-custom-photo {
+  opacity: 1;
+}
+
 .profile-content {
   position: absolute;
   right: 26px;

@@ -65,7 +65,7 @@ export const ensureUserProfile = async (user, db) => {
       username,
       createdAt: profileSnapshot.data()?.createdAt || serverTimestamp(),
       lastActiveAt: profileSnapshot.data()?.lastActiveAt || serverTimestamp()
-    });
+    }, { merge: true });
   });
 
   await ensureDefaultOwnerFollows(user.uid, db);

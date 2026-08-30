@@ -131,10 +131,16 @@ const renderTargetProfileIdentity = () => {
   document.getElementById("profile-handle").textContent = targetBlocked ? "" : `@${targetProfile.username}`;
   document.getElementById("view-profile-avatar").src = !targetBlocked && targetProfile.profileImage
     ? targetProfile.profileImage : "anonchat-anonymous.png";
+  document.getElementById("view-profile-avatar").classList.toggle(
+    "has-custom-photo",
+    !targetBlocked && Boolean(targetProfile.profileImage)
+  );
   if (!targetBlocked && targetProfile.coverImage) {
     document.getElementById("view-profile-cover").src = targetProfile.coverImage;
+    document.getElementById("view-profile-cover").classList.add("has-custom-photo");
   } else {
     document.getElementById("view-profile-cover").src = "anonchat-anonymous.png";
+    document.getElementById("view-profile-cover").classList.remove("has-custom-photo");
   }
 };
 

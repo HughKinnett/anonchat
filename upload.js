@@ -1,7 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { exitAfterAuthLoss } from "./push-exit.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const status = document.getElementById("timeline-status");
 const setStatus = (message, isError = false) => {
@@ -15,6 +15,7 @@ const replaceDisplayedImage = async (imageId, source) => {
   if (!current || !source) return;
   const replacement = current.cloneNode(false);
   replacement.src = source;
+  replacement.classList.add("has-custom-photo");
   try { await replacement.decode(); } catch { /* The browser can still render the data URL. */ }
   current.replaceWith(replacement);
 };
@@ -68,7 +69,7 @@ onAuthStateChanged(auth, async (user) => {
       setStatus("Preparing your photo…");
       try {
         const imageData = await compressImage(file, maxWidth, maxHeight);
-        await updateDoc(profileRef, { [field]: imageData });
+        await setDoc(profileRef, { [field]: imageData }, { merge: true });
         await replaceDisplayedImage(imageId, imageData);
         setStatus(field === "profileImage" ? "Profile photo replaced." : "Cover photo replaced.");
       } catch (error) {

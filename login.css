@@ -200,6 +200,17 @@ input:focus {
   margin: 0 auto;
 }
 
+.reset-brand-mark {
+  display: block;
+  width: 82px;
+  height: 82px;
+  margin: 0 auto 16px;
+  border: 2px solid rgba(167, 139, 250, 0.72);
+  border-radius: 24px;
+  object-fit: cover;
+  box-shadow: 0 16px 38px rgba(76, 29, 149, 0.34);
+}
+
 .password-reset-card > p { min-height: 0; }
 
 .password-reset-card .forgot-password {
