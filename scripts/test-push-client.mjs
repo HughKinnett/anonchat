@@ -87,6 +87,37 @@ const makeHarness = ({ permission = "default", existing = null, configuredKey = 
 }
 
 {
+  const states = [];
+  const logs = [];
+  const client = createPushAlertsClient({
+    notification: { permission: "granted", requestPermission: async () => "granted" },
+    serviceWorkerSupported: true,
+    pushSupported: true,
+    serviceWorkerReady: Promise.resolve({
+      update: async () => {},
+      pushManager: {
+        getSubscription: async () => null,
+        subscribe: async () => {
+          const error = new Error("private browser detail");
+          error.name = "AbortError";
+          throw error;
+        }
+      }
+    }),
+    publicKey,
+    isAndroid: true,
+    subtle: webcrypto.subtle,
+    timestamp: () => ({ sentinel: "serverTimestamp" }),
+    persist: async () => {},
+    onState: (state) => states.push(state),
+    logger: { error: (...values) => logs.push(values.join(" ")) }
+  });
+  await client.enableFromGesture({ uid: "user-a" });
+  assert.equal(states.at(-1), "device-settings", "Android subscription failures give actionable device-setting guidance");
+  assert.equal(logs.join(" ").includes("private browser detail"), false, "Android diagnostics never expose browser error details");
+}
+
+{
   const harness = makeHarness({ permission: "granted", existing: makeSubscription(), failSave: true });
   await assert.doesNotReject(harness.client.reconcileExisting({ uid: "user-a" }), "storage failures do not crash timeline startup");
   assert.equal(harness.states.at(-1), "retry");

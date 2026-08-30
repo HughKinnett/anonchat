@@ -194,6 +194,7 @@ spotifyRemove?.addEventListener("click", async () => {
 });
 
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isAndroid = /android/i.test(navigator.userAgent);
 const isStandalone = window.matchMedia("(display-mode: standalone)").matches
   || window.navigator.standalone === true;
 const serviceWorkerSupported = "serviceWorker" in navigator;
@@ -230,6 +231,7 @@ const pushAlertsClient = createPushAlertsClient({
   serviceWorkerReady: pushServiceWorkerReady,
   publicKey: VAPID_PUBLIC_KEY,
   isIOS,
+  isAndroid,
   isStandalone,
   subtle: window.crypto?.subtle,
   timestamp: serverTimestamp,

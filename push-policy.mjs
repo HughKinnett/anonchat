@@ -5,6 +5,7 @@ export const PUSH_ALERT_STATES = Object.freeze({
   UNSUPPORTED: "unsupported",
   INSTALL_REQUIRED: "install-required",
   CONFIGURATION_PENDING: "configuration-pending",
+  DEVICE_SETTINGS: "device-settings",
   RETRY: "retry"
 });
 

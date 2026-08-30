@@ -13,6 +13,7 @@ export const PUSH_ALERT_MESSAGES = Object.freeze({
   [PUSH_ALERT_STATES.UNSUPPORTED]: "Phone alerts are not supported by this browser.",
   [PUSH_ALERT_STATES.INSTALL_REQUIRED]: "On iPhone, add AnonChat to your Home Screen before enabling phone alerts.",
   [PUSH_ALERT_STATES.CONFIGURATION_PENDING]: "Phone alerts are not configured yet. Please try again later.",
+  [PUSH_ALERT_STATES.DEVICE_SETTINGS]: "Android blocked the alert subscription. Allow notifications for Chrome or AnonChat in Android Settings, then tap Enable phone alerts again.",
   [PUSH_ALERT_STATES.RETRY]: "Phone alerts could not finish setting up. Refresh this page, then tap Enable phone alerts again."
 });
 
@@ -23,6 +24,7 @@ export function createPushAlertsClient({
   serviceWorkerReady,
   publicKey,
   isIOS = false,
+  isAndroid = false,
   isStandalone = false,
   subtle = globalThis.crypto?.subtle,
   timestamp,
@@ -104,10 +106,20 @@ export function createPushAlertsClient({
         }
       }
       if (allowCreate) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey)
-        });
+        try {
+          await registration.update?.();
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey)
+          });
+        } catch (error) {
+          logger?.error?.("Phone alert browser subscription failed.", error?.name || "unknown");
+          if (isAndroid) {
+            onState(PUSH_ALERT_STATES.DEVICE_SETTINGS);
+            return PUSH_ALERT_STATES.DEVICE_SETTINGS;
+          }
+          return reportFailure();
+        }
       }
       if (!subscription) return null;
       try {
