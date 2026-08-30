@@ -194,6 +194,71 @@
       "collectionGroup": "reports",
       "fieldPath": "reporterUid",
       "indexes": [{ "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }]
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "profileImage",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "users",
+      "fieldPath": "coverImage",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "posts",
+      "fieldPath": "imageData",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "posts",
+      "fieldPath": "content",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "posts",
+      "fieldPath": "options",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "communityPosts",
+      "fieldPath": "imageData",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "communityPosts",
+      "fieldPath": "content",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "roomMessages",
+      "fieldPath": "imageData",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "roomMessages",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "messages",
+      "fieldPath": "imageData",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "messages",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "comments",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "replies",
+      "fieldPath": "text",
+      "indexes": []
     }
   ]
 }
