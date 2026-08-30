@@ -10,7 +10,7 @@ import { createViewerBlockTracker, isBlockedActor } from "./viewer-block-policy.
 import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  addDoc, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query,
+  addDoc, collection, deleteDoc, deleteField, doc, documentId, getDoc, limit, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -726,12 +726,7 @@ const renderDirectMessages = () => {
     remove.addEventListener("click", async () => {
       remove.disabled = true;
       try {
-        const legacyReference = doc(db, "directMessages", message.id);
-        const legacySnapshot = await getDoc(legacyReference);
-        const batch = writeBatch(db);
-        batch.delete(message.ref);
-        if (legacySnapshot.exists()) batch.delete(legacyReference);
-        await batch.commit();
+        await deleteDoc(message.ref);
         revealedPrivatePhotos.delete(message.id);
         setStatus("Private message deleted permanently.");
       } catch {
@@ -795,15 +790,7 @@ $("delete-chat").addEventListener("click", async () => {
   control.disabled = true;
   control.textContent = "Deleting chat…";
   try {
-    const legacySnapshot = await getDocs(query(
-      collection(db, "directMessages"),
-      where("participants", "array-contains", state.user.uid)
-    ));
-    const legacyMessages = legacySnapshot.docs.filter((message) =>
-      message.data().participants?.includes(other)
-    );
-    const references = [...chatMessages.map((message) => message.ref), ...legacyMessages.map((message) => message.ref)]
-      .filter((reference, index, list) => list.findIndex((item) => item.path === reference.path) === index);
+    const references = chatMessages.map((message) => message.ref);
     for (let offset = 0; offset < references.length; offset += 400) {
       const batch = writeBatch(db);
       references.slice(offset, offset + 400).forEach((reference) => batch.delete(reference));
