@@ -8,7 +8,6 @@ import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { createViewerBlockTracker, isBlockedActor } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
-import { applyPrivacyWatermark, clearPrivacyWatermark } from "./privacy-watermark.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query,
@@ -964,7 +963,6 @@ $("download-data").addEventListener("click", () => {
 });
 
 const stopCommunityResources = () => {
-  clearPrivacyWatermark();
   revealedPrivatePhotos.clear();
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
   clearRoomExpiryTimer();
@@ -1073,7 +1071,6 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   state.profile = profile.data();
-  applyPrivacyWatermark({ username: state.profile.username, surface: "private community" });
   void recordPageActivity({
     surface: "community",
     profile: state.profile,
