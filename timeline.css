@@ -1187,6 +1187,7 @@ button:not(.avatar-button):not(.banner-button):hover, .nav-button:hover,
 #profile-admin-link[hidden] {
   display: none !important;
 }
+.membership-badge{display:flex;width:fit-content;margin-top:12px;text-decoration:none;pointer-events:none}.view-profile-identity .membership-badge{margin:12px auto 0}.membership-badge[hidden]{display:none !important}@media(max-width:560px){.membership-badge{margin-top:14px}.profile-links{row-gap:10px}}
 .admin-mfa-card[hidden], #admin-mfa-setup[hidden], #admin-mfa-start[hidden] { display: none !important; }
 .admin-mfa-card label { display:block; margin:12px 0 7px; color:var(--muted); font-weight:800; }
 .admin-mfa-secret { display:block; overflow-wrap:anywhere; margin:10px 0; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--surface-2); color:#ddd6fe; user-select:all; }

@@ -167,6 +167,9 @@ const renderTargetProfileIdentity = () => {
   document.title = targetBlocked ? "Unavailable profile — AnonChat" : `@${targetProfile.username} — AnonChat`;
   document.getElementById("profile-name").textContent = targetBlocked ? "Unavailable profile" : targetProfile.username;
   document.getElementById("profile-handle").textContent = targetBlocked ? "" : `@${targetProfile.username}`;
+  const membershipBadge = document.getElementById("profile-membership-badge");
+  membershipBadge.hidden = targetBlocked;
+  membershipBadge.textContent = isDesignatedAdmin(targetProfile.username) ? "Founder" : "Founding Member";
   document.getElementById("view-profile-avatar").src = !targetBlocked && targetProfile.profileImage
     ? targetProfile.profileImage : "anonchat-anonymous.png";
   document.getElementById("view-profile-avatar").hidden = false;
