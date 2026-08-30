@@ -1187,3 +1187,6 @@ button:not(.avatar-button):not(.banner-button):hover, .nav-button:hover,
 #profile-admin-link[hidden] {
   display: none !important;
 }
+.admin-mfa-card[hidden], #admin-mfa-setup[hidden], #admin-mfa-start[hidden] { display: none !important; }
+.admin-mfa-card label { display:block; margin:12px 0 7px; color:var(--muted); font-weight:800; }
+.admin-mfa-secret { display:block; overflow-wrap:anywhere; margin:10px 0; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--surface-2); color:#ddd6fe; user-select:all; }

@@ -9,7 +9,8 @@ import { blockedProfileStatus, commentsForPost, interactionParentForPost } from 
 import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
 import { createViewerBlockTracker, didViewerBlock, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { isDesignatedAdmin } from "./auth-security-policy.mjs";
+import { multiFactor, onAuthStateChanged, TotpMultiFactorGenerator } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -57,6 +58,10 @@ const sessionGeneration = createSessionGeneration();
 let activeProfileSession = 0;
 const PROFILE_FEED_LIMIT = 50;
 let postsRenderQueued = false;
+let pendingTotpSecret = null;
+const mfaCard = document.getElementById("admin-mfa-card");
+const mfaSetup = document.getElementById("admin-mfa-setup");
+const mfaStatus = document.getElementById("admin-mfa-status");
 const schedulePostsRender = () => {
   if (postsRenderQueued) return;
   postsRenderQueued = true;
@@ -64,6 +69,39 @@ const schedulePostsRender = () => {
 };
 const profileSpotifyCard = document.getElementById("profile-spotify-card");
 const profileSpotifyPlayer = document.getElementById("profile-spotify-player");
+
+document.getElementById("admin-mfa-start")?.addEventListener("click", async () => {
+  mfaStatus.textContent = "Preparing authenticator setup…";
+  try {
+    const session = await multiFactor(currentUser).getSession();
+    pendingTotpSecret = await TotpMultiFactorGenerator.generateSecret(session);
+    document.getElementById("admin-mfa-secret").textContent = pendingTotpSecret.secretKey;
+    document.getElementById("admin-mfa-open").href = pendingTotpSecret.generateQrCodeUrl(currentUser.email || currentProfileUsername, "AnonChat");
+    mfaSetup.hidden = false;
+    mfaStatus.textContent = "Add the key, then confirm the current code.";
+  } catch (error) {
+    mfaStatus.textContent = error.code === "auth/operation-not-allowed"
+      ? "TOTP must first be enabled under Firebase Authentication → Multi-factor authentication."
+      : "Authenticator setup could not start. Sign out, sign in again, and retry.";
+  }
+});
+
+document.getElementById("admin-mfa-confirm")?.addEventListener("click", async () => {
+  const code = document.getElementById("admin-mfa-code").value.replace(/\s/g, "");
+  if (!pendingTotpSecret || !/^\d{6}$/.test(code)) {
+    mfaStatus.textContent = "Enter the current 6-digit code.";
+    return;
+  }
+  try {
+    await multiFactor(currentUser).enroll(TotpMultiFactorGenerator.assertionForEnrollment(pendingTotpSecret, code), "AnonChat administrator authenticator");
+    pendingTotpSecret = null;
+    mfaSetup.hidden = true;
+    document.getElementById("admin-mfa-start").hidden = true;
+    mfaStatus.textContent = "Authenticator protection is enabled on this administrator account.";
+  } catch {
+    mfaStatus.textContent = "That code was not accepted. Wait for a new code and try again.";
+  }
+});
 const userReportTarget = () => ({ targetKind: "user", targetCollection: "users", targetId: targetUserId, reportedUserId: targetUserId });
 const postReportTarget = (postDoc, post) => ({
   targetKind: postDoc.ref.parent.id === "communityPosts" ? "communityPost" : "post",
@@ -815,6 +853,10 @@ onAuthStateChanged(auth, async (user) => {
     await exitAfterAuthLoss({ redirect: () => window.location.replace(destination) });
     return;
   }
+  if (!user.emailVerified) {
+    await exitAuthenticatedSession({ user, stopListeners: stopProfileResources, redirect: () => window.location.replace("index.html") });
+    return;
+  }
 
   if (!targetUserId) {
     window.location.replace("timeline.html");
@@ -884,11 +926,15 @@ onAuthStateChanged(auth, async (user) => {
   await startViewerBlockListeners(session, user.uid);
   if (!sessionIsCurrent()) return;
   renderTargetProfileIdentity();
-  const adminUsernames = ["i_love_you_h", "cybercapone"];
-  const viewerIsAdmin = adminUsernames.includes(currentProfileUsername.toLowerCase());
-  const targetIsAdmin = adminUsernames.includes(String(targetProfile.username || "").toLowerCase());
+  const viewerIsAdmin = isDesignatedAdmin(currentProfileUsername);
+  const targetIsAdmin = isDesignatedAdmin(targetProfile.username);
   document.getElementById("profile-admin-link").hidden =
     !(viewerIsAdmin && targetIsAdmin && currentUser.uid === targetUserId);
+  mfaCard.hidden = !(viewerIsAdmin && targetIsAdmin && currentUser.uid === targetUserId);
+  if (!mfaCard.hidden && multiFactor(currentUser).enrolledFactors.some((factor) => factor.factorId === TotpMultiFactorGenerator.FACTOR_ID)) {
+    document.getElementById("admin-mfa-start").hidden = true;
+    mfaStatus.textContent = "Authenticator protection is enabled on this administrator account.";
+  }
   const viewDay = new Date().toISOString().slice(0, 10);
   setDoc(doc(db, "pageViews", viewDay), {
     date: viewDay,

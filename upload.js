@@ -4,6 +4,8 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/f
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const status = document.getElementById("timeline-status");
+document.getElementById("banner-upload-button")?.addEventListener("click", () => document.getElementById("banner-upload")?.click());
+document.getElementById("profile-upload-button")?.addEventListener("click", () => document.getElementById("profile-upload")?.click());
 const setStatus = (message, isError = false) => {
   if (!status) return;
   status.textContent = message;

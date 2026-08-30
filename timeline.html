@@ -50,12 +50,12 @@
   <main class="page-shell">
     <section class="profile-banner" aria-labelledby="display-name">
       <input type="file" id="banner-upload" accept="image/*" hidden>
-      <button class="banner-button" type="button" aria-label="Change banner" onclick="document.getElementById('banner-upload').click()">
+      <button id="banner-upload-button" class="banner-button" type="button" aria-label="Change banner">
         <img id="banner-pic" alt="" hidden>
       </button>
       <div class="profile-content">
         <input type="file" id="profile-upload" accept="image/*" hidden>
-        <button class="avatar-button" type="button" aria-label="Change profile picture" onclick="document.getElementById('profile-upload').click()">
+        <button id="profile-upload-button" class="avatar-button" type="button" aria-label="Change profile picture">
           <img id="profile-pic" alt="" hidden>
         </button>
         <div>

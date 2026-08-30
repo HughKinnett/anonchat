@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node scripts/test-regressions.mjs",
+    "test": "node scripts/test-auth-security-policy.mjs && node scripts/test-regressions.mjs",
     "test:legal-signup": "node scripts/test-legal-signup.mjs",
     "test:moderation-client": "node scripts/test-moderation-client.mjs",
     "test:viewer-block-policy": "node scripts/test-viewer-block-policy.mjs && node scripts/test-session-generation-policy.mjs && node scripts/test-protected-metadata-policy.mjs && node scripts/test-timeline-interaction-policy.mjs",

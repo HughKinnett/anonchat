@@ -1,5 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { chooseDurablePersistence } from "./auth-persistence-policy.mjs";
+import { clearFailures, failureState, MAX_CONSECUTIVE_FAILURES, recordInvalidCredential } from "./auth-security-policy.mjs";
 import { ensureDefaultOwnerFollows } from "./default-follows.js";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import {
@@ -7,9 +8,13 @@ import {
   browserSessionPersistence,
   createUserWithEmailAndPassword,
   deleteUser,
+  getMultiFactorResolver,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   setPersistence,
+  TotpMultiFactorGenerator,
   updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
@@ -64,12 +69,41 @@ const signInMessage = (error) => {
   return "Sign-in failed. Try again or use Forgot password below.";
 };
 
+const requirePasswordReset = async (email) => {
+  await sendPasswordResetEmail(auth, email, {
+    url: `${window.location.origin}/index.html?passwordReset=1`,
+    handleCodeInApp: false
+  });
+  setStatus("Three incorrect attempts were detected. A password-reset link was sent to that email. Reset the password before signing in again.", true);
+};
+
+const requestTotpCode = () => {
+  const value = window.prompt("Enter the 6-digit code from your authenticator app.");
+  if (value === null) throw Object.assign(new Error("mfa-cancelled"), { code: "auth/mfa-cancelled" });
+  const code = value.replace(/\s/g, "");
+  if (!/^\d{6}$/.test(code)) throw Object.assign(new Error("mfa-invalid"), { code: "auth/invalid-verification-code" });
+  return code;
+};
+
+const finishAdminMfaSignIn = async (error) => {
+  const resolver = getMultiFactorResolver(auth, error);
+  const hint = resolver.hints.find((entry) => entry.factorId === TotpMultiFactorGenerator.FACTOR_ID);
+  if (!hint) throw error;
+  return resolver.resolveSignIn(TotpMultiFactorGenerator.assertionForSignIn(hint.uid, requestTotpCode()));
+};
+
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     await exitAfterAuthLoss({ redirect: () => {} });
     return;
   }
   if (authInProgress) return;
+  if (!user.emailVerified) {
+    await sendEmailVerification(user, { url: `${window.location.origin}/index.html` }).catch(() => {});
+    await exitAuthenticatedSession({ user, redirect: () => {} });
+    setStatus("Verify your email before signing in. A verification link was sent.", true);
+    return;
+  }
   const profile = await getDoc(doc(db, "users", user.uid));
   if (profile.exists() && profile.data().banned === true) {
     await exitAuthenticatedSession({ user, redirect: () => {} });
@@ -87,7 +121,25 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
   const password = document.getElementById("password").value;
 
   try {
-    const credential = await signInAcrossDevices(email, password);
+    const normalizedEmail = email.toLowerCase();
+    if (failureState(window.localStorage, normalizedEmail).resetRequired && new URLSearchParams(window.location.search).get("passwordReset") !== "1") {
+      await requirePasswordReset(normalizedEmail);
+      authInProgress = false;
+      return;
+    }
+    let credential;
+    try {
+      credential = await signInAcrossDevices(normalizedEmail, password);
+    } catch (error) {
+      if (error.code === "auth/multi-factor-auth-required") credential = await finishAdminMfaSignIn(error);
+      else throw error;
+    }
+    clearFailures(window.localStorage, normalizedEmail);
+    if (!credential.user.emailVerified) {
+      await sendEmailVerification(credential.user, { url: `${window.location.origin}/index.html` });
+      await exitAuthenticatedSession({ user: credential.user, redirect: () => {} });
+      throw Object.assign(new Error("email-not-verified"), { code: "auth/email-not-verified" });
+    }
     const profile = await getDoc(doc(db, "users", credential.user.uid));
     if (profile.exists() && profile.data().banned === true) {
       await exitAuthenticatedSession({ user: credential.user, redirect: () => {} });
@@ -96,6 +148,23 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
     window.location.replace("timeline.html");
   } catch (error) {
     authInProgress = false;
+    if (invalidCredentialCodes.includes(error.code)) {
+      const attempts = recordInvalidCredential(window.localStorage, email);
+      if (attempts.resetRequired) {
+        await requirePasswordReset(email.toLowerCase()).catch(() => setStatus("Three incorrect attempts were detected. Use Forgot password below before trying again.", true));
+        return;
+      }
+      setStatus(`That email and password were not recognized. ${MAX_CONSECUTIVE_FAILURES - attempts.count} attempt${MAX_CONSECUTIVE_FAILURES - attempts.count === 1 ? "" : "s"} remain before a password reset is required.`, true);
+      return;
+    }
+    if (error.code === "auth/email-not-verified") {
+      setStatus("Verify your email before signing in. A new verification link was sent.", true);
+      return;
+    }
+    if (["auth/invalid-verification-code", "auth/mfa-cancelled"].includes(error.code)) {
+      setStatus("The authenticator code was not accepted. Sign in again and enter the current 6-digit code.", true);
+      return;
+    }
     setStatus(signInMessage(error), true);
   }
 });
@@ -127,6 +196,10 @@ signUpForm.addEventListener("submit", async (event) => {
     setStatus("Confirm that you are at least 18 and accept the Terms and Privacy Policy before creating an account.", true);
     return;
   }
+  if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    setStatus("Use at least 12 characters with uppercase, lowercase, a number, and a symbol.", true);
+    return;
+  }
 
   authInProgress = true;
   setStatus("Creating your account…");
@@ -138,6 +211,7 @@ signUpForm.addEventListener("submit", async (event) => {
     ]);
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     newUser = credential.user;
+    await sendEmailVerification(newUser, { url: `${window.location.origin}/index.html` });
 
     await runTransaction(db, async (transaction) => {
       const usernameRef = doc(db, "usernames", normalizedUsername);
@@ -179,7 +253,8 @@ signUpForm.addEventListener("submit", async (event) => {
 
     await updateProfile(newUser, { displayName: username });
     await ensureDefaultOwnerFollows(newUser.uid, db);
-    window.location.replace("timeline.html");
+    await exitAuthenticatedSession({ user: newUser, redirect: () => {} });
+    setStatus("Account created. Check your email and verify it before signing in.");
   } catch (error) {
     if (newUser) await deleteUser(newUser).catch(() => {});
     authInProgress = false;
