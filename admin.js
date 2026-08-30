@@ -24,6 +24,7 @@ const setStatus = (message, error = false) => { $("admin-status").textContent = 
 const setAuthenticatorStatus = (message) => { $("admin-authenticator-status").textContent = message; };
 
 $("admin-authenticator-start").onclick = async () => {
+  if (!adminUser) { setAuthenticatorStatus("Administrator access is still loading. Wait a moment and try again."); return; }
   setAuthenticatorStatus("Preparing authenticator setup…");
   try {
     pendingAdminTotpSecret = await TotpMultiFactorGenerator.generateSecret(await multiFactor(adminUser).getSession());
@@ -31,8 +32,15 @@ $("admin-authenticator-start").onclick = async () => {
     $("admin-authenticator-open").href = pendingAdminTotpSecret.generateQrCodeUrl(adminUser.email || "AnonChat admin", "AnonChat");
     $("admin-authenticator-setup").hidden = false;
     setAuthenticatorStatus("Add the key, then confirm the current code.");
-  } catch {
-    setAuthenticatorStatus("Setup could not start. Sign out, sign in again, and retry.");
+  } catch (error) {
+    const messages = {
+      "auth/requires-recent-login": "For security, sign out and sign back in before setting up the authenticator.",
+      "auth/unverified-email": "Verify this administrator account's email before setting up the authenticator.",
+      "auth/operation-not-allowed": "Authenticator support is not enabled in Firebase yet.",
+      "auth/unsupported-first-factor": "This account's current sign-in method cannot be used with an authenticator.",
+      "auth/maximum-second-factor-count-exceeded": "This account already has the maximum number of sign-in factors."
+    };
+    setAuthenticatorStatus(messages[error?.code] || `Setup could not start (${error?.code || "browser-error"}). Refresh once and retry.`);
   }
 };
 
@@ -625,6 +633,7 @@ onAuthStateChanged(auth, async user => {
   const authorized = !profileData?.banned && reservation?.exists() && reservation.data().uid === user.uid && reservation.data().username === username;
   if (!authorized) { location.replace("timeline.html"); return; }
   adminUid = user.uid; adminUser = user; $("admin-identity").textContent = `Signed in as @${username}`;
+  $("admin-authenticator-start").disabled = false;
   if (multiFactor(user).enrolledFactors.some(factor => factor.factorId === TotpMultiFactorGenerator.FACTOR_ID)) {
     $("admin-authenticator-start").hidden = true;
     setAuthenticatorStatus("Authenticator protection is enabled on this administrator account.");

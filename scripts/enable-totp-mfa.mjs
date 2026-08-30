@@ -14,7 +14,10 @@ try {
       }]
     }
   });
-  console.log("TOTP_MFA_ENABLED");
+  const configuration = await getAuth(app).projectConfigManager().getProjectConfig();
+  const provider = configuration.multiFactorConfig?.providerConfigs?.find(entry => entry.totpProviderConfig);
+  if (provider?.state !== "ENABLED") throw new Error("TOTP configuration verification failed");
+  console.log(`TOTP_MFA_ENABLED adjacentIntervals=${provider.totpProviderConfig.adjacentIntervals}`);
 } finally {
   await deleteApp(app);
 }

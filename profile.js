@@ -80,9 +80,14 @@ document.getElementById("admin-mfa-start")?.addEventListener("click", async () =
     mfaSetup.hidden = false;
     mfaStatus.textContent = "Add the key, then confirm the current code.";
   } catch (error) {
-    mfaStatus.textContent = error.code === "auth/operation-not-allowed"
-      ? "TOTP must first be enabled under Firebase Authentication → Multi-factor authentication."
-      : "Authenticator setup could not start. Sign out, sign in again, and retry.";
+    const messages = {
+      "auth/requires-recent-login": "For security, sign out and sign back in before setting up the authenticator.",
+      "auth/unverified-email": "Verify this administrator account's email before setting up the authenticator.",
+      "auth/operation-not-allowed": "Authenticator support is not enabled in Firebase yet.",
+      "auth/unsupported-first-factor": "This account's current sign-in method cannot be used with an authenticator.",
+      "auth/maximum-second-factor-count-exceeded": "This account already has the maximum number of sign-in factors."
+    };
+    mfaStatus.textContent = messages[error?.code] || `Authenticator setup could not start (${error?.code || "browser-error"}). Refresh once and retry.`;
   }
 });
 
