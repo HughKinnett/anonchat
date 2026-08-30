@@ -10,6 +10,15 @@ const setStatus = (message, isError = false) => {
   status.style.color = isError ? "#fca5a5" : "inherit";
 };
 
+const replaceDisplayedImage = async (imageId, source) => {
+  const current = document.getElementById(imageId);
+  if (!current || !source) return;
+  const replacement = current.cloneNode(false);
+  replacement.src = source;
+  try { await replacement.decode(); } catch { /* The browser can still render the data URL. */ }
+  current.replaceWith(replacement);
+};
+
 const compressImage = (file, maxWidth, maxHeight, quality = 0.72) => new Promise((resolve, reject) => {
   if (!file?.type.startsWith("image/") || file.size > 10 * 1024 * 1024) {
     reject(new Error("Choose an image smaller than 10 MB."));
@@ -47,24 +56,26 @@ onAuthStateChanged(auth, async (user) => {
   const snapshot = await getDoc(profileRef);
   if (snapshot.exists()) {
     const profile = snapshot.data();
-    if (profile.profileImage) document.getElementById("profile-pic").src = profile.profileImage;
-    if (profile.coverImage) document.getElementById("banner-pic").src = profile.coverImage;
+    if (profile.profileImage) await replaceDisplayedImage("profile-pic", profile.profileImage);
+    if (profile.coverImage) await replaceDisplayedImage("banner-pic", profile.coverImage);
   }
 
   const bindUpload = (inputId, imageId, field, maxWidth, maxHeight) => {
     document.getElementById(inputId).addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
       if (!file) return;
+      event.target.disabled = true;
       setStatus("Preparing your photo…");
       try {
         const imageData = await compressImage(file, maxWidth, maxHeight);
         await updateDoc(profileRef, { [field]: imageData });
-        document.getElementById(imageId).src = imageData;
-        setStatus("Photo updated.");
+        await replaceDisplayedImage(imageId, imageData);
+        setStatus(field === "profileImage" ? "Profile photo replaced." : "Cover photo replaced.");
       } catch (error) {
         setStatus(error.message || "Could not update that photo.", true);
       } finally {
         event.target.value = "";
+        event.target.disabled = false;
       }
     });
   };
