@@ -53,6 +53,11 @@ jobs:
         env:
           GCLOUD_PROJECT: anonchatlogin
 
+      - name: Ensure Firestore field index exemptions
+        run: npm run rollout:ensure-field-exemptions
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+
       - name: Wait for required Firestore indexes
         run: npm run rollout:wait-indexes
         timeout-minutes: 22
@@ -75,8 +80,8 @@ jobs:
         env:
           GCLOUD_PROJECT: anonchatlogin
 
-      - name: Deploy Firestore rules and indexes
-        run: npx --no-install firebase deploy --project anonchatlogin --only firestore:rules,firestore:indexes --non-interactive
+      - name: Deploy Firestore rules
+        run: npx --no-install firebase deploy --project anonchatlogin --only firestore:rules --non-interactive
 
       - name: Drain poll votes created during rules cutover
         run: npm run rollout:migrate-poll-votes

@@ -51,6 +51,7 @@
     "test:poll-vote-migration": "firebase emulators:exec --only firestore \"node scripts/test-poll-vote-migration.mjs\"",
     "test:rollout-policy": "node scripts/test-production-rollout.mjs",
     "rollout:ensure-indexes": "node scripts/ensure-firestore-indexes.mjs",
+    "rollout:ensure-field-exemptions": "node scripts/ensure-firestore-field-exemptions.mjs",
     "rollout:wait-indexes": "node scripts/wait-firestore-indexes.mjs",
     "rollout:process-moderation": "node scripts/process-production-moderation.mjs",
     "rollout:migrate-poll-votes": "node scripts/poll-vote-migration.mjs",
