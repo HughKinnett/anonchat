@@ -3,7 +3,9 @@ export const clearProfileProtectedMetadata = ({ document, renderSpotify }, messa
   document.getElementById("profile-name").textContent = message;
   document.getElementById("profile-handle").textContent = "";
   document.getElementById("view-profile-avatar").src = "anonchat-anonymous.png";
+  document.getElementById("view-profile-avatar").hidden = false;
   document.getElementById("view-profile-cover").src = "anonchat-anonymous.png";
+  document.getElementById("view-profile-cover").hidden = false;
   const followersLink = document.getElementById("profile-followers");
   followersLink.textContent = "— followers";
   followersLink.removeAttribute("href");

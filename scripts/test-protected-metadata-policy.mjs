@@ -27,8 +27,10 @@ clearProfileProtectedMetadata({ document, renderSpotify: (value) => { renderedSp
 assert.equal(document.title, "Loading profile — AnonChat");
 assert.equal(elements.get("profile-name").textContent, "Loading B…");
 assert.equal(elements.get("profile-handle").textContent, "");
-assert.equal(elements.get("view-profile-avatar").src, "Untitled.jpeg");
-assert.equal(elements.get("view-profile-cover").src, "Untitled.jpeg");
+assert.equal(elements.get("view-profile-avatar").src, "anonchat-anonymous.png");
+assert.equal(elements.get("view-profile-avatar").hidden, false);
+assert.equal(elements.get("view-profile-cover").src, "anonchat-anonymous.png");
+assert.equal(elements.get("view-profile-cover").hidden, false);
 assert.equal(elements.get("profile-followers").textContent, "— followers");
 assert.equal(elements.get("profile-followers").attributes.has("href"), false);
 assert.equal(elements.get("profile-following").textContent, "— following");

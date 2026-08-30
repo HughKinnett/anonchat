@@ -283,6 +283,13 @@ button:disabled { cursor: wait; opacity: 0.6; }
   opacity: 0.62;
 }
 
+.banner-button img[hidden],
+.avatar-button img[hidden],
+.view-profile-cover[hidden],
+.view-profile-avatar[hidden] {
+  display: none !important;
+}
+
 .banner-button img.has-custom-photo,
 .view-profile-cover.has-custom-photo {
   opacity: 1;

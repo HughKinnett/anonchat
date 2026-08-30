@@ -10,12 +10,13 @@ const setStatus = (message, isError = false) => {
   status.style.color = isError ? "#fca5a5" : "inherit";
 };
 
-const replaceDisplayedImage = async (imageId, source) => {
+const replaceDisplayedImage = async (imageId, source, custom = true) => {
   const current = document.getElementById(imageId);
   if (!current || !source) return;
   const replacement = current.cloneNode(false);
   replacement.src = source;
-  replacement.classList.add("has-custom-photo");
+  replacement.hidden = false;
+  replacement.classList.toggle("has-custom-photo", custom);
   try { await replacement.decode(); } catch { /* The browser can still render the data URL. */ }
   current.replaceWith(replacement);
 };
@@ -55,11 +56,17 @@ onAuthStateChanged(auth, async (user) => {
   }
   const profileRef = doc(db, "users", user.uid);
   const snapshot = await getDoc(profileRef);
-  if (snapshot.exists()) {
-    const profile = snapshot.data();
-    if (profile.profileImage) await replaceDisplayedImage("profile-pic", profile.profileImage);
-    if (profile.coverImage) await replaceDisplayedImage("banner-pic", profile.coverImage);
-  }
+  const profile = snapshot.exists() ? snapshot.data() : {};
+  await replaceDisplayedImage(
+    "profile-pic",
+    profile.profileImage || "anonchat-anonymous.png",
+    Boolean(profile.profileImage)
+  );
+  await replaceDisplayedImage(
+    "banner-pic",
+    profile.coverImage || "anonchat-anonymous.png",
+    Boolean(profile.coverImage)
+  );
 
   const bindUpload = (inputId, imageId, field, maxWidth, maxHeight) => {
     document.getElementById(inputId).addEventListener("change", async (event) => {
