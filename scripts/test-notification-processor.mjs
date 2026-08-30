@@ -883,6 +883,7 @@ class FairSourceAdapter extends ScanAdapter {
       firstRunCursors: {
         reaction: true,
         comment: true,
+        "private-message": true,
         "message-request": true,
         "room-message": true,
         "reveal-request": true

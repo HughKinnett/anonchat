@@ -140,22 +140,22 @@ const validEventId = "a".repeat(64);
 const shown = await push({ json: {
   type: "comment",
   title: "New comment",
-  body: "Someone commented on your post.",
+  actorLabel: "HiddenFox", body: "commented on your post.",
   url: "/timeline.html",
   tag: `anonchat-${validEventId}`
 } });
 assert.equal(shown.title, "New comment");
-assert.equal(shown.options.body, "Someone commented on your post.");
+assert.equal(shown.options.body, "@HiddenFox commented on your post.");
 assert.equal(shown.options.tag, `anonchat-${validEventId}`);
 assert.equal(shown.options.data.url, "https://anonchatlogin.web.app/timeline.html");
 
 for (const malicious of [
   { type: "arbitrary", title: "Private title", body: "private message body", url: "https://evil.example", tag: "attacker" },
   { type: "reaction", title: "Forged title", body: "private post body", url: "/timeline.html", tag: `anonchat-${validEventId}` },
-  { type: "room-message", title: "New room message", body: "A temporary room you joined has a new message.", url: "https://evil.example", tag: `anonchat-${validEventId}` },
-  { type: "comment", title: "New comment", body: "Someone commented on your post.", url: "/admin.html", tag: `anonchat-${validEventId}` },
-  { type: "comment", title: "New comment", body: "Someone commented on your post.", url: "/timeline.html", tag: "unstable" },
-  { type: "comment", title: "New comment", body: "Someone commented on your post.", url: "/timeline.html", tag: `anonchat-${validEventId}`, extra: "private" }
+  { type: "room-message", actorLabel: "QuietOwl12", title: "New room message", body: "sent a message in a temporary room.", url: "https://evil.example", tag: `anonchat-${validEventId}` },
+  { type: "comment", title: "New comment", actorLabel: "HiddenFox", body: "commented on your post.", url: "/admin.html", tag: `anonchat-${validEventId}` },
+  { type: "comment", title: "New comment", actorLabel: "HiddenFox", body: "commented on your post.", url: "/timeline.html", tag: "unstable" },
+  { type: "comment", title: "New comment", actorLabel: "HiddenFox", body: "commented on your post.", url: "/timeline.html", tag: `anonchat-${validEventId}`, extra: "private" }
 ]) {
   const fallback = await push({ json: malicious });
   assert.equal(fallback.title, "AnonChat");

@@ -317,8 +317,8 @@ export const deliverNotificationEvents = async ({
             invocation.sends += 1;
             result.sent += 1;
             const actorLabel = claim.data.type === "room-message"
-              ? await adapter.roomAlias(claim.data.roomId, claim.data.actorUid, claim.data.sourceCreatedAt)
-              : await adapter.userName(claim.data.actorUid);
+              ? await adapter.roomAlias?.(claim.data.roomId, claim.data.actorUid, claim.data.sourceCreatedAt) ?? "Someone"
+              : await adapter.userName?.(claim.data.actorUid) ?? "Someone";
             await sendPush(subscription, notificationPayload(claim.data.type, claim.id, actorLabel));
           } catch (error) {
             pushError = error;

@@ -33,7 +33,7 @@ const createdAt = { toMillis: () => 1_700_000_000_123 };
 const later = { toMillis: () => 1_700_000_000_124 };
 const preciseEarly = new Timestamp(1_700_000_000, 123_000_001);
 const preciseLater = new Timestamp(1_700_000_000, 123_000_999);
-assert.deepEqual([...NOTIFICATION_TYPES], ["reaction", "comment", "message-request", "room-message", "reveal-request"]);
+assert.deepEqual([...NOTIFICATION_TYPES], ["reaction", "comment", "private-message", "message-request", "room-message", "reveal-request"]);
 assert.equal(MAX_SUBSCRIPTIONS_PER_RECIPIENT, 100);
 assert.equal(MAX_NOTIFICATION_ATTEMPTS, 5);
 assert.equal(MAX_NOTIFICATION_AGE_MS, 7 * 24 * 60 * 60 * 1000);
@@ -50,11 +50,12 @@ assert.deepEqual(canonicalTimestamp(new Date(1_700_000_000_123)), { seconds: 1_7
 assert.deepEqual(canonicalTimestamp(1_700_000_000_123), { seconds: 1_700_000_000, nanoseconds: 123_000_000 });
 
 const expectedPayloads = {
-  reaction: ["New reaction", "Someone reacted to your post.", "/timeline.html"],
-  comment: ["New comment", "Someone commented on your post.", "/timeline.html"],
-  "message-request": ["New message request", "You have a new private conversation request.", "/community.html#messages-panel"],
-  "room-message": ["New room message", "A temporary room you joined has a new message.", "/community.html#rooms-panel"],
-  "reveal-request": ["New mutual reveal request", "You have a new mutual reveal request.", "/community.html#messages-panel"]
+  reaction: ["New reaction", "reacted to your post.", "/timeline.html"],
+  comment: ["New comment", "commented on your post.", "/timeline.html"],
+  "private-message": ["New private message", "sent you a private message.", "/community.html#messages-panel"],
+  "message-request": ["New message request", "sent you a private conversation request.", "/community.html#messages-panel"],
+  "room-message": ["New room message", "sent a message in a temporary room.", "/community.html#rooms-panel"],
+  "reveal-request": ["New mutual reveal request", "sent you a mutual reveal request.", "/community.html#messages-panel"]
 };
 for (const [type, [title, body, url]] of Object.entries(expectedPayloads)) {
   const payload = notificationPayload(type, "a".repeat(64));
