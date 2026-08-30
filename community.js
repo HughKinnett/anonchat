@@ -785,7 +785,7 @@ $("delete-chat").addEventListener("click", async () => {
     message.data().participants.includes(state.user.uid)
     && message.data().participants.includes(other)
   );
-  if (!window.confirm("Delete this entire private conversation for both users? This cannot be undone.")) return;
+  if (!window.confirm("Delete every message in this chat for both users? You will remain connected and can message again without another request.")) return;
   const control = $("delete-chat");
   control.disabled = true;
   control.textContent = "Deleting chat…";
@@ -796,9 +796,7 @@ $("delete-chat").addEventListener("click", async () => {
       references.slice(offset, offset + 400).forEach((reference) => batch.delete(reference));
       await batch.commit();
     }
-    const acceptedRequest = requestFor(other);
-    if (acceptedRequest) await deleteDoc(acceptedRequest.ref);
-    setStatus("Private conversation deleted permanently.");
+    setStatus("Chat messages deleted. This conversation remains accepted, so no new request is needed.");
   } catch {
     setStatus("Could not delete the entire chat.", true);
   } finally {

@@ -78,8 +78,10 @@ assert.doesNotMatch(source, /photo\.addEventListener\("load", \(\) => consumeVie
   "private photos are never consumed merely because the browser preloaded them");
 assert.match(source, /remove\.textContent = "Delete for everyone"[\s\S]{0,260}await deleteDoc\(message\.ref\)/,
   "individual private-message deletion targets the current stored message directly");
-assert.match(source, /const references = chatMessages\.map\(\(message\) => message\.ref\)[\s\S]{0,500}await deleteDoc\(acceptedRequest\.ref\)/,
-  "deleting a chat removes its current messages before deleting the accepted conversation");
+assert.match(source, /const references = chatMessages\.map\(\(message\) => message\.ref\)[\s\S]{0,500}This conversation remains accepted, so no new request is needed/,
+  "deleting a chat removes its messages while preserving the accepted conversation");
+assert.doesNotMatch(source, /await deleteDoc\(acceptedRequest\.ref\)/,
+  "chat deletion never removes the accepted request record");
 assert.doesNotMatch(source, /collection\(db, "directMessages"\)/,
   "private deletion no longer depends on the retired legacy collection");
 assert.match(directMessageMigration, /batch\.set\([\s\S]{0,180}batch\.delete\(message\.ref\)/,
