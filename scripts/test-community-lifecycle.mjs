@@ -72,8 +72,12 @@ assert.match(source, /Photo sent in this temporary room[\s\S]{0,100}item\.append
   "temporary-room photos remain visible for the room lifetime");
 assert.doesNotMatch(source, /Photo sent in this temporary room[\s\S]{0,160}consumeViewedPhoto/,
   "temporary-room photos are not view-once");
-assert.match(source, /Photo sent in this private conversation[\s\S]{0,160}consumeViewedPhoto/,
-  "private-message photos are consumed after a recipient views them");
+assert.match(source, /viewPhoto\.textContent = "View photo once"[\s\S]{0,260}revealedPrivatePhotos\.set\(message\.id, data\.imageData\)[\s\S]{0,160}consumeViewedPhoto\(message\)/,
+  "a recipient deliberately opens a private photo before it is consumed");
+assert.match(source, /const imageData = data\.senderId === state\.user\.uid \? data\.imageData : revealedImage/,
+  "an opened photo remains visible from session memory after its stored copy is consumed");
+assert.doesNotMatch(source, /photo\.addEventListener\("load", \(\) => consumeViewedPhoto/,
+  "private photos are never consumed merely because the browser preloaded them");
 assert.match(source, /legacyReference = doc\(db, "directMessages", message\.id\)[\s\S]{0,300}batch\.delete\(message\.ref\)[\s\S]{0,120}batch\.delete\(legacyReference\)/,
   "individual private-message deletion removes both current and legacy copies");
 assert.match(source, /collection\(db, "directMessages"\)[\s\S]{0,900}await deleteDoc\(acceptedRequest\.ref\)/,

@@ -143,6 +143,8 @@
 .message-photo-preview img,.message-photo { display: block; width: min(100%, 360px); max-height: 420px; border: 1px solid var(--border); border-radius: 16px; object-fit: contain; background: #080a0f; }
 .message-photo-preview button { margin-top: 6px; }
 .message .message-photo { margin-top: 7px; }
+.view-once-photo-button { width: fit-content; min-width: 112px; min-height: 43px; margin-top: 7px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 850; }
+.view-once-photo-status { margin-top: 7px; color: var(--muted) !important; }
 .direct-message-entry-row input { width: 100%; }
 .direct-message-composer .message-expiry-option {
   width: fit-content;

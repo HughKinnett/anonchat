@@ -31,6 +31,7 @@ let clearDirectMessageExpiryTimer = () => {};
 let stopRoomMessageListener = () => {};
 let pendingRoomImage = "";
 let pendingDirectImage = "";
+const revealedPrivatePhotos = new Map();
 const directMessageListeners = new Map();
 const directMessageBuckets = new Map();
 const stopDirectMessageListeners = () => {
@@ -685,6 +686,7 @@ const renderRequests = () => {
 };
 
 $("conversation-user").addEventListener("change", () => {
+  revealedPrivatePhotos.clear();
   renderDirectMessages();
   renderReveals();
 });
@@ -731,6 +733,7 @@ const renderDirectMessages = () => {
         batch.delete(message.ref);
         if (legacySnapshot.exists()) batch.delete(legacyReference);
         await batch.commit();
+        revealedPrivatePhotos.delete(message.id);
         setStatus("Private message deleted permanently.");
       } catch {
         remove.disabled = false;
@@ -740,13 +743,30 @@ const renderDirectMessages = () => {
     actions.append(remove);
     item.append(sender);
     if (data.text) item.append(text);
-    if (data.imageData) {
+    const revealedImage = revealedPrivatePhotos.get(message.id);
+    const imageData = data.senderId === state.user.uid ? data.imageData : revealedImage;
+    if (imageData) {
       const photo = document.createElement("img");
       photo.className = "message-photo";
-      photo.src = data.imageData;
+      photo.src = imageData;
       photo.alt = "Photo sent in this private conversation";
-      photo.addEventListener("load", () => consumeViewedPhoto(message), { once: true });
       item.append(photo);
+    } else if (data.imageData && data.senderId !== state.user.uid) {
+      const viewPhoto = document.createElement("button");
+      viewPhoto.type = "button";
+      viewPhoto.className = "view-once-photo-button";
+      viewPhoto.textContent = "View photo once";
+      viewPhoto.addEventListener("click", () => {
+        revealedPrivatePhotos.set(message.id, data.imageData);
+        renderDirectMessages();
+        void consumeViewedPhoto(message);
+      }, { once: true });
+      item.append(viewPhoto);
+    } else if (data.photoViewedAt) {
+      const viewed = document.createElement("small");
+      viewed.className = "view-once-photo-status";
+      viewed.textContent = "View-once photo opened";
+      item.append(viewed);
     }
     item.append(actions);
     return item;
@@ -945,6 +965,7 @@ $("download-data").addEventListener("click", () => {
 
 const stopCommunityResources = () => {
   clearPrivacyWatermark();
+  revealedPrivatePhotos.clear();
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
   clearRoomExpiryTimer();
   clearRoomExpiryTimer = () => {};
