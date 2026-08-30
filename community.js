@@ -944,7 +944,7 @@ onAuthStateChanged(auth, async (user) => {
   loadPrivacy();
   renderIdentity();
 
-  listen(collection(db, "users"), "users", () => { renderMessageUsers(); renderRequests(); });
+  listen(query(collection(db, "users"), limit(500)), "users", () => { renderMessageUsers(); renderRequests(); });
   state.moderation = createModerationClient({
     db, currentUid: user.uid, timestamp: serverTimestamp,
     firestore: { deleteDoc, doc, getDoc, setDoc, writeBatch }
@@ -973,7 +973,7 @@ onAuthStateChanged(auth, async (user) => {
       setStatus("Could not load block preferences.", true);
     }
   );
-  listen(query(collection(db, "rooms"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), orderBy(documentId())), "rooms", renderRooms);
+  listen(query(collection(db, "rooms"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), orderBy(documentId()), limit(100)), "rooms", renderRooms);
   listen(query(collection(db, "roomMembers"), where("uid", "==", user.uid)), "roomMemberships", renderRooms);
 
   const mergePrivate = (key, firstQuery, secondQuery, render, onReady) => {
@@ -991,8 +991,8 @@ onAuthStateChanged(auth, async (user) => {
   };
   mergePrivate(
     "requests",
-    query(collection(db, "messageRequests"), where("fromId", "==", user.uid)),
-    query(collection(db, "messageRequests"), where("toId", "==", user.uid)),
+    query(collection(db, "messageRequests"), where("fromId", "==", user.uid), limit(500)),
+    query(collection(db, "messageRequests"), where("toId", "==", user.uid), limit(500)),
     () => { renderRequests(); renderMessageUsers(); syncDirectMessageListeners(); },
     () => { state.requestsLoaded = true; renderRequestAction(); syncDirectMessageListeners(); }
   );

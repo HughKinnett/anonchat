@@ -996,7 +996,7 @@ service cloud.firestore {
         || isAdmin();
     }
 
-    function acceptedConversationMessage(requestId, message) {
+    function acceptedConversation(requestId) {
       let conversation = get(/databases/$(database)/documents/messageRequests/$(requestId));
       return exists(/databases/$(database)/documents/messageRequests/$(requestId))
         && conversation.data.status == 'accepted'
@@ -1004,12 +1004,7 @@ service cloud.firestore {
           || requestId == conversation.data.toId + '_' + conversation.data.fromId)
         && (conversation.data.fromId == request.auth.uid
           || conversation.data.toId == request.auth.uid)
-        && !pairIsBlocked(conversation.data.fromId, conversation.data.toId)
-        && message.participants is list
-        && message.participants.size() == 2
-        && conversation.data.fromId in message.participants
-        && conversation.data.toId in message.participants
-        && message.senderId in message.participants;
+        && !pairIsBlocked(conversation.data.fromId, conversation.data.toId);
     }
 
     function acceptedConversationMessageAfter(requestId, message) {
@@ -1252,7 +1247,7 @@ service cloud.firestore {
 
     match /messageRequests/{requestId}/messages/{messageId} {
       allow read: if activeUser()
-        && acceptedConversationMessage(requestId, resource.data);
+        && acceptedConversation(requestId);
       allow create: if activeUserAfter()
         && request.resource.data.keys().hasOnly([
           'participants', 'senderId', 'text', 'createdAt', 'expiresAt'

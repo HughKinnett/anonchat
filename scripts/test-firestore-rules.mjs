@@ -93,6 +93,13 @@ try {
   await assertSucceeds(getDocs(query(
     collection(userA, "messageRequests", "user-a_user-b", "messages")
   )));
+  await testEnv.withSecurityRulesDisabled(async (context) => setDoc(
+    doc(context.firestore(), "blocks", "user-a_user-b"),
+    { blockerUid: "user-a", blockedUid: "user-b", createdAt: new Date(3) }
+  ));
+  await assertFails(getDocs(query(
+    collection(userA, "messageRequests", "user-a_user-b", "messages")
+  )), "blocked participants cannot load the private conversation");
 
   // Participants cannot read messages until the request is accepted.
   await testEnv.clearFirestore();

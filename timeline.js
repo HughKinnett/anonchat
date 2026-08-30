@@ -78,6 +78,7 @@ const sessionGeneration = createSessionGeneration();
 let activeTimelineSession = 0;
 let clearNotificationExpiryTimer = () => {};
 let showingProfile = false;
+const TIMELINE_POST_LIMIT = window.matchMedia("(max-width: 700px)").matches ? 25 : 60;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
 const notificationPanel = document.getElementById("notification-panel");
@@ -1664,7 +1665,7 @@ onAuthStateChanged(auth, async (user) => {
   );
 
   listeners.push(listenForSession(
-    query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(100)),
+    query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(TIMELINE_POST_LIMIT)),
     (snapshot) => {
       syncReportedHolds("posts", snapshot.docs);
       postDocs = snapshot.docs;
@@ -1677,7 +1678,7 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(listenForSession(
-    query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(100)),
+    query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(TIMELINE_POST_LIMIT)),
     (snapshot) => {
       syncReportedHolds("communityPosts", snapshot.docs);
       communityPostDocs = snapshot.docs;
