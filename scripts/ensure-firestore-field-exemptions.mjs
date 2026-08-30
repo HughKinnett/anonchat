@@ -14,6 +14,7 @@ const main = async () => {
       `--collection-group=${entry.collectionGroup}`,
       "--database=(default)",
       "--disable-indexes",
+      "--async",
       `--project=${projectId}`,
       "--quiet"
     ], { encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 120_000 });
