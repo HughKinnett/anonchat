@@ -251,6 +251,11 @@
       "indexes": []
     },
     {
+      "collectionGroup": "messages",
+      "fieldPath": "senderId",
+      "indexes": [{ "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }]
+    },
+    {
       "collectionGroup": "comments",
       "fieldPath": "text",
       "indexes": []

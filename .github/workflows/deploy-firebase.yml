@@ -48,6 +48,9 @@ jobs:
       - name: Verify Firebase cost index policy
         run: npm run test:cost-indexes
 
+      - name: Verify Premium access policy
+        run: npm run test:premium
+
       - name: Ensure required Firestore indexes
         run: npm run rollout:ensure-indexes
         env:
@@ -55,6 +58,11 @@ jobs:
 
       - name: Ensure Firestore field index exemptions
         run: npm run rollout:ensure-field-exemptions
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+
+      - name: Grant launch accounts Founding access
+        run: npm run rollout:premium-founders
         env:
           GCLOUD_PROJECT: anonchatlogin
 

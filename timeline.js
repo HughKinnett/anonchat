@@ -1,5 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { isDesignatedAdmin } from "./auth-security-policy.mjs";
+import { premiumLabel } from "./premium-policy.mjs";
 import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
@@ -1639,7 +1640,10 @@ onAuthStateChanged(auth, async (user) => {
   renderSpotifySong(profile.data().spotifyTrackUrl || "");
   document.getElementById("display-name").textContent = profileUsername || "AnonChat user";
   document.getElementById("user-handle").textContent = profileUsername ? `@${profileUsername}` : "";
-  document.getElementById("membership-badge").textContent = isDesignatedAdmin(profileUsername) ? "Founder" : "Founding Member";
+  const premiumAccess = await getDoc(doc(db, "premiumAccess", user.uid));
+  if (!sessionIsCurrent()) return;
+  document.getElementById("membership-badge").textContent = premiumAccess.exists()
+    ? premiumLabel(premiumAccess.data()) : "Member";
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =

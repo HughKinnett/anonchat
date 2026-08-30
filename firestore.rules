@@ -507,6 +507,42 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true;
     }
 
+    function isPremiumUid(uid) {
+      return exists(/databases/$(database)/documents/premiumAccess/$(uid))
+        && get(/databases/$(database)/documents/premiumAccess/$(uid)).data.uid == uid
+        && get(/databases/$(database)/documents/premiumAccess/$(uid)).data.status == 'active'
+        && get(/databases/$(database)/documents/premiumAccess/$(uid)).data.tier in ['founder', 'founding', 'subscriber'];
+    }
+
+    function isPremiumUidAfter(uid) {
+      return existsAfter(/databases/$(database)/documents/premiumAccess/$(uid))
+        && getAfter(/databases/$(database)/documents/premiumAccess/$(uid)).data.uid == uid
+        && getAfter(/databases/$(database)/documents/premiumAccess/$(uid)).data.status == 'active'
+        && getAfter(/databases/$(database)/documents/premiumAccess/$(uid)).data.tier in ['founder', 'founding', 'subscriber'];
+    }
+
+    function premiumRoomMember(roomId, uid) {
+      return exists(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + uid));
+    }
+
+    function premiumRoomMemberAfter(roomId, uid) {
+      return existsAfter(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + uid));
+    }
+
+    function premiumRoomRole(roomId, uid) {
+      return get(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + uid)).data.role;
+    }
+
+    function premiumRoomOwner(roomId) {
+      return premiumRoomMember(roomId, request.auth.uid)
+        && premiumRoomRole(roomId, request.auth.uid) == 'owner';
+    }
+
+    function premiumRoomModerator(roomId) {
+      return premiumRoomMember(roomId, request.auth.uid)
+        && premiumRoomRole(roomId, request.auth.uid) == 'moderator';
+    }
+
     function activePushUser() {
       return activeUser()
         && !exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
@@ -921,6 +957,57 @@ service cloud.firestore {
         && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId));
     }
 
+    match /premiumAccess/{userId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /premiumSettings/{userId} {
+      allow read: if signedIn();
+      allow create, update: if activeUserAfter()
+        && request.auth.uid == userId
+        && isPremiumUidAfter(userId)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'onlineVisible', 'accent', 'profileFrame', 'cardStyle', 'bannerStyle', 'updatedAt'
+        ])
+        && request.resource.data.uid == userId
+        && request.resource.data.onlineVisible is bool
+        && request.resource.data.accent in ['violet', 'rose', 'ocean', 'emerald']
+        && request.resource.data.profileFrame in ['glow', 'double', 'minimal']
+        && request.resource.data.cardStyle in ['glass', 'solid', 'outline']
+        && request.resource.data.bannerStyle in ['midnight', 'aurora', 'ember']
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /premiumCheckout/{documentId} {
+      allow read: if signedIn() && documentId == 'public';
+      allow write: if false;
+    }
+
+    match /customers/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow write: if false;
+
+      match /checkout_sessions/{sessionId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow create: if activeUserAfter() && request.auth.uid == userId
+          && exists(/databases/$(database)/documents/premiumCheckout/public)
+          && get(/databases/$(database)/documents/premiumCheckout/public).data.mode == 'test'
+          && get(/databases/$(database)/documents/premiumCheckout/public).data.enabled == true
+          && request.resource.data.keys().hasOnly(['price', 'success_url', 'cancel_url'])
+          && request.resource.data.price == get(/databases/$(database)/documents/premiumCheckout/public).data.priceId
+          && request.resource.data.success_url == 'https://anonchatlogin.web.app/premium.html?checkout=success'
+          && request.resource.data.cancel_url == 'https://anonchatlogin.web.app/premium.html?checkout=cancelled';
+        allow update, delete: if false;
+      }
+
+      match /subscriptions/{subscriptionId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow write: if false;
+      }
+    }
+
     match /follows/{followId} {
       allow read: if signedIn();
       allow create: if activeUserAfter()
@@ -946,7 +1033,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['uid', 'openedAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.openedAt == request.time;
-      allow delete: if false;
+      allow delete: if activeUser() && request.auth.uid == userId;
     }
 
     match /notificationReads/{readId} {
@@ -1139,6 +1226,71 @@ service cloud.firestore {
         && request.resource.data.option <= 3
         && request.resource.data.createdAt == request.time;
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /premiumRooms/{roomId} {
+      allow read: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid));
+      allow create: if activeUserAfter() && isPremiumUidAfter(request.auth.uid)
+        && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'moderatorIds', 'createdAt', 'updatedAt', 'moderationState'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string && request.resource.data.name.size() >= 3 && request.resource.data.name.size() <= 40
+        && request.resource.data.topic is string && request.resource.data.topic.size() <= 100
+        && request.resource.data.moderatorIds == []
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.moderationState == 'visible'
+        && premiumRoomMemberAfter(roomId, request.auth.uid)
+        && getAfter(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + request.auth.uid)).data.role == 'owner';
+      allow update: if activeUserAfter() && premiumRoomOwner(roomId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moderatorIds', 'updatedAt'])
+        && request.resource.data.moderatorIds is list && request.resource.data.moderatorIds.size() <= 2
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin() || (activeUser() && premiumRoomOwner(roomId));
+    }
+
+    match /premiumRoomMembers/{memberId} {
+      allow read: if isAdmin() || (activeUser() && (resource.data.uid == request.auth.uid || premiumRoomMember(resource.data.roomId, request.auth.uid)));
+      allow create: if activeUserAfter()
+        && memberId == request.resource.data.roomId + '_' + request.resource.data.uid
+        && request.resource.data.keys().hasOnly(['roomId', 'uid', 'role', 'invitedBy', 'joinedAt'])
+        && request.resource.data.uid is string && isPremiumUidAfter(request.resource.data.uid)
+        && request.resource.data.role in ['owner', 'moderator', 'member']
+        && request.resource.data.invitedBy == request.auth.uid && request.resource.data.joinedAt == request.time
+        && ((request.resource.data.uid == request.auth.uid && request.resource.data.role == 'owner'
+            && existsAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId))
+            && getAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId)).data.ownerId == request.auth.uid)
+          || (exists(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId))
+            && (premiumRoomOwner(request.resource.data.roomId) || premiumRoomModerator(request.resource.data.roomId))
+            && (request.resource.data.role == 'member'
+              || (premiumRoomOwner(request.resource.data.roomId)
+                && request.resource.data.uid in getAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId)).data.moderatorIds))));
+      allow update: if activeUserAfter() && premiumRoomOwner(resource.data.roomId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.invitedBy == resource.data.invitedBy
+        && request.resource.data.joinedAt == resource.data.joinedAt
+        && request.resource.data.role in ['moderator', 'member']
+        && ((request.resource.data.role == 'moderator'
+            && resource.data.uid in getAfter(/databases/$(database)/documents/premiumRooms/$(resource.data.roomId)).data.moderatorIds)
+          || (request.resource.data.role == 'member'
+            && !(resource.data.uid in getAfter(/databases/$(database)/documents/premiumRooms/$(resource.data.roomId)).data.moderatorIds)));
+      allow delete: if isAdmin() || (activeUser() && (premiumRoomOwner(resource.data.roomId)
+        || (premiumRoomModerator(resource.data.roomId) && resource.data.role == 'member')
+        || (resource.data.uid == request.auth.uid && resource.data.role != 'owner')));
+    }
+
+    match /premiumRooms/{roomId}/messages/{messageId} {
+      allow read: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid));
+      allow create: if activeUserAfter() && isPremiumUidAfter(request.auth.uid)
+        && premiumRoomMemberAfter(roomId, request.auth.uid)
+        && request.resource.data.keys().hasOnly(['senderId', 'username', 'text', 'createdAt'])
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.text is string && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 500 && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid)
+        && (resource.data.senderId == request.auth.uid || premiumRoomOwner(roomId) || premiumRoomModerator(roomId)));
     }
 
     match /rooms/{roomId} {

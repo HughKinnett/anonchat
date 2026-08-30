@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { collection, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const ONLINE_WINDOW_MS = 15 * 60 * 1000;
 const sessionKey = uid => `anonchat.onlineFollowers.v1.${uid}`;
@@ -45,6 +45,13 @@ onAuthStateChanged(auth, async user => {
   } catch { /* Take a fresh opening snapshot. */ }
 
   try {
+    const privacy = await getDoc(doc(db, "premiumSettings", user.uid));
+    if (privacy.exists() && privacy.data().onlineVisible === false) {
+      await deleteDoc(doc(db, "appPresence", user.uid)).catch(() => {});
+      sessionStorage.setItem(key, "[]");
+      render([]);
+      return;
+    }
     await setDoc(doc(db, "appPresence", user.uid), { uid: user.uid, openedAt: serverTimestamp() }, { merge: true });
     const follows = await getDocs(query(collection(db, "follows"), where("followingId", "==", user.uid)));
     const followerIds = [...new Set(follows.docs.map(entry => entry.data().followerId).filter(Boolean))].slice(0, 100);

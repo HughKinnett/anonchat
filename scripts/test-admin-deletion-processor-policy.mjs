@@ -42,6 +42,7 @@ for (const required of [
   "votes-by-target", "timeline-votes-by-target", "follows-from-target", "follows-to-target", "direct-messages",
   "message-requests-from-target", "message-requests-to-target", "reveals-from-target", "reveals-to-target",
   "owned-rooms", "room-memberships", "room-messages", "owned-circles", "circle-memberships", "preferences", "private-profile",
+  "owned-premium-rooms", "premium-room-memberships", "premium-room-messages", "premium-access", "premium-settings", "stripe-customer",
   "report-intakes-by-target", "report-intakes-about-target", "case-reports-by-target", "moderation-cases-about-target",
   "report-receipts",
   "blocks-by-target", "blocks-of-target", "push-subscriptions",

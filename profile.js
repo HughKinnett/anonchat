@@ -10,6 +10,7 @@ import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
 import { createViewerBlockTracker, didViewerBlock, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { isDesignatedAdmin } from "./auth-security-policy.mjs";
+import { premiumLabel } from "./premium-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -40,6 +41,7 @@ let currentProfileUsername;
 let comments = [];
 let follows = [];
 let targetProfile;
+let targetPremiumAccess;
 let targetPosts = [];
 let targetCommunityPosts = [];
 let users = [];
@@ -133,7 +135,7 @@ const renderTargetProfileIdentity = () => {
   document.getElementById("profile-handle").textContent = targetBlocked ? "" : `@${targetProfile.username}`;
   const membershipBadge = document.getElementById("profile-membership-badge");
   membershipBadge.hidden = targetBlocked;
-  membershipBadge.textContent = isDesignatedAdmin(targetProfile.username) ? "Founder" : "Founding Member";
+  membershipBadge.textContent = targetPremiumAccess ? premiumLabel(targetPremiumAccess) : "Member";
   document.getElementById("view-profile-avatar").src = !targetBlocked && targetProfile.profileImage
     ? targetProfile.profileImage : "anonchat-anonymous.png";
   document.getElementById("view-profile-avatar").hidden = false;
@@ -879,6 +881,9 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   targetProfile = profileSnapshot.data();
+  const premiumSnapshot = await getDoc(doc(db, "premiumAccess", targetUserId));
+  if (!sessionIsCurrent()) return;
+  targetPremiumAccess = premiumSnapshot.exists() ? premiumSnapshot.data() : null;
   if (targetProfile.banned === true && currentUser.uid !== targetUserId) {
     document.getElementById("profile-name").textContent = "Unavailable profile";
     setStatus("This account is banned.", true);
