@@ -9,6 +9,7 @@
 .main-menu-panel a,.main-menu-panel button{display:flex;width:100%;min-height:44px;align-items:center;padding:10px 12px;border:0;border-radius:10px;background:transparent;color:#f7f8fb;text-align:left;text-decoration:none}
 .main-menu-panel a:hover,.main-menu-panel button:hover{background:rgba(139,92,246,.17)}
 .main-menu-panel .menu-danger{color:#fca5a5}
+.online-followers-menu{margin:7px 0;padding:10px 5px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)}.online-followers-heading{margin:0 7px 7px;color:#c4b5fd;font-size:.74rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.online-followers-list{display:grid;max-height:180px;overflow:auto}.online-followers-list small{padding:7px;color:#aeb4c3;line-height:1.35}.main-menu-panel .online-followers-list a{min-height:38px;padding:7px}.online-dot{width:9px;height:9px;margin-right:9px;border-radius:50%;background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.14)}
 .primary:disabled,.secondary:disabled{cursor:not-allowed}
 .primary[aria-busy=true],.secondary[aria-busy=true]{cursor:wait}
 .follow-button{min-height:34px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.05);color:var(--text);font-size:.82rem;font-weight:700}.room-card-actions{display:flex;flex:0 0 auto;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:8px}.message-report{display:flex;align-items:center;flex-wrap:wrap;gap:7px}.message-report select{width:auto;min-width:145px}

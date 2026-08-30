@@ -937,6 +937,18 @@ service cloud.firestore {
         && (resource.data.followerId == request.auth.uid || resource.data.followingId == request.auth.uid);
     }
 
+    match /appPresence/{userId} {
+      allow read: if activeUser()
+        && (request.auth.uid == userId
+          || exists(/databases/$(database)/documents/follows/$(userId + '_' + request.auth.uid)));
+      allow create, update: if activeUserAfter()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['uid', 'openedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.openedAt == request.time;
+      allow delete: if false;
+    }
+
     match /notificationReads/{readId} {
       allow read: if signedIn() && resource.data.uid == request.auth.uid;
       allow create: if activeUserAfter()
