@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.anonchat.app",
+      "sha256_cert_fingerprints": [
+        "3B:4F:C8:19:15:93:6A:96:EF:B6:D7:21:23:A3:E9:70:CF:98:6A:C8:C6:CA:1C:9C:B2:A2:B1:A4:A3:45:E4:E3"
+      ]
+    }
+  }
+]
