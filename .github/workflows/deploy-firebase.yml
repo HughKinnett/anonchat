@@ -40,6 +40,11 @@ jobs:
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
+      - name: Keep administrator authenticator support enabled
+        run: npm run auth:enable-totp
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+
       - name: Ensure required Firestore indexes
         run: npm run rollout:ensure-indexes
         env:

@@ -43,6 +43,7 @@
     "test:notification-rules": "firebase emulators:exec --only firestore \"node scripts/test-notification-rules.mjs\"",
     "test:notification-firestore-integration": "firebase emulators:exec --only firestore \"node scripts/test-notification-firestore-integration.mjs\"",
     "notification:process": "node scripts/notification-processor.mjs",
+    "auth:enable-totp": "node scripts/enable-totp-mfa.mjs",
     "test:workflow-policy": "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs && node scripts/test-production-rollout.mjs",
     "test:community-lifecycle": "node scripts/test-community-lifecycle.mjs",
     "test:timeline-query-compatibility": "node scripts/test-timeline-moderation-ui.mjs",
