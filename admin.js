@@ -3,7 +3,7 @@ import { recordPageActivity } from "./activity-integration.mjs";
 import { adminDeletionQueuePayloads, canAdminSetBanned, canQueueAdminDeletion, isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
 import { canConfirmDeletion, deletionDialogJobTransition, deletionJobRecord, filterModerationCases, filterUsers, generalContentDeletionPayloads, generalContentDeletionWriteMode, hasDeletionJob, isTerminalModerationAction, legacyRoomActionPayload, moderationActionPayload, moderationActionRetryPayload, moderationActionState, moderationActionsAvailable, moderationCaseRecord, moderationTranscriptMessage, processorHealth, queueFailureDialogTransition, resolveReportActionFocus, resolveUserFocus, sortInactiveUsers, statusForUser, timestampMillis } from "./admin-dashboard-policy.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { multiFactor, onAuthStateChanged, TotpMultiFactorGenerator } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { addDoc, collection, collectionGroup, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = id => document.getElementById(id);
@@ -11,6 +11,7 @@ const state = { users: [], posts: [], communityPosts: [], views: [], comments: [
 const unsubs = [];
 let adminUid = "", adminUser = null, userFilter = "all", reportFilter = "open", pageActive = true, listenersStarted = false, heartbeatTimer = null;
 let dialogState = { open: false, targetUid: "", submitting: false }, dialogTarget = null, dialogTrigger = null;
+let pendingAdminTotpSecret = null;
 const pendingModerationActions = new Map();
 const pendingLegacyRoomActions = new Set(), loadedModerationEvidence = new Map(), loadedRoomTranscripts = new Map(), reportActionUnsubs = new Map();
 const moderationEvidenceEpochs = new Map(), roomTranscriptEpochs = new Map();
@@ -20,6 +21,32 @@ const roomTranscriptPageSize = 100;
 const legacyRoomPageSize = 100, legacyRoomPageCursors = [];
 
 const setStatus = (message, error = false) => { $("admin-status").textContent = message; $("admin-status").style.color = error ? "#fca5a5" : ""; };
+const setAuthenticatorStatus = (message) => { $("admin-authenticator-status").textContent = message; };
+
+$("admin-authenticator-start").onclick = async () => {
+  setAuthenticatorStatus("Preparing authenticator setup…");
+  try {
+    pendingAdminTotpSecret = await TotpMultiFactorGenerator.generateSecret(await multiFactor(adminUser).getSession());
+    $("admin-authenticator-secret").textContent = pendingAdminTotpSecret.secretKey;
+    $("admin-authenticator-open").href = pendingAdminTotpSecret.generateQrCodeUrl(adminUser.email || "AnonChat admin", "AnonChat");
+    $("admin-authenticator-setup").hidden = false;
+    setAuthenticatorStatus("Add the key, then confirm the current code.");
+  } catch {
+    setAuthenticatorStatus("Setup could not start. Sign out, sign in again, and retry.");
+  }
+};
+
+$("admin-authenticator-confirm").onclick = async () => {
+  const code = $("admin-authenticator-code").value.replace(/\s/g, "");
+  if (!pendingAdminTotpSecret || !/^\d{6}$/.test(code)) { setAuthenticatorStatus("Enter the current 6-digit code."); return; }
+  try {
+    await multiFactor(adminUser).enroll(TotpMultiFactorGenerator.assertionForEnrollment(pendingAdminTotpSecret, code), "AnonChat administrator authenticator");
+    pendingAdminTotpSecret = null;
+    $("admin-authenticator-setup").hidden = true;
+    $("admin-authenticator-start").hidden = true;
+    setAuthenticatorStatus("Authenticator protection is enabled on this administrator account.");
+  } catch { setAuthenticatorStatus("That code was not accepted. Wait for a new code and try again."); }
+};
 const records = snapshot => snapshot.docs.map(entry => ({ id: entry.id, parentId: entry.ref.parent.parent?.id, ...entry.data() }));
 const formatDate = value => { const ms = timestampMillis(value); return ms === null ? "Activity not recorded" : new Date(ms).toLocaleString(); };
 const create = (name, text, className) => { const node = document.createElement(name); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
@@ -598,5 +625,9 @@ onAuthStateChanged(auth, async user => {
   const authorized = !profileData?.banned && reservation?.exists() && reservation.data().uid === user.uid && reservation.data().username === username;
   if (!authorized) { location.replace("timeline.html"); return; }
   adminUid = user.uid; adminUser = user; $("admin-identity").textContent = `Signed in as @${username}`;
+  if (multiFactor(user).enrolledFactors.some(factor => factor.factorId === TotpMultiFactorGenerator.FACTOR_ID)) {
+    $("admin-authenticator-start").hidden = true;
+    setAuthenticatorStatus("Authenticator protection is enabled on this administrator account.");
+  }
   void recordPageActivity({ surface: "admin", profile: profileData, user, db, firestore: { doc, updateDoc, serverTimestamp }, isAuthorizedAdmin: authorized }); startLiveData();
 });

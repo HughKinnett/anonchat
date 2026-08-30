@@ -12,6 +12,18 @@
   <section class="admin-hero"><div><p class="admin-kicker">Admin dashboard</p><h1>Take care of your community</h1><p id="admin-identity">Checking administrator access…</p></div><p id="last-updated">Waiting for live data…</p></section>
   <p id="admin-status" role="status" aria-live="polite"></p>
 
+  <section class="admin-panel admin-authenticator" aria-labelledby="admin-authenticator-title">
+    <div class="admin-panel-heading"><div><h2 id="admin-authenticator-title">Authenticator app</h2><p class="admin-note">Require a rotating 6-digit code when signing in to this administrator account.</p></div><button id="admin-authenticator-start" class="admin-action" type="button">Set up authenticator</button></div>
+    <div id="admin-authenticator-setup" hidden>
+      <p>Add this setup key in Google Authenticator, Microsoft Authenticator, Authy, or another TOTP app:</p>
+      <code id="admin-authenticator-secret" class="admin-authenticator-secret"></code>
+      <p><a id="admin-authenticator-open" class="admin-action nav-button" href="#">Open authenticator app</a></p>
+      <label for="admin-authenticator-code">Enter the current 6-digit code</label>
+      <div class="admin-authenticator-confirm"><input id="admin-authenticator-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"><button id="admin-authenticator-confirm" class="admin-action" type="button">Confirm</button></div>
+    </div>
+    <p id="admin-authenticator-status" class="admin-note" role="status" aria-live="polite"></p>
+  </section>
+
   <section class="admin-metrics" aria-label="Community totals">
     <article><strong id="metric-users">0</strong><span>Total Users</span></article>
     <article><strong id="metric-inactive">0</strong><span>Inactive 7+ Days</span></article>
