@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v67";
+const CACHE_NAME = "anonchat-v68";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -64,7 +64,7 @@ const APP_SHELL = [
   "./upload.js",
   "./pwa.js",
   "./manifest.webmanifest",
-  "./Untitled.jpeg"
+  "./anonchat-anonymous.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -104,11 +104,12 @@ self.addEventListener("fetch", (event) => {
 
 
 const PUSH_PAYLOADS = Object.freeze({
-  reaction: Object.freeze({ title: "New reaction", body: "Someone reacted to your post.", url: "/timeline.html" }),
-  comment: Object.freeze({ title: "New comment", body: "Someone commented on your post.", url: "/timeline.html" }),
-  "message-request": Object.freeze({ title: "New message request", body: "You have a new private conversation request.", url: "/community.html#messages-panel" }),
-  "room-message": Object.freeze({ title: "New room message", body: "A temporary room you joined has a new message.", url: "/community.html#rooms-panel" }),
-  "reveal-request": Object.freeze({ title: "New mutual reveal request", body: "You have a new mutual reveal request.", url: "/community.html#messages-panel" })
+  reaction: Object.freeze({ title: "New reaction", action: "reacted to your post.", url: "/timeline.html" }),
+  comment: Object.freeze({ title: "New comment", action: "commented on your post.", url: "/timeline.html" }),
+  "private-message": Object.freeze({ title: "New private message", action: "sent you a private message.", url: "/community.html#messages-panel" }),
+  "message-request": Object.freeze({ title: "New message request", action: "sent you a private conversation request.", url: "/community.html#messages-panel" }),
+  "room-message": Object.freeze({ title: "New room message", action: "sent a message in a temporary room.", url: "/community.html#rooms-panel" }),
+  "reveal-request": Object.freeze({ title: "New mutual reveal request", action: "sent you a mutual reveal request.", url: "/community.html#messages-panel" })
 });
 const FALLBACK_PUSH_PAYLOAD = Object.freeze({
   title: "AnonChat",
@@ -119,11 +120,12 @@ const FALLBACK_PUSH_PAYLOAD = Object.freeze({
 const exactPushPayload = (payload) => {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const keys = Object.keys(payload).sort();
-  if (keys.join("\u0000") !== ["body", "tag", "title", "type", "url"].sort().join("\u0000")) return null;
+  if (keys.join("\u0000") !== ["actorLabel", "body", "tag", "title", "type", "url"].sort().join("\u0000")) return null;
   const fixed = PUSH_PAYLOADS[payload.type];
-  if (!fixed || payload.title !== fixed.title || payload.body !== fixed.body || payload.url !== fixed.url) return null;
-  if (payload.title.length > 80 || payload.body.length > 160 || !/^anonchat-[0-9a-f]{64}$/.test(payload.tag)) return null;
-  return payload;
+  if (!fixed || payload.title !== fixed.title || payload.body !== fixed.action || payload.url !== fixed.url) return null;
+  if (!/^[A-Za-z0-9_]{1,40}$/.test(payload.actorLabel)
+    || payload.title.length > 80 || !/^anonchat-[0-9a-f]{64}$/.test(payload.tag)) return null;
+  return { ...payload, body: `@${payload.actorLabel} ${fixed.action}` };
 };
 
 self.addEventListener("push", (event) => {
@@ -133,8 +135,8 @@ self.addEventListener("push", (event) => {
   const target = safeNotificationTarget(payload.url);
   event.waitUntil(self.registration.showNotification(payload.title, {
     body: payload.body,
-    icon: "./Untitled.jpeg",
-    badge: "./Untitled.jpeg",
+    icon: "./anonchat-anonymous.png",
+    badge: "./anonchat-anonymous.png",
     tag: payload.tag,
     data: { url: target }
   }));

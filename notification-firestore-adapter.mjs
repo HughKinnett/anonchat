@@ -21,6 +21,7 @@ const PROCESSOR_PATH = "system/notificationProcessor";
 const SOURCE_COLLECTIONS = Object.freeze({
   reaction: { collection: "reactions", group: true },
   comment: { collection: "comments", group: true },
+  "private-message": { collection: "messages", group: true },
   "message-request": { collection: "messageRequests" },
   "room-message": { collection: "roomMessages" },
   "reveal-request": { collection: "reveals" }
@@ -145,6 +146,27 @@ export class FirestoreNotificationAdapter {
     if (!snapshot.exists) return undefined;
     const data = snapshot.data();
     return data.type === "repost" ? data.originalAuthorId : data.authorId;
+  }
+
+  async userName(uid) {
+    const snapshot = await this.db.collection("users").doc(uid).get();
+    const username = snapshot.exists ? snapshot.data().username : "";
+    return typeof username === "string" && /^[A-Za-z0-9_]{1,40}$/.test(username)
+      ? username
+      : "Someone";
+  }
+
+  async roomAlias(roomId, senderId, sourceCreatedAt) {
+    const snapshot = await this.db.collection("roomMessages")
+      .where("roomId", "==", roomId)
+      .where("senderId", "==", senderId)
+      .where("createdAt", "==", sourceCreatedAt)
+      .limit(1)
+      .get();
+    const alias = snapshot.docs[0]?.data()?.tempName;
+    return typeof alias === "string" && /^[A-Za-z0-9_]{1,40}$/.test(alias)
+      ? alias
+      : "Someone";
   }
 
   async roomMembers(source) {

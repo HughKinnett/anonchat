@@ -2,8 +2,8 @@ export const clearProfileProtectedMetadata = ({ document, renderSpotify }, messa
   document.title = "Loading profile — AnonChat";
   document.getElementById("profile-name").textContent = message;
   document.getElementById("profile-handle").textContent = "";
-  document.getElementById("view-profile-avatar").src = "Untitled.jpeg";
-  document.getElementById("view-profile-cover").src = "Untitled.jpeg";
+  document.getElementById("view-profile-avatar").src = "anonchat-anonymous.png";
+  document.getElementById("view-profile-cover").src = "anonchat-anonymous.png";
   const followersLink = document.getElementById("profile-followers");
   followersLink.textContent = "— followers";
   followersLink.removeAttribute("href");

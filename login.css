@@ -20,7 +20,7 @@ body {
   margin: 0;
   background:
     linear-gradient(100deg, rgba(7, 9, 14, 0.94), rgba(7, 9, 14, 0.64)),
-    url("Untitled.jpeg") center / cover fixed;
+    url("anonchat-anonymous.png") center / cover fixed;
   color: var(--text);
 }
 

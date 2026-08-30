@@ -1,6 +1,7 @@
 export const NOTIFICATION_TYPES = Object.freeze([
   "reaction",
   "comment",
+  "private-message",
   "message-request",
   "room-message",
   "reveal-request"
@@ -23,11 +24,12 @@ export const TERMINAL_NOTIFICATION_STATUSES = Object.freeze(["delivered", "suppr
 
 const TYPE_SET = new Set(NOTIFICATION_TYPES);
 const PAYLOADS = Object.freeze({
-  reaction: Object.freeze({ title: "New reaction", body: "Someone reacted to your post.", url: "/timeline.html" }),
-  comment: Object.freeze({ title: "New comment", body: "Someone commented on your post.", url: "/timeline.html" }),
-  "message-request": Object.freeze({ title: "New message request", body: "You have a new private conversation request.", url: "/community.html#messages-panel" }),
-  "room-message": Object.freeze({ title: "New room message", body: "A temporary room you joined has a new message.", url: "/community.html#rooms-panel" }),
-  "reveal-request": Object.freeze({ title: "New mutual reveal request", body: "You have a new mutual reveal request.", url: "/community.html#messages-panel" })
+  reaction: Object.freeze({ title: "New reaction", body: "reacted to your post.", url: "/timeline.html" }),
+  comment: Object.freeze({ title: "New comment", body: "commented on your post.", url: "/timeline.html" }),
+  "private-message": Object.freeze({ title: "New private message", body: "sent you a private message.", url: "/community.html#messages-panel" }),
+  "message-request": Object.freeze({ title: "New message request", body: "sent you a private conversation request.", url: "/community.html#messages-panel" }),
+  "room-message": Object.freeze({ title: "New room message", body: "sent a message in a temporary room.", url: "/community.html#rooms-panel" }),
+  "reveal-request": Object.freeze({ title: "New mutual reveal request", body: "sent you a mutual reveal request.", url: "/community.html#messages-panel" })
 });
 
 export const canonicalTimestamp = (value) => {
@@ -78,10 +80,13 @@ const sha256 = async (value, subtle = globalThis.crypto?.subtle) => {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
-export const notificationPayload = (type, eventId) => {
+export const notificationPayload = (type, eventId, actorLabel = "Someone") => {
   if (!TYPE_SET.has(type)) throw codedError("INVALID_NOTIFICATION_TYPE");
   if (!/^[0-9a-f]{64}$/.test(eventId)) throw codedError("INVALID_EVENT_ID");
-  return { type, ...PAYLOADS[type], tag: `anonchat-${eventId}` };
+  const label = typeof actorLabel === "string" && /^[A-Za-z0-9_]{1,40}$/.test(actorLabel)
+    ? actorLabel
+    : "Someone";
+  return { type, actorLabel: label, ...PAYLOADS[type], tag: `anonchat-${eventId}` };
 };
 
 export const sourceCursor = (source) => {
@@ -147,6 +152,13 @@ export const createDeliveryId = (eventId, subscriptionId, subscriptionFingerprin
 export const validateTrustedSource = (type, data, nowMillis) => {
   if (!TYPE_SET.has(type) || !Number.isFinite(timestampMillis(data?.createdAt))) return false;
   if (["reaction", "comment"].includes(type)) return nonempty(data.uid);
+  if (type === "private-message") {
+    return nonempty(data.senderId) && Array.isArray(data.participants)
+      && data.participants.length === 2
+      && new Set(data.participants).size === 2
+      && data.participants.every(nonempty)
+      && data.participants.includes(data.senderId);
+  }
   if (["message-request", "reveal-request"].includes(type)) {
     return nonempty(data.fromId) && nonempty(data.toId) && data.fromId !== data.toId && data.status === "pending";
   }

@@ -72,7 +72,7 @@ const personCard = (uid) => {
   link.className = "connection-person";
   link.href = `profile.html?uid=${encodeURIComponent(uid)}`;
   const avatar = document.createElement("img");
-  avatar.src = data.profileImage || "Untitled.jpeg";
+  avatar.src = data.profileImage || "anonchat-anonymous.png";
   avatar.alt = "";
   const name = document.createElement("strong");
   name.textContent = `@${data.username || "anonymous"}`;

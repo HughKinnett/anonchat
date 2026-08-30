@@ -27,7 +27,7 @@ const safeLog = (logger, level, code) => {
   if (typeof method === "function") method.call(logger, code);
 };
 
-const actorFor = (type, data) => type === "room-message"
+const actorFor = (type, data) => ["room-message", "private-message"].includes(type)
   ? data.senderId
   : ["message-request", "reveal-request"].includes(type)
     ? data.fromId
@@ -65,6 +65,9 @@ const recipientsFor = async (adapter, type, source) => {
   if (["reaction", "comment"].includes(type)) {
     const author = await adapter.postAuthor(source);
     return author && author !== actorUid ? [author] : [];
+  }
+  if (type === "private-message") {
+    return source.data.participants.filter((uid) => uid !== actorUid);
   }
   if (["message-request", "reveal-request"].includes(type)) return [source.data.toId];
   const members = await adapter.roomMembers(source);
@@ -313,7 +316,10 @@ export const deliverNotificationEvents = async ({
           try {
             invocation.sends += 1;
             result.sent += 1;
-            await sendPush(subscription, notificationPayload(claim.data.type, claim.id));
+            const actorLabel = claim.data.type === "room-message"
+              ? await adapter.roomAlias(claim.data.roomId, claim.data.actorUid, claim.data.sourceCreatedAt)
+              : await adapter.userName(claim.data.actorUid);
+            await sendPush(subscription, notificationPayload(claim.data.type, claim.id, actorLabel));
           } catch (error) {
             pushError = error;
           }

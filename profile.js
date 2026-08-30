@@ -130,11 +130,11 @@ const renderTargetProfileIdentity = () => {
   document.getElementById("profile-name").textContent = targetBlocked ? "Unavailable profile" : targetProfile.username;
   document.getElementById("profile-handle").textContent = targetBlocked ? "" : `@${targetProfile.username}`;
   document.getElementById("view-profile-avatar").src = !targetBlocked && targetProfile.profileImage
-    ? targetProfile.profileImage : "Untitled.jpeg";
+    ? targetProfile.profileImage : "anonchat-anonymous.png";
   if (!targetBlocked && targetProfile.coverImage) {
     document.getElementById("view-profile-cover").src = targetProfile.coverImage;
   } else {
-    document.getElementById("view-profile-cover").src = "Untitled.jpeg";
+    document.getElementById("view-profile-cover").src = "anonchat-anonymous.png";
   }
 };
 
