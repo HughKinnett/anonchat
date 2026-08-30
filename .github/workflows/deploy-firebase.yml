@@ -40,8 +40,8 @@ jobs:
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Keep administrator authenticator support enabled
-        run: npm run auth:enable-totp
+      - name: Keep authenticator protection disabled
+        run: npm run auth:disable-totp
         env:
           GCLOUD_PROJECT: anonchatlogin
 

@@ -8,13 +8,11 @@ import {
   browserSessionPersistence,
   createUserWithEmailAndPassword,
   deleteUser,
-  getMultiFactorResolver,
   sendEmailVerification,
   sendPasswordResetEmail,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   setPersistence,
-  TotpMultiFactorGenerator,
   updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
@@ -77,21 +75,6 @@ const requirePasswordReset = async (email) => {
   setStatus("Three incorrect attempts were detected. A password-reset link was sent to that email. Reset the password before signing in again.", true);
 };
 
-const requestTotpCode = () => {
-  const value = window.prompt("Enter the 6-digit code from your authenticator app.");
-  if (value === null) throw Object.assign(new Error("mfa-cancelled"), { code: "auth/mfa-cancelled" });
-  const code = value.replace(/\s/g, "");
-  if (!/^\d{6}$/.test(code)) throw Object.assign(new Error("mfa-invalid"), { code: "auth/invalid-verification-code" });
-  return code;
-};
-
-const finishAdminMfaSignIn = async (error) => {
-  const resolver = getMultiFactorResolver(auth, error);
-  const hint = resolver.hints.find((entry) => entry.factorId === TotpMultiFactorGenerator.FACTOR_ID);
-  if (!hint) throw error;
-  return resolver.resolveSignIn(TotpMultiFactorGenerator.assertionForSignIn(hint.uid, requestTotpCode()));
-};
-
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     await exitAfterAuthLoss({ redirect: () => {} });
@@ -127,13 +110,7 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
       authInProgress = false;
       return;
     }
-    let credential;
-    try {
-      credential = await signInAcrossDevices(normalizedEmail, password);
-    } catch (error) {
-      if (error.code === "auth/multi-factor-auth-required") credential = await finishAdminMfaSignIn(error);
-      else throw error;
-    }
+    const credential = await signInAcrossDevices(normalizedEmail, password);
     clearFailures(window.localStorage, normalizedEmail);
     if (!credential.user.emailVerified) {
       await sendEmailVerification(credential.user, { url: `${window.location.origin}/index.html` });
@@ -148,6 +125,11 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
     window.location.replace("timeline.html");
   } catch (error) {
     authInProgress = false;
+    if (error.code === "auth/too-many-requests") {
+      clearFailures(window.localStorage, email);
+      setStatus("Firebase temporarily paused sign-in attempts for this account or network. AnonChat's local attempt counter has been reset. Wait for Firebase's cooldown, or use Forgot password below now.", true);
+      return;
+    }
     if (invalidCredentialCodes.includes(error.code)) {
       const attempts = recordInvalidCredential(window.localStorage, email);
       if (attempts.resetRequired) {
@@ -159,10 +141,6 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
     }
     if (error.code === "auth/email-not-verified") {
       setStatus("Verify your email before signing in. A new verification link was sent.", true);
-      return;
-    }
-    if (["auth/invalid-verification-code", "auth/mfa-cancelled"].includes(error.code)) {
-      setStatus("The authenticator code was not accepted. Sign in again and enter the current 6-digit code.", true);
       return;
     }
     setStatus(signInMessage(error), true);

@@ -10,7 +10,7 @@ import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
 import { createViewerBlockTracker, didViewerBlock, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { isDesignatedAdmin } from "./auth-security-policy.mjs";
-import { multiFactor, onAuthStateChanged, TotpMultiFactorGenerator } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
@@ -58,10 +58,6 @@ const sessionGeneration = createSessionGeneration();
 let activeProfileSession = 0;
 const PROFILE_FEED_LIMIT = 50;
 let postsRenderQueued = false;
-let pendingTotpSecret = null;
-const mfaCard = document.getElementById("admin-mfa-card");
-const mfaSetup = document.getElementById("admin-mfa-setup");
-const mfaStatus = document.getElementById("admin-mfa-status");
 const schedulePostsRender = () => {
   if (postsRenderQueued) return;
   postsRenderQueued = true;
@@ -70,43 +66,6 @@ const schedulePostsRender = () => {
 const profileSpotifyCard = document.getElementById("profile-spotify-card");
 const profileSpotifyPlayer = document.getElementById("profile-spotify-player");
 
-document.getElementById("admin-mfa-start")?.addEventListener("click", async () => {
-  mfaStatus.textContent = "Preparing authenticator setup…";
-  try {
-    const session = await multiFactor(currentUser).getSession();
-    pendingTotpSecret = await TotpMultiFactorGenerator.generateSecret(session);
-    document.getElementById("admin-mfa-secret").textContent = pendingTotpSecret.secretKey;
-    document.getElementById("admin-mfa-open").href = pendingTotpSecret.generateQrCodeUrl(currentUser.email || currentProfileUsername, "AnonChat");
-    mfaSetup.hidden = false;
-    mfaStatus.textContent = "Add the key, then confirm the current code.";
-  } catch (error) {
-    const messages = {
-      "auth/requires-recent-login": "For security, sign out and sign back in before setting up the authenticator.",
-      "auth/unverified-email": "Verify this administrator account's email before setting up the authenticator.",
-      "auth/operation-not-allowed": "Authenticator support is not enabled in Firebase yet.",
-      "auth/unsupported-first-factor": "This account's current sign-in method cannot be used with an authenticator.",
-      "auth/maximum-second-factor-count-exceeded": "This account already has the maximum number of sign-in factors."
-    };
-    mfaStatus.textContent = messages[error?.code] || `Authenticator setup could not start (${error?.code || "browser-error"}). Refresh once and retry.`;
-  }
-});
-
-document.getElementById("admin-mfa-confirm")?.addEventListener("click", async () => {
-  const code = document.getElementById("admin-mfa-code").value.replace(/\s/g, "");
-  if (!pendingTotpSecret || !/^\d{6}$/.test(code)) {
-    mfaStatus.textContent = "Enter the current 6-digit code.";
-    return;
-  }
-  try {
-    await multiFactor(currentUser).enroll(TotpMultiFactorGenerator.assertionForEnrollment(pendingTotpSecret, code), "AnonChat administrator authenticator");
-    pendingTotpSecret = null;
-    mfaSetup.hidden = true;
-    document.getElementById("admin-mfa-start").hidden = true;
-    mfaStatus.textContent = "Authenticator protection is enabled on this administrator account.";
-  } catch {
-    mfaStatus.textContent = "That code was not accepted. Wait for a new code and try again.";
-  }
-});
 const userReportTarget = () => ({ targetKind: "user", targetCollection: "users", targetId: targetUserId, reportedUserId: targetUserId });
 const postReportTarget = (postDoc, post) => ({
   targetKind: postDoc.ref.parent.id === "communityPosts" ? "communityPost" : "post",
@@ -938,11 +897,6 @@ onAuthStateChanged(auth, async (user) => {
   const targetIsAdmin = isDesignatedAdmin(targetProfile.username);
   document.getElementById("profile-admin-link").hidden =
     !(viewerIsAdmin && targetIsAdmin && currentUser.uid === targetUserId);
-  mfaCard.hidden = !(viewerIsAdmin && targetIsAdmin && currentUser.uid === targetUserId);
-  if (!mfaCard.hidden && multiFactor(currentUser).enrolledFactors.some((factor) => factor.factorId === TotpMultiFactorGenerator.FACTOR_ID)) {
-    document.getElementById("admin-mfa-start").hidden = true;
-    mfaStatus.textContent = "Authenticator protection is enabled on this administrator account.";
-  }
   const viewDay = new Date().toISOString().slice(0, 10);
   setDoc(doc(db, "pageViews", viewDay), {
     date: viewDay,

@@ -44,20 +44,6 @@
       </div>
     </section>
 
-    <section id="admin-mfa-card" class="spotify-profile-card admin-mfa-card" aria-labelledby="admin-mfa-title" hidden>
-      <div class="spotify-card-heading"><div><p class="eyebrow">Administrator security</p><h2 id="admin-mfa-title">Authenticator app</h2></div></div>
-      <p id="admin-mfa-description">Protect this administrator profile with a rotating 6-digit code.</p>
-      <button id="admin-mfa-start" class="primary-button" type="button">Set up authenticator</button>
-      <div id="admin-mfa-setup" hidden>
-        <p>Open Google Authenticator, Microsoft Authenticator, Authy, or another TOTP app and add this setup key:</p>
-        <code id="admin-mfa-secret" class="admin-mfa-secret"></code>
-        <p><a id="admin-mfa-open" class="secondary-button nav-button" href="#">Open authenticator app</a></p>
-        <label for="admin-mfa-code">Enter the current 6-digit code</label>
-        <div class="spotify-input-row"><input id="admin-mfa-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"><button id="admin-mfa-confirm" class="primary-button" type="button">Confirm</button></div>
-      </div>
-      <p id="admin-mfa-status" role="status" aria-live="polite"></p>
-    </section>
-
     <section id="profile-spotify-card" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-spotify-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="profile-spotify-title">Playing on Spotify</h2></div></div>
       <div id="profile-spotify-player"></div>

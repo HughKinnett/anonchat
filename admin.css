@@ -31,5 +31,3 @@ button, .admin-action, .nav-button {
   color: #ddd6fe !important; font-size: 0.82rem !important; font-weight: 800 !important;
 }
 button:hover, .admin-action:hover, .nav-button:hover { background: rgba(139, 92, 246, 0.28) !important; }
-.admin-authenticator[hidden], #admin-authenticator-setup[hidden], #admin-authenticator-start[hidden] { display:none !important; }
-.admin-authenticator-secret{display:block;overflow-wrap:anywhere;margin:10px 0;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:#ddd6fe;user-select:all}.admin-authenticator label{display:block;margin:10px 0 7px;font-weight:800}.admin-authenticator-confirm{display:flex;flex-wrap:wrap;gap:8px}.admin-authenticator-confirm input{box-sizing:border-box;min-height:44px;padding:0 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:white;font:inherit}

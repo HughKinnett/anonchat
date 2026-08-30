@@ -9,15 +9,15 @@ try {
   await getAuth(app).projectConfigManager().updateProjectConfig({
     multiFactorConfig: {
       providerConfigs: [{
-        state: "ENABLED",
+        state: "DISABLED",
         totpProviderConfig: { adjacentIntervals: 5 }
       }]
     }
   });
   const configuration = await getAuth(app).projectConfigManager().getProjectConfig();
   const provider = configuration.multiFactorConfig?.providerConfigs?.find(entry => entry.totpProviderConfig);
-  if (provider?.state !== "ENABLED") throw new Error("TOTP configuration verification failed");
-  console.log(`TOTP_MFA_ENABLED adjacentIntervals=${provider.totpProviderConfig.adjacentIntervals}`);
+  if (provider?.state !== "DISABLED") throw new Error("TOTP disable verification failed");
+  console.log("TOTP_MFA_DISABLED");
 } finally {
   await deleteApp(app);
 }
