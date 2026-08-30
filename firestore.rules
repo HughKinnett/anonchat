@@ -1182,7 +1182,7 @@ service cloud.firestore {
         && resource.data.get('moderationState', 'visible') != 'hidden'
         && linkedRoomAvailable(resource.data.roomId));
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'text', 'expiresAt', 'moderationState', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'text', 'imageData', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.senderId == request.auth.uid
         && roomAvailableAfter(request.resource.data.roomId)
         && !pairIsBlocked(request.auth.uid,
@@ -1190,8 +1190,10 @@ service cloud.firestore {
         && request.resource.data.tempName is string
         && request.resource.data.tempName.size() <= 40
         && request.resource.data.text is string
-        && request.resource.data.text.size() >= 1
+        && (request.resource.data.text.size() >= 1
+          || request.resource.data.get('imageData', '').size() > 0)
         && request.resource.data.text.size() <= 280
+        && request.resource.data.get('imageData', '').size() <= 780000
         && request.resource.data.moderationState == 'visible'
         && validRoomMessageExpiry(request.resource.data.roomId)
         && request.resource.data.createdAt == request.time;
@@ -1250,12 +1252,14 @@ service cloud.firestore {
         && acceptedConversation(requestId);
       allow create: if activeUserAfter()
         && request.resource.data.keys().hasOnly([
-          'participants', 'senderId', 'text', 'createdAt', 'expiresAt'
+          'participants', 'senderId', 'text', 'imageData', 'createdAt', 'expiresAt'
         ])
         && acceptedConversationMessageAfter(requestId, request.resource.data)
         && request.resource.data.text is string
-        && request.resource.data.text.size() >= 1
+        && (request.resource.data.text.size() >= 1
+          || request.resource.data.get('imageData', '').size() > 0)
         && request.resource.data.text.size() <= 500
+        && request.resource.data.get('imageData', '').size() <= 780000
         && request.resource.data.createdAt == request.time
         && (!request.resource.data.keys().hasAny(['expiresAt'])
           || (request.resource.data.expiresAt is timestamp
@@ -1263,7 +1267,16 @@ service cloud.firestore {
               + duration.value(55, 'm')
             && request.resource.data.expiresAt <= request.time + duration.value(24, 'h')
               + duration.value(5, 'm')));
-      allow update: if false;
+      allow update: if activeUserAfter()
+        && acceptedConversation(requestId)
+        && request.auth.uid in resource.data.participants
+        && resource.data.senderId != request.auth.uid
+        && resource.data.get('imageData', '').size() > 0
+        && request.resource.data.get('imageData', '') == ''
+        && request.resource.data.photoViewedBy == request.auth.uid
+        && request.resource.data.photoViewedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['imageData', 'photoViewedBy', 'photoViewedAt']);
       allow delete: if signedIn()
         && request.auth.uid in resource.data.participants;
     }

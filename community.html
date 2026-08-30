@@ -59,7 +59,15 @@
         <button class="dialog-close" type="button" aria-label="Close">×</button>
         <h2 id="room-title"></h2><p id="room-alias" class="pill"></p><p id="room-disappears" class="muted" aria-live="polite"></p>
         <div id="room-messages" class="message-stream"></div>
-        <form id="room-message-form" class="inline-form"><input id="room-message" maxlength="280" required placeholder="Message as your temporary identity"><button class="primary">Send</button></form>
+        <form id="room-message-form" class="message-photo-composer">
+          <div class="message-entry-row">
+            <input id="room-message" maxlength="280" placeholder="Message as your temporary identity">
+            <label class="photo-bubble" for="room-photo-upload" aria-label="Add photo to temporary-room message" aria-pressed="false" role="button" tabindex="0" title="Add photo"><span aria-hidden="true">📷＋</span></label>
+            <input id="room-photo-upload" type="file" accept="image/*" hidden>
+            <button class="primary">Send</button>
+          </div>
+          <div id="room-photo-preview-wrap" class="message-photo-preview" hidden><img id="room-photo-preview" alt="Selected temporary-room photo preview"><button id="remove-room-photo" type="button">Remove photo</button></div>
+        </form>
       </dialog>
     </section>
 
@@ -77,7 +85,13 @@
           <label>Conversation<select id="conversation-user"></select></label>
           <div id="direct-messages" class="message-stream"></div>
           <form id="direct-message-form" class="direct-message-composer">
-            <div class="direct-message-entry-row"><input id="direct-message" maxlength="500" required placeholder="Private message"><button class="primary">Send</button></div>
+            <div class="direct-message-entry-row">
+              <input id="direct-message" maxlength="500" placeholder="Private message">
+              <label class="photo-bubble" for="direct-photo-upload" aria-label="Add photo to private message" aria-pressed="false" role="button" tabindex="0" title="Add photo"><span aria-hidden="true">📷＋</span></label>
+              <input id="direct-photo-upload" type="file" accept="image/*" hidden>
+              <button class="primary">Send</button>
+            </div>
+            <div id="direct-photo-preview-wrap" class="message-photo-preview" hidden><img id="direct-photo-preview" alt="Selected private-message photo preview"><button id="remove-direct-photo" type="button">Remove photo</button></div>
             <label class="message-expiry-option"><input id="direct-message-disappear" type="checkbox"> Disappear after 24 hours</label>
           </form>
           <div class="chat-management-row"><button id="delete-chat" class="primary" type="button">Delete chat</button></div>

@@ -129,10 +129,20 @@
 }
 .direct-message-entry-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
 }
+
+.message-photo-composer { display: grid; gap: 8px; margin-top: 10px; }
+.message-entry-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+.photo-bubble { display: grid; width: 44px; height: 44px; place-items: center; flex: 0 0 44px; border: 1px solid rgba(167,139,250,.5); border-radius: 50%; background: linear-gradient(135deg,rgba(139,92,246,.22),rgba(59,130,246,.1)); color: white; cursor: pointer; font-size: 1.05rem; box-shadow: 0 6px 16px rgba(139,92,246,.18); }
+.photo-bubble:hover,.photo-bubble.is-selected { border-color: #c4b5fd; background: linear-gradient(145deg,#8b5cf6,#6d28d9); }
+.photo-bubble:focus-visible { outline: 3px solid #ddd6fe; outline-offset: 3px; }
+.message-photo-preview { position: relative; width: min(100%, 360px); }
+.message-photo-preview img,.message-photo { display: block; width: min(100%, 360px); max-height: 420px; border: 1px solid var(--border); border-radius: 16px; object-fit: contain; background: #080a0f; }
+.message-photo-preview button { margin-top: 6px; }
+.message .message-photo { margin-top: 7px; }
 .direct-message-entry-row input { width: 100%; }
 .direct-message-composer .message-expiry-option {
   width: fit-content;
@@ -145,8 +155,9 @@
 }
 #delete-chat { position: static; }
 @media (max-width: 520px) {
-  .direct-message-entry-row { grid-template-columns: 1fr; }
+  .direct-message-entry-row,.message-entry-row { grid-template-columns: minmax(0, 1fr) auto; }
   .direct-message-entry-row button { width: 100%; }
+  .direct-message-entry-row .primary,.message-entry-row .primary { grid-column: 1 / -1; width: 100%; }
 }
 
 

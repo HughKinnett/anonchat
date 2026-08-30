@@ -10,7 +10,7 @@ import { createViewerBlockTracker, isBlockedActor } from "./viewer-block-policy.
 import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  addDoc, collection, deleteDoc, doc, documentId, getDoc, limit, onSnapshot, orderBy, query,
+  addDoc, collection, deleteDoc, deleteField, doc, documentId, getDoc, limit, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -28,6 +28,8 @@ let activeCommunitySession = 0;
 let clearRoomExpiryTimer = () => {};
 let clearDirectMessageExpiryTimer = () => {};
 let stopRoomMessageListener = () => {};
+let pendingRoomImage = "";
+let pendingDirectImage = "";
 const directMessageListeners = new Map();
 const directMessageBuckets = new Map();
 const stopDirectMessageListeners = () => {
@@ -88,6 +90,15 @@ const scheduleActiveRoomExpiry = () => {
 const aggressive = /\b(fuck|bitch|kill|hate|stupid|idiot|dumb|worthless|shut up)\b/i;
 const safeToSend = (text) => !state.preferences?.contextCheck || !aggressive.test(text) ||
   window.confirm("This may come across as aggressive. Do you want to send it as written?");
+const consumeViewedPhoto = (message) => {
+  const data = message.data();
+  if (!data.imageData || data.senderId === state.user?.uid) return;
+  updateDoc(message.ref, {
+    imageData: deleteField(),
+    photoViewedBy: state.user.uid,
+    photoViewedAt: serverTimestamp()
+  }).catch(() => setStatus("That view-once photo has already disappeared."));
+};
 
 
 const attachMentionAutocomplete = (input) => {
@@ -153,6 +164,79 @@ const attachMentionAutocomplete = (input) => {
 
 attachMentionAutocomplete($("room-message"));
 attachMentionAutocomplete($("direct-message"));
+
+const compressMessageImage = (file) => new Promise((resolve, reject) => {
+  if (!file?.type.startsWith("image/") || file.size > 10 * 1024 * 1024) {
+    reject(new Error("Choose an image smaller than 10 MB."));
+    return;
+  }
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error("Could not read that image."));
+  reader.onload = () => {
+    const image = new Image();
+    image.onerror = () => reject(new Error("Could not open that image."));
+    image.onload = () => {
+      const scale = Math.min(1, 1400 / image.width, 1400 / image.height);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      const data = canvas.toDataURL("image/jpeg", 0.7);
+      if (data.length > 780000) reject(new Error("That image is still too large after compression."));
+      else resolve(data);
+    };
+    image.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+const bindMessagePhoto = ({ inputId, labelFor, previewId, wrapId, removeId, setPending }) => {
+  const input = $(inputId);
+  const label = document.querySelector(`label[for='${labelFor}']`);
+  const preview = $(previewId);
+  const wrap = $(wrapId);
+  const clear = () => {
+    setPending("");
+    input.value = "";
+    preview.removeAttribute("src");
+    wrap.hidden = true;
+    label.classList.remove("is-selected");
+    label.setAttribute("aria-pressed", "false");
+  };
+  label.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    input.click();
+  });
+  input.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setStatus("Preparing your message photo…");
+    try {
+      const data = await compressMessageImage(file);
+      setPending(data);
+      preview.src = data;
+      wrap.hidden = false;
+      label.classList.add("is-selected");
+      label.setAttribute("aria-pressed", "true");
+      setStatus("Photo ready.");
+    } catch (error) {
+      clear();
+      setStatus(error.message || "Could not prepare that photo.", true);
+    }
+  });
+  $(removeId).addEventListener("click", clear);
+  return clear;
+};
+
+const clearRoomPhoto = bindMessagePhoto({
+  inputId: "room-photo-upload", labelFor: "room-photo-upload", previewId: "room-photo-preview",
+  wrapId: "room-photo-preview-wrap", removeId: "remove-room-photo", setPending: (value) => { pendingRoomImage = value; }
+});
+const clearDirectPhoto = bindMessagePhoto({
+  inputId: "direct-photo-upload", labelFor: "direct-photo-upload", previewId: "direct-photo-preview",
+  wrapId: "direct-photo-preview-wrap", removeId: "remove-direct-photo", setPending: (value) => { pendingDirectImage = value; }
+});
 
 const selectPanel = (panelId) => {
   const chosen = document.getElementById(panelId) ? panelId : "rooms-panel";
@@ -325,7 +409,15 @@ const renderRoomMessages = () => {
     sender.textContent = data.tempName;
     const text = document.createElement("span");
     text.textContent = data.text;
-    item.append(sender, text);
+    item.append(sender);
+    if (data.text) item.append(text);
+    if (data.imageData) {
+      const photo = document.createElement("img");
+      photo.className = "message-photo";
+      photo.src = data.imageData;
+      photo.alt = "Photo sent in this temporary room";
+      item.append(photo);
+    }
     return item;
   }));
   $("room-messages").scrollTop = $("room-messages").scrollHeight;
@@ -394,7 +486,7 @@ $("room-form").addEventListener("submit", async (event) => {
 $("room-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = $("room-message").value.trim();
-  if (!text || !safeToSend(text)) return;
+  if ((!text && !pendingRoomImage) || (text && !safeToSend(text))) return;
   const room = activeRoom();
   if (!room || !isRoomActive(room.data(), now())) {
     setStatus("Room expired.", true);
@@ -408,9 +500,11 @@ $("room-message-form").addEventListener("submit", async (event) => {
   try {
     await addDoc(collection(db, "roomMessages"), {
       roomId: state.activeRoom, senderId: state.user.uid, tempName: aliasFor(state.activeRoom), text,
+      ...(pendingRoomImage ? { imageData: pendingRoomImage } : {}),
       expiresAt: room.data().expiresAt, moderationState: "visible", createdAt: serverTimestamp()
     });
     event.target.reset();
+    clearRoomPhoto();
   } catch {
     setStatus("Could not send room message.", true);
   }
@@ -637,7 +731,17 @@ const renderDirectMessages = () => {
       }
     });
     actions.append(remove);
-    item.append(sender, text, actions);
+    item.append(sender);
+    if (data.text) item.append(text);
+    if (data.imageData) {
+      const photo = document.createElement("img");
+      photo.className = "message-photo";
+      photo.src = data.imageData;
+      photo.alt = "Photo sent in this private conversation";
+      photo.addEventListener("load", () => consumeViewedPhoto(message), { once: true });
+      item.append(photo);
+    }
+    item.append(actions);
     return item;
   }));
   $("direct-messages").scrollTop = $("direct-messages").scrollHeight;
@@ -687,7 +791,7 @@ $("direct-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const other = $("conversation-user").value;
   const text = $("direct-message").value.trim();
-  if (!other || !text || !safeToSend(text)) return;
+  if (!other || (!text && !pendingDirectImage) || (text && !safeToSend(text))) return;
   if (isBlockedUid(other)) {
     setStatus("Could not send to a blocked user.", true);
     return;
@@ -703,10 +807,12 @@ $("direct-message-form").addEventListener("submit", async (event) => {
       participants: [state.user.uid, other].sort(),
       senderId: state.user.uid,
       text,
+      ...(pendingDirectImage ? { imageData: pendingDirectImage } : {}),
       createdAt: serverTimestamp(),
       ...(disappear ? { expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) } : {})
     });
     event.target.reset();
+    clearDirectPhoto();
   } catch {
     setStatus("Could not send private message.", true);
   }

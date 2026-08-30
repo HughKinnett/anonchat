@@ -64,7 +64,13 @@ assert.match(source, /if \(!state\.viewerBlocks\.ready\)/,
 
 assert.match(rules, /function roomIsActive\(room\)\s*\{\s*return room\.expiresAt is timestamp/s);
 assert.match(rules, /\['name', 'topic', 'ownerId', 'createdAt', 'expiresAt', 'moderationState'\]/);
-assert.match(rules, /\['roomId', 'senderId', 'tempName', 'text', 'expiresAt', 'moderationState', 'createdAt'\]/);
+assert.match(rules, /\['roomId', 'senderId', 'tempName', 'text', 'imageData', 'expiresAt', 'moderationState', 'createdAt'\]/);
+assert.match(source, /Photo sent in this temporary room[\s\S]{0,100}item\.append\(photo\)/,
+  "temporary-room photos remain visible for the room lifetime");
+assert.doesNotMatch(source, /Photo sent in this temporary room[\s\S]{0,160}consumeViewedPhoto/,
+  "temporary-room photos are not view-once");
+assert.match(source, /Photo sent in this private conversation[\s\S]{0,160}consumeViewedPhoto/,
+  "private-message photos are consumed after a recipient views them");
 assert.match(rules, /request\.resource\.data\.moderationState == 'visible'/);
 
 const hasIndex = (collectionGroup, fields) => indexes.indexes.some((index) =>
