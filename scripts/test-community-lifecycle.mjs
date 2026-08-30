@@ -9,6 +9,8 @@ const css = await readFile(new URL("../community.css", import.meta.url), "utf8")
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 const indexes = JSON.parse(await readFile(new URL("../firestore.indexes.json", import.meta.url), "utf8"));
 const directMessageMigration = await readFile(new URL("./direct-message-migration.mjs", import.meta.url), "utf8");
+const profileSource = await readFile(new URL("../profile.js", import.meta.url), "utf8");
+const watermarkSource = await readFile(new URL("../privacy-watermark.mjs", import.meta.url), "utf8");
 
 assert.equal(roomExpiry(1_000), 86_401_000);
 assert.equal(isRoomActive({ expiresAt: { toMillis: () => 1_001 } }, 1_000), true);
@@ -78,6 +80,13 @@ assert.match(source, /collection\(db, "directMessages"\)[\s\S]{0,900}await delet
   "deleting a chat removes legacy messages before deleting the accepted conversation");
 assert.match(directMessageMigration, /batch\.set\([\s\S]{0,180}batch\.delete\(message\.ref\)/,
   "the deployment migration atomically moves legacy messages instead of leaving resurrection copies");
+assert.match(source, /applyPrivacyWatermark\(\{ username: state\.profile\.username, surface: "private community" \}\)/,
+  "private conversations and temporary rooms identify the signed-in viewer in screenshots");
+assert.match(profileSource, /applyPrivacyWatermark\(\{ username: currentProfileUsername, surface: "profile view" \}\)/,
+  "profile screenshots identify the signed-in viewer");
+assert.match(watermarkSource, /pointer-events:\s*none/, "the watermark never blocks private controls");
+assert.match(watermarkSource, /Viewer @\$\{safeUsername\}[\s\S]*\$\{minuteStamp\(\)\}/,
+  "watermarks contain the viewer username and current timestamp");
 assert.match(rules, /request\.resource\.data\.moderationState == 'visible'/);
 
 const hasIndex = (collectionGroup, fields) => indexes.indexes.some((index) =>

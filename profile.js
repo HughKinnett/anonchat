@@ -9,6 +9,7 @@ import { blockedProfileStatus, commentsForPost, interactionParentForPost } from 
 import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
 import { createViewerBlockTracker, didViewerBlock, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
+import { applyPrivacyWatermark, clearPrivacyWatermark } from "./privacy-watermark.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -775,6 +776,7 @@ blockButton.addEventListener("click", async () => {
 });
 
 const stopProfileResources = () => {
+  clearPrivacyWatermark();
   moderationClient?.destroy();
   sessionListeners.splice(0).forEach((unsubscribe) => unsubscribe());
   stopProfileContent();
@@ -843,6 +845,7 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     currentProfileUsername = currentProfileSnapshot.data().username;
   }
+  applyPrivacyWatermark({ username: currentProfileUsername, surface: "profile view" });
   void recordPageActivity({
     surface: "profile",
     profile: currentProfileSnapshot.data(),
