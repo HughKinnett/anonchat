@@ -10,7 +10,7 @@ import { createViewerBlockTracker, isBlockedActor } from "./viewer-block-policy.
 import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  addDoc, collection, deleteDoc, deleteField, doc, documentId, getDoc, limit, onSnapshot, orderBy, query,
+  addDoc, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -724,7 +724,13 @@ const renderDirectMessages = () => {
     remove.addEventListener("click", async () => {
       remove.disabled = true;
       try {
-        await deleteDoc(message.ref);
+        const legacyReference = doc(db, "directMessages", message.id);
+        const legacySnapshot = await getDoc(legacyReference);
+        const batch = writeBatch(db);
+        batch.delete(message.ref);
+        if (legacySnapshot.exists()) batch.delete(legacyReference);
+        await batch.commit();
+        setStatus("Private message deleted permanently.");
       } catch {
         remove.disabled = false;
         setStatus("Could not delete that private message.", true);
@@ -764,21 +770,28 @@ $("delete-chat").addEventListener("click", async () => {
     message.data().participants.includes(state.user.uid)
     && message.data().participants.includes(other)
   );
-  if (!chatMessages.length) {
-    setStatus("This chat has no messages to delete.");
-    return;
-  }
-  if (!window.confirm("Delete every message in this chat for both users? This cannot be undone.")) return;
+  if (!window.confirm("Delete this entire private conversation for both users? This cannot be undone.")) return;
   const control = $("delete-chat");
   control.disabled = true;
   control.textContent = "Deleting chat…";
   try {
-    for (let offset = 0; offset < chatMessages.length; offset += 400) {
+    const legacySnapshot = await getDocs(query(
+      collection(db, "directMessages"),
+      where("participants", "array-contains", state.user.uid)
+    ));
+    const legacyMessages = legacySnapshot.docs.filter((message) =>
+      message.data().participants?.includes(other)
+    );
+    const references = [...chatMessages.map((message) => message.ref), ...legacyMessages.map((message) => message.ref)]
+      .filter((reference, index, list) => list.findIndex((item) => item.path === reference.path) === index);
+    for (let offset = 0; offset < references.length; offset += 400) {
       const batch = writeBatch(db);
-      chatMessages.slice(offset, offset + 400).forEach((message) => batch.delete(message.ref));
+      references.slice(offset, offset + 400).forEach((reference) => batch.delete(reference));
       await batch.commit();
     }
-    setStatus("Chat deleted. The accepted conversation remains available.");
+    const acceptedRequest = requestFor(other);
+    if (acceptedRequest) await deleteDoc(acceptedRequest.ref);
+    setStatus("Private conversation deleted permanently.");
   } catch {
     setStatus("Could not delete the entire chat.", true);
   } finally {

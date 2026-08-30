@@ -48,14 +48,15 @@ const migrate = async () => {
       const participants = message.data().participants;
       if (![data.fromId, data.toId].every((uid) => participants.includes(uid))) return;
       batch.set(db.doc(`messageRequests/${requestId}/messages/${message.id}`), message.data());
-      writes += 1;
+      batch.delete(message.ref);
+      writes += 2;
       migrated += 1;
     });
     if (writes) await batch.commit();
     cursor = snapshot.docs.at(-1);
     if (snapshot.size < PAGE_SIZE) break;
   }
-  console.log(`DIRECT_MESSAGE_MIGRATION_COMPLETE inspected=${inspected} copied=${migrated}`);
+  console.log(`DIRECT_MESSAGE_MIGRATION_COMPLETE inspected=${inspected} moved=${migrated}`);
 };
 
 migrate().catch(() => {

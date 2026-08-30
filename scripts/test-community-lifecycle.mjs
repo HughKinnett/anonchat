@@ -8,6 +8,7 @@ const source = await readFile(new URL("../community.js", import.meta.url), "utf8
 const css = await readFile(new URL("../community.css", import.meta.url), "utf8");
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 const indexes = JSON.parse(await readFile(new URL("../firestore.indexes.json", import.meta.url), "utf8"));
+const directMessageMigration = await readFile(new URL("./direct-message-migration.mjs", import.meta.url), "utf8");
 
 assert.equal(roomExpiry(1_000), 86_401_000);
 assert.equal(isRoomActive({ expiresAt: { toMillis: () => 1_001 } }, 1_000), true);
@@ -71,6 +72,12 @@ assert.doesNotMatch(source, /Photo sent in this temporary room[\s\S]{0,160}consu
   "temporary-room photos are not view-once");
 assert.match(source, /Photo sent in this private conversation[\s\S]{0,160}consumeViewedPhoto/,
   "private-message photos are consumed after a recipient views them");
+assert.match(source, /legacyReference = doc\(db, "directMessages", message\.id\)[\s\S]{0,300}batch\.delete\(message\.ref\)[\s\S]{0,120}batch\.delete\(legacyReference\)/,
+  "individual private-message deletion removes both current and legacy copies");
+assert.match(source, /collection\(db, "directMessages"\)[\s\S]{0,900}await deleteDoc\(acceptedRequest\.ref\)/,
+  "deleting a chat removes legacy messages before deleting the accepted conversation");
+assert.match(directMessageMigration, /batch\.set\([\s\S]{0,180}batch\.delete\(message\.ref\)/,
+  "the deployment migration atomically moves legacy messages instead of leaving resurrection copies");
 assert.match(rules, /request\.resource\.data\.moderationState == 'visible'/);
 
 const hasIndex = (collectionGroup, fields) => indexes.indexes.some((index) =>
