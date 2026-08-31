@@ -9,13 +9,15 @@ onAuthStateChanged(auth, async user => {
   const snapshot = await getDoc(doc(db, "premiumAccess", user.uid));
   const access = snapshot.exists() ? snapshot.data() : null;
   const active = hasPremiumAccess(access);
+  const lifetime = active && (access.tier === "founder" || access.tier === "founding");
   document.querySelectorAll(".premium-only").forEach(link => { link.hidden = !active; });
   if (active) {
-    status.textContent = `${premiumLabel(access)} access is active. All Premium features are unlocked.`;
+    status.textContent = lifetime
+      ? "Your account has lifetime Premium access. No payment required."
+      : `${premiumLabel(access)} access is active. Enjoy everything included with AnonChat Premium.`;
     checkout.hidden = true;
-    document.getElementById("checkout-note").textContent = "Your account has lifetime Premium access. No payment is required.";
   } else {
-    status.textContent = "Premium access is not active on this account.";
+    status.textContent = "Enjoy more with AnonChat Premium. Purchase securely with a debit or credit card.";
     const config = await getDoc(doc(db, "premiumCheckout", "public"));
     const enabled = config.exists() && config.data().mode === "test" && config.data().enabled === true;
     checkout.disabled = !enabled;

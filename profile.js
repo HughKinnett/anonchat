@@ -139,28 +139,32 @@ const renderTargetProfileIdentity = () => {
   membershipBadge.hidden = targetBlocked;
   membershipBadge.textContent = targetPremiumAccess ? premiumLabel(targetPremiumAccess) : "Member";
   const profileAvatar = document.getElementById("view-profile-avatar");
-  profileAvatar.classList.remove("premium-avatar-choice"); profileAvatar.removeAttribute("style");
-  profileAvatar.src = !targetBlocked && targetProfile.profileImage
-    ? targetProfile.profileImage : "anonchat-anonymous.png";
-  document.getElementById("view-profile-avatar").hidden = false;
-  document.getElementById("view-profile-avatar").classList.toggle(
-    "has-custom-photo",
-    !targetBlocked && Boolean(targetProfile.profileImage)
-  );
+  const profileCover = document.getElementById("view-profile-cover");
+  profileAvatar.classList.remove("premium-avatar-choice", "premium-avatar-female", "has-custom-photo");
+  profileCover.classList.remove("premium-cover-choice", "has-custom-photo");
+  profileAvatar.removeAttribute("style"); profileCover.removeAttribute("style");
+  profileAvatar.hidden = false; profileCover.hidden = false;
   if (!targetBlocked && targetPremiumSettings) {
     applyPremiumTheme(document.body, targetPremiumSettings);
     applyPremiumTheme(document.querySelector(".profile-banner") || document.querySelector("main"), targetPremiumSettings);
-    applyPremiumAvatar(profileAvatar, targetPremiumSettings.avatarId);
-    applyPremiumCover(document.getElementById("view-profile-cover"), targetPremiumSettings.coverId);
   }
-  if (!targetBlocked && targetProfile.coverImage) {
-    document.getElementById("view-profile-cover").src = targetProfile.coverImage;
-    document.getElementById("view-profile-cover").hidden = false;
-    document.getElementById("view-profile-cover").classList.add("has-custom-photo");
+  const premiumAvatarApplied = !targetBlocked && targetPremiumSettings
+    ? applyPremiumAvatar(profileAvatar, targetPremiumSettings.avatarId) : false;
+  if (!premiumAvatarApplied) {
+    profileAvatar.src = !targetBlocked && targetProfile.profileImage
+      ? targetProfile.profileImage : "anonchat-anonymous.png";
+    profileAvatar.classList.toggle("has-custom-photo", !targetBlocked && Boolean(targetProfile.profileImage));
+  }
+  const premiumCoverApplied = !targetBlocked && targetPremiumSettings
+    ? applyPremiumCover(profileCover, targetPremiumSettings.coverId) : false;
+  if (premiumCoverApplied) {
+    profileCover.classList.remove("has-custom-photo");
+  } else if (!targetBlocked && targetProfile.coverImage) {
+    profileCover.src = targetProfile.coverImage;
+    profileCover.classList.add("has-custom-photo");
   } else {
-    document.getElementById("view-profile-cover").src = "anonchat-anonymous.png";
-    document.getElementById("view-profile-cover").hidden = false;
-    document.getElementById("view-profile-cover").classList.remove("has-custom-photo");
+    profileCover.src = "anonchat-anonymous.png";
+    profileCover.classList.remove("has-custom-photo");
   }
 };
 
