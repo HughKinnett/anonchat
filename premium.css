@@ -45,3 +45,15 @@ body.premium-full-theme .temporary-chat-bubble,body.premium-full-theme .preview-
 @media(max-width:760px){.surface-control-grid,.legacy-style-grid{grid-template-columns:1fr 1fr}.avatar-choice-grid{grid-template-columns:repeat(3,1fr)}}
 .premium-avatar-female{background-image:url('premium-avatar-female-sprite.png')!important}.cover-choice-grid{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:12px}.cover-choice{display:grid!important;height:auto!important;gap:8px;padding:10px!important}.cover-choice>span,.premium-cover-choice{display:block;background-image:url('premium-cover-sprite.png')!important;background-size:400% 300%!important;background-position:var(--cover-x) var(--cover-y)!important;background-repeat:no-repeat!important}.cover-choice>span{width:100%;aspect-ratio:2/1;border-radius:16px}.cover-choice[aria-pressed=true]{outline:4px solid #fff;outline-offset:2px}.preview-premium-cover{height:130px;border-radius:18px;background-size:400% 300%!important}.feed-premium-avatar{width:38px;height:38px;flex:0 0 38px;border-radius:50%}
 .premium-message-actions-sheet{width:min(420px,calc(100% - 28px));padding:22px;background:#7c3aed!important}.premium-message-actions-sheet h3{margin-top:0}.premium-message-actions-sheet button{width:100%;margin-top:9px;background:#6d28d9!important}.premium-message{touch-action:pan-y;user-select:none}.premium-message:active{outline:3px solid #c4b5fd}
+
+/* Keep the full color editor inside narrow phone viewports. */
+.full-customize-form,.full-customize-form section,.surface-control-grid,.surface-control-grid label,.legacy-style-grid,.legacy-style-grid label{min-width:0;max-width:100%}
+.surface-control-grid select,.legacy-style-grid select{display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box}
+@media(max-width:560px){
+  .premium-shell{width:min(100% - 20px,1080px);padding-top:18px}
+  .premium-card{padding:16px}
+  .surface-control-grid,.legacy-style-grid{grid-template-columns:minmax(0,1fr)}
+  .avatar-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cover-choice-grid{grid-template-columns:minmax(0,1fr)}
+  .full-customize-form h2,.full-customize-form p{overflow-wrap:anywhere}
+}
