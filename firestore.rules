@@ -968,7 +968,9 @@ service cloud.firestore {
         && request.auth.uid == userId
         && isPremiumUidAfter(userId)
         && request.resource.data.keys().hasOnly([
-          'uid', 'onlineVisible', 'accent', 'profileFrame', 'cardStyle', 'bannerStyle', 'updatedAt'
+          'uid', 'onlineVisible', 'accent', 'profileFrame', 'cardStyle', 'bannerStyle',
+          'chatBubbleColor', 'timelineFeedColor', 'communityBackgroundColor', 'privateBoxColor',
+          'privateChatBubbleColor', 'temporaryChatBubbleColor', 'updatedAt'
         ])
         && request.resource.data.uid == userId
         && request.resource.data.onlineVisible is bool
@@ -976,6 +978,12 @@ service cloud.firestore {
         && request.resource.data.profileFrame in ['glow', 'double', 'minimal']
         && request.resource.data.cardStyle in ['glass', 'solid', 'outline']
         && request.resource.data.bannerStyle in ['midnight', 'aurora', 'ember']
+        && request.resource.data.chatBubbleColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.timelineFeedColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.communityBackgroundColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.privateBoxColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.privateChatBubbleColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.temporaryChatBubbleColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
         && request.resource.data.updatedAt == request.time;
       allow delete: if false;
     }
@@ -1231,10 +1239,11 @@ service cloud.firestore {
     match /premiumRooms/{roomId} {
       allow read: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid));
       allow create: if activeUserAfter() && isPremiumUidAfter(request.auth.uid)
-        && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'moderatorIds', 'createdAt', 'updatedAt', 'moderationState'])
+        && request.resource.data.keys().hasOnly(['name', 'topic', 'roomColor', 'ownerId', 'moderatorIds', 'createdAt', 'updatedAt', 'moderationState'])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string && request.resource.data.name.size() >= 3 && request.resource.data.name.size() <= 40
         && request.resource.data.topic is string && request.resource.data.topic.size() <= 100
+        && request.resource.data.roomColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
         && request.resource.data.moderatorIds == []
         && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
         && request.resource.data.moderationState == 'visible'

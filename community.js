@@ -405,7 +405,7 @@ const renderRoomMessages = () => {
   $("room-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
     const item = document.createElement("div");
-    item.className = `message${data.senderId === state.user.uid ? " mine" : ""}`;
+    item.className = `message temporary-chat-bubble${data.senderId === state.user.uid ? " mine" : ""}`;
     const sender = document.createElement("small");
     sender.textContent = data.tempName;
     const text = document.createElement("span");
@@ -707,7 +707,7 @@ const renderDirectMessages = () => {
   $("direct-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
     const item = document.createElement("div");
-    item.className = `message${data.senderId === state.user.uid ? " mine" : ""}`;
+    item.className = `message private-chat-bubble${data.senderId === state.user.uid ? " mine" : ""}`;
     const sender = document.createElement("small");
     sender.textContent = `@${userName(data.senderId)}`;
     const text = document.createElement("span");
