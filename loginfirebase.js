@@ -1,6 +1,5 @@
 import { auth, db } from "./firebase-config.js";
 import { chooseDurablePersistence } from "./auth-persistence-policy.mjs";
-import { clearFailures, failureState, MAX_CONSECUTIVE_FAILURES, recordInvalidCredential } from "./auth-security-policy.mjs";
 import { ensureDefaultOwnerFollows } from "./default-follows.js";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import {
@@ -8,8 +7,6 @@ import {
   browserSessionPersistence,
   createUserWithEmailAndPassword,
   deleteUser,
-  sendEmailVerification,
-  sendPasswordResetEmail,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   setPersistence,
@@ -24,6 +21,13 @@ import {
 
 const status = document.getElementById("auth-status");
 let authInProgress = false;
+
+try {
+  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.localStorage.key(index);
+    if (key?.startsWith("anonchat.authFailures.")) window.localStorage.removeItem(key);
+  }
+} catch { /* Sign-in still works when browser storage is unavailable. */ }
 
 const setStatus = (message, isError = false) => {
   status.textContent = message;
@@ -67,26 +71,12 @@ const signInMessage = (error) => {
   return "Sign-in failed. Try again or use Forgot password below.";
 };
 
-const requirePasswordReset = async (email) => {
-  await sendPasswordResetEmail(auth, email, {
-    url: `${window.location.origin}/index.html?passwordReset=1`,
-    handleCodeInApp: false
-  });
-  setStatus("Three incorrect attempts were detected. A password-reset link was sent to that email. Reset the password before signing in again.", true);
-};
-
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     await exitAfterAuthLoss({ redirect: () => {} });
     return;
   }
   if (authInProgress) return;
-  if (!user.emailVerified) {
-    await sendEmailVerification(user, { url: `${window.location.origin}/index.html` }).catch(() => {});
-    await exitAuthenticatedSession({ user, redirect: () => {} });
-    setStatus("Verify your email before signing in. A verification link was sent.", true);
-    return;
-  }
   const profile = await getDoc(doc(db, "users", user.uid));
   if (profile.exists() && profile.data().banned === true) {
     await exitAuthenticatedSession({ user, redirect: () => {} });
@@ -104,19 +94,7 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
   const password = document.getElementById("password").value;
 
   try {
-    const normalizedEmail = email.toLowerCase();
-    if (failureState(window.localStorage, normalizedEmail).resetRequired && new URLSearchParams(window.location.search).get("passwordReset") !== "1") {
-      await requirePasswordReset(normalizedEmail);
-      authInProgress = false;
-      return;
-    }
-    const credential = await signInAcrossDevices(normalizedEmail, password);
-    clearFailures(window.localStorage, normalizedEmail);
-    if (!credential.user.emailVerified) {
-      await sendEmailVerification(credential.user, { url: `${window.location.origin}/index.html` });
-      await exitAuthenticatedSession({ user: credential.user, redirect: () => {} });
-      throw Object.assign(new Error("email-not-verified"), { code: "auth/email-not-verified" });
-    }
+    const credential = await signInAcrossDevices(email, password);
     const profile = await getDoc(doc(db, "users", credential.user.uid));
     if (profile.exists() && profile.data().banned === true) {
       await exitAuthenticatedSession({ user: credential.user, redirect: () => {} });
@@ -125,24 +103,6 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
     window.location.replace("timeline.html");
   } catch (error) {
     authInProgress = false;
-    if (error.code === "auth/too-many-requests") {
-      clearFailures(window.localStorage, email);
-      setStatus("Firebase temporarily paused sign-in attempts for this account or network. AnonChat's local attempt counter has been reset. Wait for Firebase's cooldown, or use Forgot password below now.", true);
-      return;
-    }
-    if (invalidCredentialCodes.includes(error.code)) {
-      const attempts = recordInvalidCredential(window.localStorage, email);
-      if (attempts.resetRequired) {
-        await requirePasswordReset(email.toLowerCase()).catch(() => setStatus("Three incorrect attempts were detected. Use Forgot password below before trying again.", true));
-        return;
-      }
-      setStatus(`That email and password were not recognized. ${MAX_CONSECUTIVE_FAILURES - attempts.count} attempt${MAX_CONSECUTIVE_FAILURES - attempts.count === 1 ? "" : "s"} remain before a password reset is required.`, true);
-      return;
-    }
-    if (error.code === "auth/email-not-verified") {
-      setStatus("Verify your email before signing in. A new verification link was sent.", true);
-      return;
-    }
     setStatus(signInMessage(error), true);
   }
 });
@@ -189,7 +149,6 @@ signUpForm.addEventListener("submit", async (event) => {
     ]);
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     newUser = credential.user;
-    await sendEmailVerification(newUser, { url: `${window.location.origin}/index.html` });
 
     await runTransaction(db, async (transaction) => {
       const usernameRef = doc(db, "usernames", normalizedUsername);
@@ -231,8 +190,7 @@ signUpForm.addEventListener("submit", async (event) => {
 
     await updateProfile(newUser, { displayName: username });
     await ensureDefaultOwnerFollows(newUser.uid, db);
-    await exitAuthenticatedSession({ user: newUser, redirect: () => {} });
-    setStatus("Account created. Check your email and verify it before signing in.");
+    window.location.replace("timeline.html");
   } catch (error) {
     if (newUser) await deleteUser(newUser).catch(() => {});
     authInProgress = false;

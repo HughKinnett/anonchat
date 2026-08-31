@@ -2,8 +2,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node scripts/test-auth-security-policy.mjs && node scripts/test-regressions.mjs",
+    "test": "node scripts/test-regressions.mjs",
     "test:legal-signup": "node scripts/test-legal-signup.mjs",
+    "test:login": "node scripts/test-login-button.mjs && node scripts/test-auth-activity.mjs",
     "test:moderation-client": "node scripts/test-moderation-client.mjs",
     "test:viewer-block-policy": "node scripts/test-viewer-block-policy.mjs && node scripts/test-session-generation-policy.mjs && node scripts/test-protected-metadata-policy.mjs && node scripts/test-timeline-interaction-policy.mjs",
     "test:viewer-block-surfaces": "node scripts/test-viewer-block-surfaces.mjs",
@@ -45,7 +46,6 @@
     "test:notification-rules": "firebase emulators:exec --only firestore \"node scripts/test-notification-rules.mjs\"",
     "test:notification-firestore-integration": "firebase emulators:exec --only firestore \"node scripts/test-notification-firestore-integration.mjs\"",
     "notification:process": "node scripts/notification-processor.mjs",
-    "auth:disable-totp": "node scripts/enable-totp-mfa.mjs",
     "test:workflow-policy": "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs && node scripts/test-production-rollout.mjs",
     "test:community-lifecycle": "node scripts/test-community-lifecycle.mjs",
     "test:timeline-query-compatibility": "node scripts/test-timeline-moderation-ui.mjs",

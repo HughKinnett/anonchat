@@ -9,7 +9,7 @@ import { blockedProfileStatus, commentsForPost, interactionParentForPost } from 
 import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
 import { createViewerBlockTracker, didViewerBlock, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
-import { isDesignatedAdmin } from "./auth-security-policy.mjs";
+import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
 import { premiumLabel } from "./premium-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {

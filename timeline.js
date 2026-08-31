@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { isDesignatedAdmin } from "./auth-security-policy.mjs";
+import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
 import { premiumLabel } from "./premium-policy.mjs";
 import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";

@@ -40,11 +40,6 @@ jobs:
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Keep authenticator protection disabled
-        run: npm run auth:disable-totp
-        env:
-          GCLOUD_PROJECT: anonchatlogin
-
       - name: Verify Firebase cost index policy
         run: npm run test:cost-indexes
 
