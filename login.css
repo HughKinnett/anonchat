@@ -114,6 +114,7 @@ button { touch-action: manipulation; }
   color: var(--muted);
   line-height: 1.45;
 }
+button,.primary-button,.secondary-button,select{min-height:43px!important;border:0!important;border-radius:999px!important;background:#7c3aed!important;color:#fff!important;font-weight:850!important}
 
 form { display: grid; gap: 9px; }
 

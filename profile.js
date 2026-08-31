@@ -10,7 +10,8 @@ import { clearProfileProtectedMetadata } from "./protected-metadata-policy.mjs";
 import { createViewerBlockTracker, didViewerBlock, isBlockedActor, isBlockedPost, visibleRecords } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
-import { premiumLabel } from "./premium-policy.mjs";
+import { hasPremiumAccess, premiumLabel } from "./premium-policy.mjs";
+import { applyPremiumAvatar, applyPremiumCover, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -42,6 +43,7 @@ let comments = [];
 let follows = [];
 let targetProfile;
 let targetPremiumAccess;
+let targetPremiumSettings;
 let targetPosts = [];
 let targetCommunityPosts = [];
 let users = [];
@@ -136,13 +138,21 @@ const renderTargetProfileIdentity = () => {
   const membershipBadge = document.getElementById("profile-membership-badge");
   membershipBadge.hidden = targetBlocked;
   membershipBadge.textContent = targetPremiumAccess ? premiumLabel(targetPremiumAccess) : "Member";
-  document.getElementById("view-profile-avatar").src = !targetBlocked && targetProfile.profileImage
+  const profileAvatar = document.getElementById("view-profile-avatar");
+  profileAvatar.classList.remove("premium-avatar-choice"); profileAvatar.removeAttribute("style");
+  profileAvatar.src = !targetBlocked && targetProfile.profileImage
     ? targetProfile.profileImage : "anonchat-anonymous.png";
   document.getElementById("view-profile-avatar").hidden = false;
   document.getElementById("view-profile-avatar").classList.toggle(
     "has-custom-photo",
     !targetBlocked && Boolean(targetProfile.profileImage)
   );
+  if (!targetBlocked && targetPremiumSettings) {
+    applyPremiumTheme(document.body, targetPremiumSettings);
+    applyPremiumTheme(document.querySelector(".profile-banner") || document.querySelector("main"), targetPremiumSettings);
+    applyPremiumAvatar(profileAvatar, targetPremiumSettings.avatarId);
+    applyPremiumCover(document.getElementById("view-profile-cover"), targetPremiumSettings.coverId);
+  }
   if (!targetBlocked && targetProfile.coverImage) {
     document.getElementById("view-profile-cover").src = targetProfile.coverImage;
     document.getElementById("view-profile-cover").hidden = false;
@@ -386,6 +396,7 @@ const renderPosts = () => {
     const post = postDoc.data();
     const item = document.createElement("li");
     item.className = "feed-item";
+    if (targetPremiumSettings) applyPremiumTheme(item, targetPremiumSettings);
 
     if (post.type === "repost") {
       const label = document.createElement("p");
@@ -881,9 +892,10 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   targetProfile = profileSnapshot.data();
-  const premiumSnapshot = await getDoc(doc(db, "premiumAccess", targetUserId));
+  const [premiumSnapshot, settingsSnapshot] = await Promise.all([getDoc(doc(db, "premiumAccess", targetUserId)), getDoc(doc(db, "premiumSettings", targetUserId))]);
   if (!sessionIsCurrent()) return;
   targetPremiumAccess = premiumSnapshot.exists() ? premiumSnapshot.data() : null;
+  targetPremiumSettings = settingsSnapshot.exists() && hasPremiumAccess(targetPremiumAccess) ? resolvedPremiumSettings(targetUserId, settingsSnapshot.data()) : null;
   if (targetProfile.banned === true && currentUser.uid !== targetUserId) {
     document.getElementById("profile-name").textContent = "Unavailable profile";
     setStatus("This account is banned.", true);

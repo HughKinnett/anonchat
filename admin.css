@@ -31,3 +31,4 @@ button, .admin-action, .nav-button {
   color: #ddd6fe !important; font-size: 0.82rem !important; font-weight: 800 !important;
 }
 button:hover, .admin-action:hover, .nav-button:hover { background: rgba(139, 92, 246, 0.28) !important; }
+button,.admin-action,.nav-button,select{min-height:43px!important;border:0!important;border-radius:999px!important;background:#7c3aed!important;color:#fff!important;font-weight:850!important}select{padding-right:38px!important}

@@ -18,7 +18,7 @@ for (const page of legalPages) {
 for (const phrase of ["at least 18", "report", "block", "moderation", "24 hours", "legal process", "delete"]) {
   assert.match(legalContent["terms.html"], new RegExp(phrase, "i"), `Terms explain ${phrase}`);
 }
-for (const phrase of ["Firebase Authentication", "email", "public and private user-generated content", "images", "push-subscription", "activity", "Spotify", "reports", "blocks", "Delete account"]) {
+for (const phrase of ["AnonChat securely processes", "email", "public and private user-generated content", "images", "push-subscription", "activity", "Spotify", "reports", "blocks", "Delete account"]) {
   assert.match(legalContent["privacy.html"], new RegExp(phrase, "i"), `Privacy Policy describes ${phrase}`);
 }
 assert.match(legalContent["privacy.html"], /not end-to-end encrypted/i, "Privacy Policy makes no false encryption claim");

@@ -1,51 +1,39 @@
 import { auth, db } from "./firebase-config.js";
-import { hasPremiumAccess, premiumDefaults, PREMIUM_COLORS } from "./premium-policy.mjs";
+import { hasPremiumAccess, premiumDefaults, PREMIUM_AVATARS, PREMIUM_COVERS, PREMIUM_SURFACE_FIELDS, PREMIUM_SWATCHES } from "./premium-policy.mjs";
+import { applyPremiumAvatar, applyPremiumCover, applyPremiumTheme } from "./premium-theme.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { doc, getDoc, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const ids = {
-  accent: "accent", profileFrame: "profile-frame", cardStyle: "card-style", bannerStyle: "banner-style",
-  chatBubbleColor: "chat-bubble-color", timelineFeedColor: "timeline-feed-color",
-  communityBackgroundColor: "community-background-color", privateBoxColor: "private-box-color",
-  privateChatBubbleColor: "private-chat-bubble-color", temporaryChatBubbleColor: "temporary-chat-bubble-color"
+const $ = id => document.getElementById(id), form = $("customize-form"), preview = $("customize-preview"), status = $("customize-status");
+let user, settings, selectedAvatar = "none", selectedCover = "none";
+const groupedOptions = () => {
+  const fragment = document.createDocumentFragment();
+  for (const group of ["Basic", "Neon", "Dual Color"]) {
+    const optgroup = document.createElement("optgroup"); optgroup.label = group;
+    Object.entries(PREMIUM_SWATCHES).filter(([, value]) => value.group === group).forEach(([key, value]) => optgroup.append(new Option(value.label, key)));
+    fragment.append(optgroup);
+  }
+  return fragment;
 };
-const form = document.getElementById("customize-form");
-const preview = document.getElementById("customize-preview");
-const status = document.getElementById("customize-status");
-let user = null, settings = null;
-
-document.querySelectorAll(".basic-color-select").forEach(select => {
-  select.replaceChildren(...Object.entries(PREMIUM_COLORS).map(([value, color]) => new Option(color.label, value)));
+Object.entries(PREMIUM_SURFACE_FIELDS).forEach(([field, labelText]) => {
+  const label = document.createElement("label"), select = document.createElement("select"); select.id = field; select.append(groupedOptions()); label.append(labelText, select); $("surface-controls").append(label);
 });
-const values = () => Object.fromEntries(Object.entries(ids).map(([key, id]) => [key, document.getElementById(id).value]));
-const paintColor = (selector, name) => {
-  const color = PREMIUM_COLORS[name];
-  const element = preview.querySelector(selector);
-  if (element && color) { element.style.background = color.background; element.style.color = color.text; }
+const avatarButton = avatarId => {
+  const button = document.createElement("button"); button.type = "button"; button.className = "avatar-choice"; button.dataset.avatar = avatarId; button.setAttribute("role", "radio"); button.setAttribute("aria-checked", "false");
+  if (avatarId === "none") button.textContent = "Use uploaded photo"; else { const art = document.createElement("span"); applyPremiumAvatar(art, avatarId); const label = avatarId.startsWith("female-") ? avatarId.replace("female-", "Female Avatar ") : avatarId.replace("avatar-", "Avatar "); button.append(art, document.createTextNode(label)); button.setAttribute("aria-label", label); }
+  button.onclick = () => { selectedAvatar = avatarId; document.querySelectorAll(".avatar-choice").forEach(entry => entry.setAttribute("aria-checked", String(entry === button))); paint(); };
+  return button;
 };
+$("avatar-choices").append(...PREMIUM_AVATARS.map(avatarButton));
+const coverSection = document.createElement("section"), coverTitle = document.createElement("h2"), coverHelp = document.createElement("p"), coverChoices = document.createElement("div"); coverTitle.textContent = "Choose matching cover art"; coverHelp.textContent = "Use your uploaded cover or choose coordinated Premium artwork."; coverHelp.className = "customize-help"; coverChoices.id = "cover-choices"; coverChoices.className = "cover-choice-grid"; coverSection.append(coverTitle, coverHelp, coverChoices); form.querySelector("button[type=submit]").before(coverSection);
+PREMIUM_COVERS.forEach(coverId => { const button = document.createElement("button"); button.type = "button"; button.className = "cover-choice"; button.dataset.cover = coverId; button.setAttribute("aria-pressed", "false"); if (coverId === "none") button.textContent = "Use uploaded cover"; else { const art = document.createElement("span"); applyPremiumCover(art, coverId); button.append(art, document.createTextNode(coverId.replace("cover-", "Cover "))); } button.onclick = () => { selectedCover = coverId; document.querySelectorAll(".cover-choice").forEach(entry => entry.setAttribute("aria-pressed", String(entry === button))); paint(); }; coverChoices.append(button); });
+const values = () => ({ ...Object.fromEntries(Object.keys(PREMIUM_SURFACE_FIELDS).map(field => [field, $(field).value])), profileFrame: $("profile-frame").value, cardStyle: $("card-style").value, bannerStyle: $("banner-style").value, avatarId: selectedAvatar, coverId: selectedCover });
 const paint = () => {
-  const value = values(), accents = { violet: "#8b5cf6", rose: "#ec4899", ocean: "#0ea5e9", emerald: "#10b981" };
-  preview.style.setProperty("--preview-accent", accents[value.accent]);
-  preview.dataset.frame = value.profileFrame; preview.dataset.card = value.cardStyle; preview.dataset.banner = value.bannerStyle;
-  preview.querySelector(".preview-banner").style.background = value.bannerStyle === "aurora" ? "linear-gradient(135deg,#143642,#5b21b6,#db2777)" : value.bannerStyle === "ember" ? "linear-gradient(135deg,#27130f,#b45309,#7f1d1d)" : "linear-gradient(135deg,#111827,#4c1d95)";
-  preview.querySelector(".preview-card").style.background = value.cardStyle === "solid" ? "#202330" : value.cardStyle === "outline" ? "transparent" : "rgba(255,255,255,.07)";
-  const avatar = preview.querySelector(".preview-avatar"); avatar.style.boxShadow = value.profileFrame === "glow" ? `0 0 26px ${accents[value.accent]}` : "none"; avatar.style.borderStyle = value.profileFrame === "double" ? "double" : "solid";
-  paintColor(".preview-chat-bubble", value.chatBubbleColor); paintColor(".preview-feed", value.timelineFeedColor);
-  paintColor(".preview-private-box", value.privateBoxColor); paintColor(".preview-private-bubble", value.privateChatBubbleColor);
-  paintColor(".preview-temporary-bubble", value.temporaryChatBubbleColor);
-  const community = PREMIUM_COLORS[value.communityBackgroundColor]; preview.style.background = community.background; preview.style.color = community.text;
+  applyPremiumTheme(document.body, values()); applyPremiumTheme(preview, values());
+  const avatar = $("preview-avatar"); avatar.className = "preview-avatar"; avatar.removeAttribute("style");
+  if (!applyPremiumAvatar(avatar, selectedAvatar)) avatar.style.backgroundImage = "url('anonchat-anonymous.png')";
+  let cover = preview.querySelector(".preview-premium-cover"); if (!cover) { cover = document.createElement("div"); cover.className = "preview-premium-cover"; preview.prepend(cover); } cover.className = "preview-premium-cover"; cover.removeAttribute("style"); if (!applyPremiumCover(cover, selectedCover)) cover.style.background = values().profileColor;
 };
 form.addEventListener("input", paint);
-form.addEventListener("submit", async event => {
-  event.preventDefault(); if (!user) return; const button = form.querySelector("button"); button.disabled = true;
-  try { settings = { ...settings, ...values(), uid: user.uid, updatedAt: serverTimestamp() }; await setDoc(doc(db, "premiumSettings", user.uid), settings); status.textContent = "Your Premium style is saved."; }
-  catch { status.textContent = "Could not save customization."; }
-  finally { button.disabled = false; }
-});
-onAuthStateChanged(auth, async current => {
-  if (!current) { location.replace("index.html"); return; }
-  const [access, saved] = await Promise.all([getDoc(doc(db, "premiumAccess", current.uid)), getDoc(doc(db, "premiumSettings", current.uid))]);
-  if (!access.exists() || !hasPremiumAccess(access.data())) { location.replace("premium.html"); return; }
-  user = current; settings = { ...premiumDefaults(current.uid), ...(saved.exists() ? saved.data() : {}) };
-  Object.entries(ids).forEach(([key, id]) => { document.getElementById(id).value = settings[key]; }); paint();
-});
+form.addEventListener("submit", async event => { event.preventDefault(); if (!user) return; const button = form.querySelector("button[type=submit]"); button.disabled = true; try { settings = { ...settings, ...values(), uid: user.uid, updatedAt: serverTimestamp() }; await setDoc(doc(db, "premiumSettings", user.uid), settings); status.textContent = "Every Premium color and avatar choice is saved."; } catch { status.textContent = "Could not save customization."; } finally { button.disabled = false; } });
+onAuthStateChanged(auth, async current => { if (!current) return location.replace("index.html"); const [access, saved] = await Promise.all([getDoc(doc(db, "premiumAccess", current.uid)), getDoc(doc(db, "premiumSettings", current.uid))]); if (!access.exists() || !hasPremiumAccess(access.data())) return location.replace("premium.html"); user = current; settings = { ...premiumDefaults(current.uid), ...(saved.exists() ? saved.data() : {}) }; Object.keys(PREMIUM_SURFACE_FIELDS).forEach(field => $(field).value = settings[field]); $("profile-frame").value = settings.profileFrame; $("card-style").value = settings.cardStyle; $("banner-style").value = settings.bannerStyle; selectedAvatar = settings.avatarId || "none"; selectedCover = settings.coverId || "none"; document.querySelector(`[data-avatar="${selectedAvatar}"]`)?.setAttribute("aria-checked", "true"); document.querySelector(`[data-cover="${selectedCover}"]`)?.setAttribute("aria-pressed", "true"); paint(); });

@@ -1,6 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
-import { premiumLabel } from "./premium-policy.mjs";
+import { hasPremiumAccess, premiumLabel } from "./premium-policy.mjs";
+import { applyPremiumAvatar, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
 import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
@@ -61,6 +62,9 @@ let reactions = [];
 let comments = [];
 let follows = [];
 let users = [];
+let premiumSettingsByUid = new Map();
+let premiumAccessUids = new Set();
+let currentUserIsPremium = false;
 let notificationReads = [];
 let communityPostDocs = [];
 let pollVotes = [];
@@ -969,12 +973,17 @@ const renderPost = (postDoc) => {
 
   const displayedAuthorId = post.type === "repost" ? post.originalAuthorId : post.authorId;
   const displayedUsername = post.type === "repost" ? post.originalUsername : post.username;
+  const publicPremiumSettings = premiumAccessUids.has(displayedAuthorId) ? premiumSettingsByUid.get(displayedAuthorId) : null;
+  if (publicPremiumSettings) applyPremiumTheme(item, publicPremiumSettings);
   const authorRow = document.createElement("div");
   authorRow.className = "post-author-row";
   const author = document.createElement("a");
   author.className = "author-link";
   author.href = `profile.html?uid=${encodeURIComponent(displayedAuthorId)}`;
   author.textContent = `@${displayedUsername}`;
+  if (publicPremiumSettings?.avatarId && publicPremiumSettings.avatarId !== "none") {
+    const avatar = document.createElement("span"); avatar.className = "feed-premium-avatar"; applyPremiumAvatar(avatar, publicPremiumSettings.avatarId); authorRow.append(avatar);
+  }
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
   appendLinkedText(text, post.content);
@@ -1563,6 +1572,9 @@ const stopTimelineResources = () => {
   communityPostDocs = [];
   follows = [];
   users = [];
+  premiumSettingsByUid = new Map();
+  premiumAccessUids = new Set();
+  currentUserIsPremium = false;
   notificationReads = [];
   messageRequests = [];
   roomMessages = [];
@@ -1644,6 +1656,9 @@ onAuthStateChanged(auth, async (user) => {
   if (!sessionIsCurrent()) return;
   document.getElementById("membership-badge").textContent = premiumAccess.exists()
     ? premiumLabel(premiumAccess.data()) : "Member";
+  currentUserIsPremium = premiumAccess.exists() && ["founder", "founding", "subscriber"].includes(premiumAccess.data().tier) && premiumAccess.data().status === "active";
+  content.maxLength = currentUserIsPremium ? 20000 : 500;
+  document.getElementById("post-limit-note").textContent = currentUserIsPremium ? "Premium limit: 1,000 words." : "Up to 500 characters. Premium members get 1,000 words.";
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
@@ -1705,6 +1720,19 @@ onAuthStateChanged(auth, async (user) => {
       renderSearchResults();
     },
     () => setStatus("Could not load notification names.", true)
+  ));
+  listeners.push(listenForSession(
+    collection(db, "premiumSettings"),
+    snapshot => {
+      premiumSettingsByUid = new Map(snapshot.docs.map(entry => [entry.id, resolvedPremiumSettings(entry.id, entry.data())]));
+      renderFeed();
+    },
+    () => { premiumSettingsByUid = new Map(); }
+  ));
+  listeners.push(listenForSession(
+    collection(db, "premiumAccess"),
+    snapshot => { premiumAccessUids = new Set(snapshot.docs.filter(entry => hasPremiumAccess(entry.data())).map(entry => entry.id)); renderFeed(); },
+    () => { premiumAccessUids = new Set(); }
   ));
 
   listeners.push(listenForSession(
@@ -1791,7 +1819,8 @@ form.addEventListener("submit", async (event) => {
   const options = [...document.querySelectorAll(".poll-option")]
     .map((input) => input.value.trim())
     .filter(Boolean);
-  if (!currentUser || postContent.length > 500) return;
+  const premiumWordCount = postContent ? postContent.split(/\s+/).filter(Boolean).length : 0;
+  if (!currentUser || (!currentUserIsPremium && postContent.length > 500) || (currentUserIsPremium && premiumWordCount > 1000)) { setStatus(currentUserIsPremium ? "Premium posts can contain up to 1,000 words." : "Posts can contain up to 500 characters.", true); return; }
   if (category === "Poll" && options.length < 2) {
     setStatus("Add at least two poll choices.", true);
     return;

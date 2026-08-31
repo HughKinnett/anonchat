@@ -596,7 +596,8 @@ service cloud.firestore {
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
         && request.resource.data.content is string
-        && request.resource.data.content.size() <= 500
+        && (request.resource.data.content.size() <= 500
+          || (isPremiumUidAfter(request.auth.uid) && request.resource.data.content.size() <= 20000))
         && (request.resource.data.content.size() >= 1
           || request.resource.data.get('imageData', '').size() > 0)
         && request.resource.data.get('imageData', '').size() <= 800000
@@ -968,12 +969,16 @@ service cloud.firestore {
         && request.auth.uid == userId
         && isPremiumUidAfter(userId)
         && request.resource.data.keys().hasOnly([
-          'uid', 'onlineVisible', 'accent', 'profileFrame', 'cardStyle', 'bannerStyle',
+          'uid', 'onlineVisible', 'avatarId', 'coverId', 'accent', 'profileFrame', 'cardStyle', 'bannerStyle',
           'chatBubbleColor', 'timelineFeedColor', 'communityBackgroundColor', 'privateBoxColor',
-          'privateChatBubbleColor', 'temporaryChatBubbleColor', 'updatedAt'
+          'privateChatBubbleColor', 'temporaryChatBubbleColor', 'pageColor', 'headerColor', 'menuColor',
+          'profileColor', 'composerColor', 'timelineColor', 'postColor', 'buttonColor', 'inputColor',
+          'textColor', 'commentColor', 'temporaryBoxColor', 'updatedAt'
         ])
         && request.resource.data.uid == userId
         && request.resource.data.onlineVisible is bool
+        && request.resource.data.avatarId in ['none', 'avatar-1', 'avatar-2', 'avatar-3', 'avatar-4', 'avatar-5', 'avatar-6', 'avatar-7', 'avatar-8', 'avatar-9', 'avatar-10', 'avatar-11', 'avatar-12', 'female-1', 'female-2', 'female-3', 'female-4', 'female-5', 'female-6', 'female-7', 'female-8', 'female-9', 'female-10', 'female-11', 'female-12']
+        && request.resource.data.coverId in ['none', 'cover-1', 'cover-2', 'cover-3', 'cover-4', 'cover-5', 'cover-6', 'cover-7', 'cover-8', 'cover-9', 'cover-10', 'cover-11', 'cover-12']
         && request.resource.data.accent in ['violet', 'rose', 'ocean', 'emerald']
         && request.resource.data.profileFrame in ['glow', 'double', 'minimal']
         && request.resource.data.cardStyle in ['glass', 'solid', 'outline']
@@ -981,9 +986,21 @@ service cloud.firestore {
         && request.resource.data.chatBubbleColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
         && request.resource.data.timelineFeedColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
         && request.resource.data.communityBackgroundColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
-        && request.resource.data.privateBoxColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
-        && request.resource.data.privateChatBubbleColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
-        && request.resource.data.temporaryChatBubbleColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.privateBoxColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.privateChatBubbleColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.temporaryChatBubbleColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.pageColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.headerColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.menuColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.profileColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.composerColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.timelineColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.postColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.buttonColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.inputColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.textColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.commentColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.temporaryBoxColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
         && request.resource.data.updatedAt == request.time;
       allow delete: if false;
     }
@@ -1208,7 +1225,8 @@ service cloud.firestore {
         && request.resource.data.username == currentUsername()
         && request.resource.data.content is string
         && request.resource.data.content.size() >= 1
-        && request.resource.data.content.size() <= 500
+        && (request.resource.data.content.size() <= 500
+          || (isPremiumUidAfter(request.auth.uid) && request.resource.data.content.size() <= 20000))
         && request.resource.data.category in ['Question', 'Confession', 'Advice', 'Rant', 'Good News', 'Poll']
         && request.resource.data.circleId is string
         && circleAvailableAfter(request.resource.data.circleId)
@@ -1243,7 +1261,7 @@ service cloud.firestore {
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string && request.resource.data.name.size() >= 3 && request.resource.data.name.size() <= 40
         && request.resource.data.topic is string && request.resource.data.topic.size() <= 100
-        && request.resource.data.roomColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.roomColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
         && request.resource.data.moderatorIds == []
         && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
         && request.resource.data.moderationState == 'visible'
