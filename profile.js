@@ -1,6 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
+import { shouldRecordDailyPageView } from "./page-view-budget.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
@@ -21,6 +22,7 @@ import {
   doc,
   documentId,
   getDoc,
+  getCountFromServer,
   getDocs,
   increment,
   limit,
@@ -46,6 +48,8 @@ let currentUser;
 let currentProfileUsername;
 let comments = [];
 let follows = [];
+let exactFollowerCount = null;
+let exactFollowingCount = null;
 let targetProfile;
 let targetPremiumAccess;
 let targetPremiumSettings;
@@ -65,7 +69,7 @@ let profileContentListeners = [];
 const sessionListeners = [];
 const sessionGeneration = createSessionGeneration();
 let activeProfileSession = 0;
-const PROFILE_FEED_LIMIT = 50;
+const PROFILE_FEED_LIMIT = 30;
 let postsRenderQueued = false;
 const schedulePostsRender = () => {
   if (postsRenderQueued) return;
@@ -293,13 +297,11 @@ const setStatus = (message, isError = false) => {
   status.style.color = isError ? "#fca5a5" : "inherit";
 };
 
-const followerCount = () =>
-  visibleRecords(follows, viewerBlocks, ["followerId", "followingId"])
-    .filter((follow) => follow.data().followingId === targetUserId).length;
+const followerCount = () => exactFollowerCount ?? visibleRecords(follows, viewerBlocks, ["followerId", "followingId"])
+  .filter((follow) => follow.data().followingId === targetUserId).length;
 
-const followingCount = () =>
-  visibleRecords(follows, viewerBlocks, ["followerId", "followingId"])
-    .filter((follow) => follow.data().followerId === targetUserId).length;
+const followingCount = () => exactFollowingCount ?? visibleRecords(follows, viewerBlocks, ["followerId", "followingId"])
+  .filter((follow) => follow.data().followerId === targetUserId).length;
 
 const isFollowing = () =>
   visibleRecords(follows, viewerBlocks, ["followerId", "followingId"]).some((follow) =>
@@ -378,7 +380,7 @@ const syncProfilePostResources = (postDocs) => {
     const parent = interactionParentForPost(postDoc);
     if (commentListeners.has(parent.path)) return;
     const unsubscribe = onSnapshot(
-      collection(db, parent.collection, parent.id, "comments"),
+      query(collection(db, parent.collection, parent.id, "comments"), orderBy("createdAt", "desc"), limit(20)),
       (snapshot) => {
         if (!sessionGeneration.isCurrent(session, uid)) return;
         comments = [
@@ -829,6 +831,8 @@ blockButton.addEventListener("click", async () => {
 });
 
 const stopProfileResources = () => {
+  exactFollowerCount = null;
+  exactFollowingCount = null;
   moderationClient?.destroy();
   sessionListeners.splice(0).forEach((unsubscribe) => unsubscribe());
   stopProfileContent();
@@ -951,21 +955,36 @@ onAuthStateChanged(auth, async (user) => {
   const targetIsAdmin = isDesignatedAdmin(targetProfile.username);
   document.getElementById("profile-admin-link").hidden =
     !(viewerIsAdmin && targetIsAdmin && currentUser.uid === targetUserId);
-  const viewDay = new Date().toISOString().slice(0, 10);
-  setDoc(doc(db, "pageViews", viewDay), {
-    date: viewDay,
-    views: increment(1),
-    updatedAt: serverTimestamp()
-  }, { merge: true }).catch(() => {});
+  if (shouldRecordDailyPageView()) {
+    const viewDay = new Date().toISOString().slice(0, 10);
+    setDoc(doc(db, "pageViews", viewDay), { date: viewDay, views: increment(1), updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+  }
 
   const followSets = { followers: [], following: [] };
   const syncFollows = () => { follows = [...followSets.followers, ...followSets.following.filter(entry => !followSets.followers.some(other => other.id === entry.id))]; renderFollowControl(); };
-  sessionListeners.push(onSnapshot(query(collection(db, "follows"), where("followingId", "==", targetUserId)), snapshot => {
+  sessionListeners.push(onSnapshot(query(collection(db, "follows"), where("followingId", "==", targetUserId), limit(50)), snapshot => {
     if (!sessionIsCurrent()) return; followSets.followers = snapshot.docs; syncFollows();
   }, () => { if (sessionIsCurrent()) setStatus("Could not load followers.", true); }));
-  sessionListeners.push(onSnapshot(query(collection(db, "follows"), where("followerId", "==", targetUserId)), snapshot => {
+  sessionListeners.push(onSnapshot(query(collection(db, "follows"), where("followerId", "==", targetUserId), limit(50)), snapshot => {
     if (!sessionIsCurrent()) return; followSets.following = snapshot.docs; syncFollows();
   }, () => { if (sessionIsCurrent()) setStatus("Could not load following.", true); }));
+  Promise.all([
+    getCountFromServer(query(collection(db, "follows"), where("followingId", "==", targetUserId))),
+    getCountFromServer(query(collection(db, "follows"), where("followerId", "==", targetUserId)))
+  ]).then(([followers, following]) => {
+    if (!sessionIsCurrent()) return;
+    exactFollowerCount = followers.data().count;
+    exactFollowingCount = following.data().count;
+    renderFollowControl();
+  }).catch(() => {});
+  if (targetUserId !== user.uid) sessionListeners.push(onSnapshot(doc(db, "follows", `${user.uid}_${targetUserId}`), snapshot => {
+    if (!sessionIsCurrent()) return;
+    followSets.following = [
+      ...followSets.following.filter(entry => entry.id !== snapshot.id),
+      ...(snapshot.exists() ? [snapshot] : [])
+    ];
+    syncFollows();
+  }));
 
   renderFollowControl();
   renderPosts();

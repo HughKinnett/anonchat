@@ -551,15 +551,15 @@ function observe(ref, key, onData, transform = records) {
 function startLiveData() {
   if (!pageActive || !adminUid || listenersStarted) return;
   listenersStarted = true;
-  observe(query(collection(db, "users"), limit(500)), "users", () => { renderMetrics(); renderUsers(); renderReports(); renderAnalytics(); });
-  observe(query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(500)), "posts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
-  observe(query(collection(db, "communityPosts"), orderBy("createdAt", "desc"), limit(500)), "communityPosts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
-  observe(query(collection(db, "pageViews"), limit(1000)), "views", renderAnalytics); observe(query(collectionGroup(db, "comments"), limit(1000)), "comments", renderAnalytics); observe(query(collectionGroup(db, "reactions"), limit(1000)), "reactions", renderAnalytics);
-  observe(query(collection(db, "follows"), limit(1000)), "follows", renderAnalytics); observe(query(collection(db, "circles"), limit(500)), "circles", renderAnalytics); observe(query(collection(db, "circleMembers"), limit(1000)), "members", renderAnalytics);
-  observe(query(collection(db, "rooms"), limit(500)), "rooms", renderAnalytics); observe(query(collection(db, "communityVotes"), limit(1000)), "votes", () => { renderMetrics(); renderAnalytics(); });
+  observe(query(collection(db, "users"), limit(100)), "users", () => { renderMetrics(); renderUsers(); renderReports(); renderAnalytics(); });
+  observe(query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(100)), "posts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
+  observe(query(collection(db, "communityPosts"), orderBy("createdAt", "desc"), limit(100)), "communityPosts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
+  observe(query(collection(db, "pageViews"), limit(100)), "views", renderAnalytics); observe(query(collectionGroup(db, "comments"), limit(100)), "comments", renderAnalytics); observe(query(collectionGroup(db, "reactions"), limit(100)), "reactions", renderAnalytics);
+  observe(query(collection(db, "follows"), limit(100)), "follows", renderAnalytics); observe(query(collection(db, "circles"), limit(100)), "circles", renderAnalytics); observe(query(collection(db, "circleMembers"), limit(100)), "members", renderAnalytics);
+  observe(query(collection(db, "rooms"), limit(100)), "rooms", renderAnalytics); observe(query(collection(db, "communityVotes"), limit(100)), "votes", () => { renderMetrics(); renderAnalytics(); });
   startReportQueue();
   startLegacyRoomQueue();
-  unsubs.push(onSnapshot(collection(db, "adminDeletionJobs"), handleJobSnapshot, () => setStatus("Could not load live deletion status.", true)));
+  unsubs.push(onSnapshot(query(collection(db, "adminDeletionJobs"), limit(100)), handleJobSnapshot, () => setStatus("Could not load live deletion status.", true)));
   unsubs.push(onSnapshot(doc(db, "system", "deletionProcessor"), snapshot => { state.processor = snapshot.exists() ? snapshot.data() : null; renderProcessorHealth(); }, () => { state.processor = null; renderProcessorHealth(); }));
   unsubs.push(onSnapshot(doc(db, "system", "moderationProcessor"), { includeMetadataChanges: true }, snapshot => {
     state.moderationProcessorListenerHealthy = snapshot.metadata.fromCache !== true;

@@ -33,6 +33,7 @@ let pendingDirectImage = "";
 const revealedPrivatePhotos = new Map();
 const directMessageListeners = new Map();
 const directMessageBuckets = new Map();
+let syncDirectMessageListeners = () => {};
 const stopDirectMessageListeners = () => {
   directMessageListeners.forEach((unsubscribe) => unsubscribe());
   directMessageListeners.clear();
@@ -177,13 +178,13 @@ const compressMessageImage = (file) => new Promise((resolve, reject) => {
     const image = new Image();
     image.onerror = () => reject(new Error("Could not open that image."));
     image.onload = () => {
-      const scale = Math.min(1, 1024 / image.width, 1024 / image.height);
+      const scale = Math.min(1, 900 / image.width, 900 / image.height);
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(image.width * scale));
       canvas.height = Math.max(1, Math.round(image.height * scale));
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-      const data = canvas.toDataURL("image/jpeg", 0.62);
-      if (data.length > 240000) reject(new Error("That image is still too large after compression."));
+      const data = canvas.toDataURL("image/jpeg", 0.55);
+      if (data.length > 120000) reject(new Error("That image is still too large after compression."));
       else resolve(data);
     };
     image.src = reader.result;
@@ -687,6 +688,7 @@ const renderRequests = () => {
 
 $("conversation-user").addEventListener("change", () => {
   revealedPrivatePhotos.clear();
+  syncDirectMessageListeners();
   renderDirectMessages();
   renderReveals();
 });
@@ -1003,7 +1005,7 @@ onAuthStateChanged(auth, async (user) => {
     state[key] = snapshot.docs;
     render?.();
   }, () => setStatus("A community section could not load.", true));
-  const syncDirectMessageListeners = () => {
+  syncDirectMessageListeners = () => {
     const acceptedRequests = new Map();
     state.requests.forEach((request) => {
       const data = request.data();
@@ -1016,17 +1018,19 @@ onAuthStateChanged(auth, async (user) => {
       if (otherId && !isBlockedUid(otherId)) acceptedRequests.set(otherId, request.id);
     });
 
+    const selectedOther = $("conversation-user").value;
     directMessageListeners.forEach((unsubscribe, otherId) => {
-      if (acceptedRequests.has(otherId)) return;
+      if (acceptedRequests.has(otherId) && otherId === selectedOther) return;
       unsubscribe();
       directMessageListeners.delete(otherId);
       directMessageBuckets.delete(otherId);
     });
 
     acceptedRequests.forEach((requestId, otherId) => {
+      if (otherId !== selectedOther) return;
       if (directMessageListeners.has(otherId)) return;
       const unsubscribe = onSnapshot(
-        query(collection(db, "messageRequests", requestId, "messages"), orderBy("createdAt", "asc")),
+        query(collection(db, "messageRequests", requestId, "messages"), orderBy("createdAt", "desc"), limit(100)),
         (snapshot) => {
           if (!sessionIsCurrent()) return;
           directMessageBuckets.set(otherId, snapshot.docs);
@@ -1071,7 +1075,7 @@ onAuthStateChanged(auth, async (user) => {
   loadPrivacy();
   renderIdentity();
 
-  listen(query(collection(db, "users"), limit(500)), "users", () => { renderMessageUsers(); renderRequests(); });
+  listen(query(collection(db, "users"), limit(100)), "users", () => { renderMessageUsers(); renderRequests(); });
   state.moderation = createModerationClient({
     db, currentUid: user.uid, timestamp: serverTimestamp,
     firestore: { deleteDoc, doc, getDoc, setDoc, writeBatch }
@@ -1100,8 +1104,8 @@ onAuthStateChanged(auth, async (user) => {
       setStatus("Could not load block preferences.", true);
     }
   );
-  listen(query(collection(db, "rooms"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), orderBy(documentId()), limit(100)), "rooms", renderRooms);
-  listen(query(collection(db, "roomMembers"), where("uid", "==", user.uid)), "roomMemberships", renderRooms);
+  listen(query(collection(db, "rooms"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), orderBy(documentId()), limit(50)), "rooms", renderRooms);
+  listen(query(collection(db, "roomMembers"), where("uid", "==", user.uid), limit(100)), "roomMemberships", renderRooms);
 
   const mergePrivate = (key, firstQuery, secondQuery, render, onReady) => {
     let first = [];
@@ -1118,15 +1122,15 @@ onAuthStateChanged(auth, async (user) => {
   };
   mergePrivate(
     "requests",
-    query(collection(db, "messageRequests"), where("fromId", "==", user.uid), limit(500)),
-    query(collection(db, "messageRequests"), where("toId", "==", user.uid), limit(500)),
+    query(collection(db, "messageRequests"), where("fromId", "==", user.uid), limit(50)),
+    query(collection(db, "messageRequests"), where("toId", "==", user.uid), limit(50)),
     () => { renderRequests(); renderMessageUsers(); syncDirectMessageListeners(); },
     () => { state.requestsLoaded = true; renderRequestAction(); syncDirectMessageListeners(); }
   );
   mergePrivate(
     "reveals",
-    query(collection(db, "reveals"), where("fromId", "==", user.uid)),
-    query(collection(db, "reveals"), where("toId", "==", user.uid)),
+    query(collection(db, "reveals"), where("fromId", "==", user.uid), limit(50)),
+    query(collection(db, "reveals"), where("toId", "==", user.uid), limit(50)),
     renderReveals
   );
   listenForSession(doc(db, "userPreferences", user.uid), (snapshot) => {

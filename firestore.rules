@@ -600,7 +600,7 @@ service cloud.firestore {
           || (isPremiumUidAfter(request.auth.uid) && request.resource.data.content.size() <= 20000))
         && (request.resource.data.content.size() >= 1
           || request.resource.data.get('imageData', '').size() > 0)
-        && request.resource.data.get('imageData', '').size() <= 800000
+        && request.resource.data.get('imageData', '').size() <= 160000
         && request.resource.data.get('category', 'Post') in ['Post', 'Question', 'Confession', 'Advice', 'Rant', 'Good News', 'Poll']
         && request.resource.data.get('options', []) is list
         && request.resource.data.get('options', []).size() <= 4
@@ -868,8 +868,10 @@ service cloud.firestore {
             ||
             (request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['profileImage', 'coverImage'])
-              && request.resource.data.get('profileImage', '').size() <= 360000
-              && request.resource.data.get('coverImage', '').size() <= 360000)
+              && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['profileImage'])
+                || request.resource.data.get('profileImage', '').size() <= 160000)
+              && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['coverImage'])
+                || request.resource.data.get('coverImage', '').size() <= 160000))
             ||
             (request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['freeAvatarId', 'freeCoverId'])
@@ -1405,7 +1407,7 @@ service cloud.firestore {
         && (request.resource.data.text.size() >= 1
           || request.resource.data.get('imageData', '').size() > 0)
         && request.resource.data.text.size() <= 280
-        && request.resource.data.get('imageData', '').size() <= 780000
+        && request.resource.data.get('imageData', '').size() <= 160000
         && request.resource.data.moderationState == 'visible'
         && validRoomMessageExpiry(request.resource.data.roomId)
         && request.resource.data.createdAt == request.time;
@@ -1471,7 +1473,7 @@ service cloud.firestore {
         && (request.resource.data.text.size() >= 1
           || request.resource.data.get('imageData', '').size() > 0)
         && request.resource.data.text.size() <= 500
-        && request.resource.data.get('imageData', '').size() <= 780000
+        && request.resource.data.get('imageData', '').size() <= 160000
         && request.resource.data.createdAt == request.time
         && (!request.resource.data.keys().hasAny(['expiresAt'])
           || (request.resource.data.expiresAt is timestamp

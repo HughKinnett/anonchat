@@ -39,7 +39,7 @@ assert.match(profileSource, /pageshow[\s\S]*event\.persisted[\s\S]*invalidateNeg
 assert.match(profileSource, /reportStateWatches\.clear\(\)[\s\S]*reportStateLoads\.clear\(\)/, "Profile teardown clears watcher bookkeeping");
 assert.match(profileSource, /if \(!user\)[\s\S]*stopProfileResources\(\)[\s\S]*exitAfterAuthLoss/, "Profile auth loss tears down moderation resources before redirect");
 assert.equal((profileSource.match(/limit\(PROFILE_FEED_LIMIT\)/g) || []).length, 2, "both Profile feeds have a hard listener bound");
-assert.match(profileSource, /const PROFILE_FEED_LIMIT = 50/, "Profile's per-feed cap is explicit and small");
+assert.match(profileSource, /const PROFILE_FEED_LIMIT = 30/, "Profile's per-feed cap is explicit and small");
 assert.match(profileSource, /schedulePostsRender/, "receipt and comment callbacks coalesce Profile rerenders");
 assert.match(profileSource, /syncProfilePostResources/, "Profile differentially tears down resources that leave the bounded feeds");
 assert.doesNotMatch(profileSource, /onSnapshot\(reportRef/, "Profile does not create a Firestore listener per report target");

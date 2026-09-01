@@ -26,7 +26,7 @@ const replaceDisplayedImage = async (imageId, source, custom = true) => {
   current.replaceWith(replacement);
 };
 
-const compressImage = (file, maxWidth, maxHeight, quality = 0.65) => new Promise((resolve, reject) => {
+const compressImage = (file, maxWidth, maxHeight, quality = 0.58) => new Promise((resolve, reject) => {
   if (!file?.type.startsWith("image/") || file.size > 10 * 1024 * 1024) {
     reject(new Error("Choose an image smaller than 10 MB."));
     return;
@@ -43,7 +43,7 @@ const compressImage = (file, maxWidth, maxHeight, quality = 0.65) => new Promise
       canvas.height = Math.max(1, Math.round(image.height * scale));
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       const data = canvas.toDataURL("image/jpeg", quality);
-      if (data.length > 140000) {
+      if (data.length > 120000) {
         reject(new Error("That image is still too large after compression."));
         return;
       }

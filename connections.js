@@ -11,6 +11,8 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getCountFromServer,
+  limit,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -26,6 +28,8 @@ const followingList = document.getElementById("following-list");
 let currentUser;
 let users = [];
 let follows = [];
+let exactFollowerCount = null;
+let exactFollowingCount = null;
 const followGroups = new Map();
 let blockTracker = createViewerBlockTracker();
 let viewerBlocks = blockTracker.current();
@@ -135,8 +139,8 @@ const render = () => {
   const followingIds = visibleFollows()
     .filter((entry) => entry.data().followerId === targetUserId)
     .map((entry) => entry.data().followingId);
-  document.getElementById("followers-count").textContent = followerIds.length;
-  document.getElementById("following-count").textContent = followingIds.length;
+  document.getElementById("followers-count").textContent = exactFollowerCount ?? followerIds.length;
+  document.getElementById("following-count").textContent = exactFollowingCount ?? followingIds.length;
 
   const followerCards = followerIds.map(personCard).filter(Boolean);
   const followingCards = followingIds.map(personCard).filter(Boolean);
@@ -161,6 +165,8 @@ const stopConnectionsListeners = () => {
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
   users = [];
   follows = [];
+  exactFollowerCount = null;
+  exactFollowingCount = null;
   followGroups.clear();
   blockTracker.reset(currentUser?.uid);
   viewerBlocks = blockTracker.current();
@@ -208,15 +214,24 @@ onAuthStateChanged(auth, async (user) => {
     (error) => { if (sessionIsCurrent()) failed?.(error); }
   ));
   const followQueries = [
-    ["target-followers", query(collection(db, "follows"), where("followingId", "==", targetUserId))],
-    ["target-following", query(collection(db, "follows"), where("followerId", "==", targetUserId))]
+    ["target-followers", query(collection(db, "follows"), where("followingId", "==", targetUserId), limit(50))],
+    ["target-following", query(collection(db, "follows"), where("followerId", "==", targetUserId), limit(50))]
   ];
-  if (targetUserId !== user.uid) followQueries.push(["viewer-following", query(collection(db, "follows"), where("followerId", "==", user.uid))]);
+  if (targetUserId !== user.uid) followQueries.push(["viewer-following", query(collection(db, "follows"), where("followerId", "==", user.uid), limit(100))]);
   followQueries.forEach(([key, reference]) => listenForSession(reference, (snapshot) => {
     followGroups.set(key, snapshot.docs);
     follows = [...new Map([...followGroups.values()].flat().map((entry) => [entry.id, entry])).values()];
     void hydrateProfiles();
   }, () => setStatus("Could not load connections.", true)));
+  Promise.all([
+    getCountFromServer(query(collection(db, "follows"), where("followingId", "==", targetUserId))),
+    getCountFromServer(query(collection(db, "follows"), where("followerId", "==", targetUserId)))
+  ]).then(([followers, following]) => {
+    if (!sessionIsCurrent()) return;
+    exactFollowerCount = followers.data().count;
+    exactFollowingCount = following.data().count;
+    render();
+  }).catch(() => {});
   await hydrateProfiles();
   const refreshBlocks = () => {
     viewerBlocks = blockTracker.current();

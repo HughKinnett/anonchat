@@ -7,6 +7,7 @@ import { isBookmarked, recordContribution, toggleBookmark } from "./experience-p
 import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
+import { shouldRecordDailyPageView } from "./page-view-budget.mjs";
 import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
 import { createPushAlertsClient } from "./push-client.mjs";
 import { applyPushAlertState } from "./push-alert-ui.mjs";
@@ -96,7 +97,7 @@ const sessionGeneration = createSessionGeneration();
 let activeTimelineSession = 0;
 let clearNotificationExpiryTimer = () => {};
 let showingProfile = false;
-const TIMELINE_POST_LIMIT = window.matchMedia("(max-width: 700px)").matches ? 25 : 60;
+const TIMELINE_POST_LIMIT = 20;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
 const notificationPanel = document.getElementById("notification-panel");
@@ -332,13 +333,13 @@ const compressPostImage = (file) => new Promise((resolve, reject) => {
     const image = new Image();
     image.onerror = () => reject(new Error("Could not open that image."));
     image.onload = () => {
-      const scale = Math.min(1, 1024 / image.width, 1024 / image.height);
+      const scale = Math.min(1, 900 / image.width, 900 / image.height);
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(image.width * scale));
       canvas.height = Math.max(1, Math.round(image.height * scale));
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-      const data = canvas.toDataURL("image/jpeg", 0.62);
-      if (data.length > 240000) {
+      const data = canvas.toDataURL("image/jpeg", 0.55);
+      if (data.length > 120000) {
         reject(new Error("That image is still too large after compression."));
         return;
       }
@@ -1828,12 +1829,10 @@ onAuthStateChanged(auth, async (user) => {
       updatedAt: serverTimestamp()
     }).catch(() => {});
   }
-  const viewDay = new Date().toISOString().slice(0, 10);
-  setDoc(doc(db, "pageViews", viewDay), {
-    date: viewDay,
-    views: increment(1),
-    updatedAt: serverTimestamp()
-  }, { merge: true }).catch(() => {});
+  if (shouldRecordDailyPageView()) {
+    const viewDay = new Date().toISOString().slice(0, 10);
+    setDoc(doc(db, "pageViews", viewDay), { date: viewDay, views: increment(1), updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+  }
   listeners.push(clearPollVoteListeners);
   listeners.push(clearInteractionListeners);
   const listenForSession = (reference, next, failed) => onSnapshot(
@@ -1870,7 +1869,7 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(listenForSession(
-    query(collection(db, "notificationReads"), where("uid", "==", user.uid)),
+    query(collection(db, "notificationReads"), where("uid", "==", user.uid), limit(50)),
     (snapshot) => {
       notificationReads = snapshot.docs;
       renderNotifications();
@@ -1879,7 +1878,7 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(listenForSession(
-    query(collection(db, "follows"), where("followerId", "==", user.uid)),
+    query(collection(db, "follows"), where("followerId", "==", user.uid), limit(200)),
     (snapshot) => {
       follows = snapshot.docs;
       renderFeed();
@@ -1888,7 +1887,7 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(listenForSession(
-    query(collection(db, "messageRequests"), where("toId", "==", user.uid)),
+    query(collection(db, "messageRequests"), where("toId", "==", user.uid), limit(50)),
     (snapshot) => {
       messageRequests = snapshot.docs;
       renderNotifications();
@@ -1897,7 +1896,7 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(listenForSession(
-    query(collection(db, "roomMembers"), where("uid", "==", user.uid)),
+    query(collection(db, "roomMembers"), where("uid", "==", user.uid), limit(100)),
     (snapshot) => {
       roomMemberships = snapshot.docs;
       renderNotifications();
