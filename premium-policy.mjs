@@ -48,7 +48,7 @@ export const hasPremiumAccess = record => Boolean(record && record.status === "a
 export const premiumLabel = record => record?.tier === "founder" ? "Founder" : record?.tier === "founding" ? "Founding Member" : "Premium Member";
 
 export const premiumDefaults = uid => ({
-  uid, onlineVisible: true, avatarId: "none", coverId: "none", accent: "violet", profileFrame: "glow", cardStyle: "glass", bannerStyle: "midnight",
+  uid, onlineVisible: true, spotifyPlaylistUrl: "", avatarId: "none", coverId: "none", accent: "violet", profileFrame: "glow", cardStyle: "glass", bannerStyle: "midnight",
   pageColor: "black", headerColor: "black", menuColor: "purple", profileColor: "navy", composerColor: "gray",
   timelineColor: "black", postColor: "navy", buttonColor: "purple", inputColor: "black", textColor: "white",
   commentColor: "purple", privateBoxColor: "black", privateChatBubbleColor: "purple", temporaryBoxColor: "black",
@@ -56,6 +56,8 @@ export const premiumDefaults = uid => ({
 });
 
 export const validPremiumSettings = (value, uid) => Boolean(value && value.uid === uid
+  && typeof value.spotifyPlaylistUrl === "string" && value.spotifyPlaylistUrl.length <= 220
+  && (value.spotifyPlaylistUrl === "" || /^https:\/\/open[.]spotify[.]com\/playlist\/[A-Za-z0-9]+$/.test(value.spotifyPlaylistUrl))
   && typeof value.onlineVisible === "boolean" && PREMIUM_AVATARS.includes(value.avatarId) && PREMIUM_COVERS.includes(value.coverId)
   && PREMIUM_ACCENTS.includes(value.accent) && PREMIUM_FRAMES.includes(value.profileFrame)
   && PREMIUM_CARDS.includes(value.cardStyle) && PREMIUM_BANNERS.includes(value.bannerStyle)

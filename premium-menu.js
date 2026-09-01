@@ -24,6 +24,7 @@ onAuthStateChanged(auth, async user => {
   const access = accessSnap.exists() ? accessSnap.data() : null;
   if (hasPremiumAccess(access)) {
     const customize = document.createElement("a"); customize.href = "customize.html"; customize.textContent = "Customize";
+    const playlist = document.createElement("a"); playlist.href = "premium-playlist.html"; playlist.textContent = "Spotify playlist";
     const rooms = document.createElement("a"); rooms.href = "premium-rooms.html"; rooms.textContent = "Invite-only rooms";
     const settings = { ...premiumDefaults(user.uid), ...(settingsSnap.exists() ? settingsSnap.data() : {}) };
     applyPremiumTheme(document.body, settings);
@@ -31,7 +32,7 @@ onAuthStateChanged(auth, async user => {
     const text = document.createElement("span");
     const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = settings.onlineVisible === false;
     const updateGhostLabel = () => { text.textContent = `Ghost Mode: ${toggle.checked ? "On" : "Off"}`; }; updateGhostLabel();
-    label.append(text, toggle); section.append(customize, rooms, label);
+    label.append(text, toggle); section.append(customize, playlist, rooms, label);
     toggle.onchange = async () => {
       toggle.disabled = true;
       try {

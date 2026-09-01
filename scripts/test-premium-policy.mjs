@@ -9,6 +9,8 @@ assert.equal(premiumLabel({ tier: "founder" }), "Founder");
 assert.equal(premiumLabel({ tier: "founding" }), "Founding Member");
 assert.equal(premiumLabel({ tier: "subscriber" }), "Premium Member");
 assert.equal(validPremiumSettings(premiumDefaults("member"), "member"), true);
+assert.equal(validPremiumSettings({ ...premiumDefaults("member"), spotifyPlaylistUrl: "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" }, "member"), true);
+assert.equal(validPremiumSettings({ ...premiumDefaults("member"), spotifyPlaylistUrl: "https://example.com/playlist/not-spotify" }, "member"), false);
 assert.equal(validPremiumSettings({ ...premiumDefaults("member"), onlineVisible: "yes" }, "member"), false);
 assert.equal(PREMIUM_COLOR_NAMES.length >= 30, true);
 assert.equal(PREMIUM_COLOR_NAMES.includes("neonPink"), true);
@@ -32,4 +34,7 @@ const menu = fs.readFileSync(new URL("../premium-menu.js", import.meta.url), "ut
 assert.match(menu, /deleteDoc\(doc\(db, "appPresence", user\.uid\)\)/);
 assert.match(menu, /hasPremiumAccess\(access\)/);
 assert.match(menu, /Ghost Mode:/);
+assert.match(menu, /premium-playlist[.]html/);
+assert.equal(fs.existsSync(new URL("../premium-playlist.html", import.meta.url)), true);
+assert.equal(fs.existsSync(new URL("../premium-playlist.js", import.meta.url)), true);
 console.log("Premium policy tests passed.");

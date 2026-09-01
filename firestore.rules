@@ -982,9 +982,13 @@ service cloud.firestore {
           'chatBubbleColor', 'timelineFeedColor', 'communityBackgroundColor', 'privateBoxColor',
           'privateChatBubbleColor', 'temporaryChatBubbleColor', 'pageColor', 'headerColor', 'menuColor',
           'profileColor', 'composerColor', 'timelineColor', 'postColor', 'buttonColor', 'inputColor',
-          'textColor', 'commentColor', 'temporaryBoxColor', 'updatedAt'
+          'textColor', 'commentColor', 'temporaryBoxColor', 'spotifyPlaylistUrl', 'updatedAt'
         ])
         && request.resource.data.uid == userId
+        && request.resource.data.spotifyPlaylistUrl is string
+        && request.resource.data.spotifyPlaylistUrl.size() <= 220
+        && (request.resource.data.spotifyPlaylistUrl == ''
+          || request.resource.data.spotifyPlaylistUrl.matches('https://open[.]spotify[.]com/playlist/[A-Za-z0-9]+'))
         && request.resource.data.onlineVisible is bool
         && request.resource.data.avatarId in ['none', 'avatar-1', 'avatar-2', 'avatar-3', 'avatar-4', 'avatar-5', 'avatar-6', 'avatar-7', 'avatar-8', 'avatar-9', 'avatar-10', 'avatar-11', 'avatar-12', 'female-1', 'female-2', 'female-3', 'female-4', 'female-5', 'female-6', 'female-7', 'female-8', 'female-9', 'female-10', 'female-11', 'female-12']
         && request.resource.data.coverId in ['none', 'cover-1', 'cover-2', 'cover-3', 'cover-4', 'cover-5', 'cover-6', 'cover-7', 'cover-8', 'cover-9', 'cover-10', 'cover-11', 'cover-12']

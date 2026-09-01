@@ -74,6 +74,8 @@ const schedulePostsRender = () => {
 };
 const profileSpotifyCard = document.getElementById("profile-spotify-card");
 const profileSpotifyPlayer = document.getElementById("profile-spotify-player");
+const profilePlaylistCard = document.getElementById("profile-playlist-card");
+const profilePlaylistPlayer = document.getElementById("profile-playlist-player");
 
 const userReportTarget = () => ({ targetKind: "user", targetCollection: "users", targetId: targetUserId, reportedUserId: targetUserId });
 const postReportTarget = (postDoc, post) => ({
@@ -130,6 +132,15 @@ const renderProfileSpotifySong = (url) => {
   profileSpotifyPlayer.append(frame, open);
 };
 
+const spotifyPlaylistId = (value) => {
+  try { const url = new URL(String(value || "").trim()); if (!/(^|\.)spotify\.com$/i.test(url.hostname)) return ""; return url.pathname.match(/^\/playlist\/([A-Za-z0-9]+)(?:\/|$)/)?.[1] || ""; } catch { return ""; }
+};
+const renderProfileSpotifyPlaylist = (url = "") => {
+  const id = spotifyPlaylistId(url); profilePlaylistPlayer.replaceChildren(); profilePlaylistCard.hidden = !id;
+  if (!id) return;
+  const frame = document.createElement("iframe"); frame.src = `https://open.spotify.com/embed/playlist/${id}?utm_source=generator&theme=0`; frame.title = `@${targetProfile.username}'s Spotify playlist`; frame.loading = "lazy"; frame.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"; profilePlaylistPlayer.append(frame);
+};
+
 const clearProtectedProfileMetadata = (message) => {
   clearProfileProtectedMetadata({ document, renderSpotify: renderProfileSpotifySong }, message);
 };
@@ -137,6 +148,7 @@ const clearProtectedProfileMetadata = (message) => {
 const renderTargetProfileIdentity = () => {
   if (!targetProfile || !viewerBlocks.ready) return;
   renderProfileSpotifySong(targetBlocked ? "" : targetProfile.spotifyTrackUrl || "");
+  renderProfileSpotifyPlaylist(targetBlocked ? "" : targetPremiumSettings?.spotifyPlaylistUrl || "");
   document.title = targetBlocked ? "Unavailable profile — AnonChat" : `@${targetProfile.username} — AnonChat`;
   document.getElementById("profile-name").textContent = targetBlocked ? "Unavailable profile" : targetProfile.username;
   document.getElementById("profile-handle").textContent = targetBlocked ? "" : `@${targetProfile.username}`;
