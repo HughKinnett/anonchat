@@ -37,4 +37,7 @@ assert.match(menu, /Ghost Mode:/);
 assert.match(menu, /premium-playlist[.]html/);
 assert.equal(fs.existsSync(new URL("../premium-playlist.html", import.meta.url)), true);
 assert.equal(fs.existsSync(new URL("../premium-playlist.js", import.meta.url)), true);
+const rooms = fs.readFileSync(new URL("../premium-rooms.js", import.meta.url), "utf8");
+assert.doesNotMatch(rooms, /premium-room-color|roomColorSelect|new Option\(color[.]label/);
+assert.match(rooms, /roomColor:"purple"/);
 console.log("Premium policy tests passed.");
