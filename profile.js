@@ -12,13 +12,16 @@ import { createSessionGeneration } from "./session-generation-policy.mjs";
 import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
 import { hasPremiumAccess, premiumLabel } from "./premium-policy.mjs";
 import { applyPremiumAvatar, applyPremiumCover, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
+import { applyFreeAvatar, applyFreeCover } from "./free-profile-theme.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
   collection,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
+  getDocs,
   increment,
   limit,
   onSnapshot,
@@ -26,6 +29,8 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  startAt,
+  endAt,
   updateDoc, writeBatch,
   where
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -140,8 +145,8 @@ const renderTargetProfileIdentity = () => {
   membershipBadge.textContent = targetPremiumAccess ? premiumLabel(targetPremiumAccess) : "Member";
   const profileAvatar = document.getElementById("view-profile-avatar");
   const profileCover = document.getElementById("view-profile-cover");
-  profileAvatar.classList.remove("premium-avatar-choice", "premium-avatar-female", "has-custom-photo");
-  profileCover.classList.remove("premium-cover-choice", "has-custom-photo");
+  profileAvatar.classList.remove("premium-avatar-choice", "premium-avatar-female", "free-avatar-choice", "has-custom-photo");
+  profileCover.classList.remove("premium-cover-choice", "free-cover-choice", "has-custom-photo");
   profileAvatar.removeAttribute("style"); profileCover.removeAttribute("style");
   profileAvatar.hidden = false; profileCover.hidden = false;
   if (!targetBlocked && targetPremiumSettings) {
@@ -150,20 +155,25 @@ const renderTargetProfileIdentity = () => {
   }
   const premiumAvatarApplied = !targetBlocked && targetPremiumSettings
     ? applyPremiumAvatar(profileAvatar, targetPremiumSettings.avatarId) : false;
-  if (!premiumAvatarApplied) {
-    profileAvatar.src = !targetBlocked && targetProfile.profileImage
+  const freeAvatarApplied = !premiumAvatarApplied && !targetBlocked
+    ? applyFreeAvatar(profileAvatar, targetProfile.freeAvatarId || "") : false;
+  if (!premiumAvatarApplied && !freeAvatarApplied) {
+    const avatarSource = !targetBlocked && targetProfile.profileImage
       ? targetProfile.profileImage : "anonchat-anonymous.png";
+    profileAvatar.style.backgroundImage = `url(${JSON.stringify(avatarSource)})`;
     profileAvatar.classList.toggle("has-custom-photo", !targetBlocked && Boolean(targetProfile.profileImage));
   }
   const premiumCoverApplied = !targetBlocked && targetPremiumSettings
     ? applyPremiumCover(profileCover, targetPremiumSettings.coverId) : false;
-  if (premiumCoverApplied) {
+  const freeCoverApplied = !premiumCoverApplied && !targetBlocked
+    ? applyFreeCover(profileCover, targetProfile.freeCoverId || "") : false;
+  if (premiumCoverApplied || freeCoverApplied) {
     profileCover.classList.remove("has-custom-photo");
   } else if (!targetBlocked && targetProfile.coverImage) {
-    profileCover.src = targetProfile.coverImage;
+    profileCover.style.backgroundImage = `url(${JSON.stringify(targetProfile.coverImage)})`;
     profileCover.classList.add("has-custom-photo");
   } else {
-    profileCover.src = "anonchat-anonymous.png";
+    profileCover.style.backgroundImage = "url('anonchat-anonymous.png')";
     profileCover.classList.remove("has-custom-photo");
   }
 };
@@ -221,7 +231,8 @@ const attachMentionAutocomplete = (input) => {
     input.focus();
   };
 
-  const render = () => {
+  let searchTimer = 0;
+  const render = async () => {
     const cursor = input.selectionStart ?? input.value.length;
     const match = input.value.slice(0, cursor).match(/@([A-Za-z0-9_]*)$/);
     if (!match) {
@@ -229,9 +240,15 @@ const attachMentionAutocomplete = (input) => {
       return;
     }
     const queryText = match[1].toLowerCase();
-    const matches = visibleRecords(users, viewerBlocks, ["uid"])
-      .filter((entry) => entry.data().username?.toLowerCase().startsWith(queryText))
-      .slice(0, 6);
+    let matches = [];
+    try {
+      const usernameMatches = await getDocs(query(collection(db, "usernames"), orderBy(documentId()), startAt(queryText), endAt(`${queryText}\uf8ff`), limit(6)));
+      const profiles = await Promise.all(usernameMatches.docs.map(entry => getDoc(doc(db, "users", entry.data().uid))));
+      const latest = input.value.slice(0, input.selectionStart ?? input.value.length).match(/@([A-Za-z0-9_]*)$/)?.[1]?.toLowerCase();
+      if (latest !== queryText) return;
+      profiles.filter(entry => entry.exists()).forEach(entry => { if (!users.some(user => user.id === entry.id)) users.push(entry); });
+      matches = visibleRecords(profiles.filter(entry => entry.exists()), viewerBlocks, ["uid"]);
+    } catch { matches = []; }
     if (!matches.length) {
       close();
       return;
@@ -250,7 +267,7 @@ const attachMentionAutocomplete = (input) => {
     suggestions.hidden = false;
   };
 
-  input.addEventListener("input", render);
+  input.addEventListener("input", () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(render, 280); });
   input.addEventListener("click", render);
   input.addEventListener("keydown", (event) => {
     if (event.key === "Escape") close();
@@ -420,6 +437,8 @@ const renderPosts = () => {
     const postImage = post.imageData ? document.createElement("img") : null;
     if (postImage) {
       postImage.className = "post-image";
+      postImage.loading = "lazy";
+      postImage.decoding = "async";
       postImage.src = post.imageData;
       postImage.alt = "Photo attached to this post";
     }
@@ -896,6 +915,7 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   targetProfile = profileSnapshot.data();
+  users = [currentProfileSnapshot, profileSnapshot].filter((entry, index, list) => entry.exists() && list.findIndex(other => other.id === entry.id) === index);
   const [premiumSnapshot, settingsSnapshot] = await Promise.all([getDoc(doc(db, "premiumAccess", targetUserId)), getDoc(doc(db, "premiumSettings", targetUserId))]);
   if (!sessionIsCurrent()) return;
   targetPremiumAccess = premiumSnapshot.exists() ? premiumSnapshot.data() : null;
@@ -925,17 +945,14 @@ onAuthStateChanged(auth, async (user) => {
     updatedAt: serverTimestamp()
   }, { merge: true }).catch(() => {});
 
-  sessionListeners.push(onSnapshot(collection(db, "users"), (snapshot) => {
-    if (!sessionIsCurrent()) return;
-    users = snapshot.docs;
-    renderPosts();
-  }, () => { if (sessionIsCurrent()) setStatus("Could not load user tags.", true); }));
-
-  sessionListeners.push(onSnapshot(collection(db, "follows"), (snapshot) => {
-    if (!sessionIsCurrent()) return;
-    follows = snapshot.docs;
-    renderFollowControl();
-  }, () => { if (sessionIsCurrent()) setStatus("Could not load follower information.", true); }));
+  const followSets = { followers: [], following: [] };
+  const syncFollows = () => { follows = [...followSets.followers, ...followSets.following.filter(entry => !followSets.followers.some(other => other.id === entry.id))]; renderFollowControl(); };
+  sessionListeners.push(onSnapshot(query(collection(db, "follows"), where("followingId", "==", targetUserId)), snapshot => {
+    if (!sessionIsCurrent()) return; followSets.followers = snapshot.docs; syncFollows();
+  }, () => { if (sessionIsCurrent()) setStatus("Could not load followers.", true); }));
+  sessionListeners.push(onSnapshot(query(collection(db, "follows"), where("followerId", "==", targetUserId)), snapshot => {
+    if (!sessionIsCurrent()) return; followSets.following = snapshot.docs; syncFollows();
+  }, () => { if (sessionIsCurrent()) setStatus("Could not load following.", true); }));
 
   renderFollowControl();
   renderPosts();

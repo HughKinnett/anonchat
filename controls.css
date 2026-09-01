@@ -1,0 +1,9 @@
+:root{--ac-control-bg:rgba(139,92,246,.16);--ac-control-hover:rgba(139,92,246,.28);--ac-control-border:rgba(167,139,250,.55);--ac-control-text:#ddd6fe;--ac-menu-bg:#171225}
+:where(button,.primary-button,.secondary-button,.button-link,.my-profile-link,.nav-button,.follow-button,.delete-button,.feed-tab,.reaction-button,.share-button,select):not(.avatar-button):not(.banner-button):not(.avatar-choice):not(.cover-choice){min-height:40px;border:1px solid var(--ac-control-border)!important;border-radius:999px!important;background:var(--ac-control-bg)!important;color:var(--ac-control-text)!important;font-weight:800!important}
+:where(button,.primary-button,.secondary-button,.button-link,.my-profile-link,.nav-button,.follow-button,.delete-button,.feed-tab,.reaction-button,.share-button):not(.avatar-button):not(.banner-button):not(.avatar-choice):not(.cover-choice):hover{background:var(--ac-control-hover)!important}
+select{max-width:100%;padding-inline:14px!important;background-color:#24183b!important}select option{background:#24183b;color:#f5f3ff}
+.main-menu-panel,.dropdown-menu,[role="menu"],dialog{border-color:var(--ac-control-border)!important;border-radius:20px!important;background:var(--ac-menu-bg)!important;color:#f5f3ff!important}
+.main-menu-panel a,.main-menu-panel label{border-radius:999px!important;color:var(--ac-control-text)!important}.main-menu-panel a:hover{background:var(--ac-control-hover)!important}
+.feed-item,.post-card,.premium-card,.message,.comment-item{content-visibility:auto;contain-intrinsic-size:auto 220px}
+img{max-width:100%;height:auto}textarea{max-width:100%;resize:vertical}
+@media(max-width:600px){:where(button,.primary-button,.secondary-button,.button-link,.my-profile-link,.nav-button,.follow-button,.delete-button,.feed-tab,.reaction-button,.share-button,select):not(.avatar-button):not(.banner-button):not(.avatar-choice):not(.cover-choice){min-height:42px}.page-shell,.premium-shell{max-width:100%;overflow-x:clip}}

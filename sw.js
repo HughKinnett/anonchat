@@ -1,9 +1,10 @@
-const CACHE_NAME = "anonchat-v91";
+const CACHE_NAME = "anonchat-v94";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./timeline.html",
   "./profile.html",
+  "./profile-style.html",
   "./forgot-password.html",
   "./connections.html",
   "./community.html",
@@ -16,6 +17,7 @@ const APP_SHELL = [
   "./privacy.html",
   "./support.html",
   "./login.css",
+  "./controls.css",
   "./timeline.css",
   "./community.css",
   "./premium.css",
@@ -47,6 +49,8 @@ const APP_SHELL = [
   "./online-followers.js",
   "./premium-policy.mjs",
   "./premium-theme.mjs",
+  "./free-profile-theme.mjs",
+  "./profile-style.js",
   "./premium-menu.js",
   "./premium.js",
   "./customize.js",
@@ -77,7 +81,7 @@ const APP_SHELL = [
   "./upload.js",
   "./pwa.js",
   "./manifest.webmanifest",
-  "./anonchat-anonymous.png"
+  "./anonchat-background-mobile.jpg"
 ];
 
 self.addEventListener("install", (event) => {
@@ -96,23 +100,19 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || new URL(event.request.url).origin !== self.location.origin) return;
-
-  event.respondWith(
-    fetch(event.request, { cache: "no-store" })
-      .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      })
-      .catch(async () => {
-        const cached = await caches.match(event.request);
-        if (cached) return cached;
-        if (event.request.mode === "navigate" || event.request.destination === "document") {
-          return caches.match("./index.html");
-        }
-        return Response.error();
-      })
-  );
+  if (event.request.mode === "navigate" || event.request.destination === "document") {
+    event.respondWith(fetch(event.request).then(response => {
+      const copy = response.clone(); caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy)); return response;
+    }).catch(() => caches.match(event.request).then(cached => cached || caches.match("./index.html"))));
+    return;
+  }
+  event.respondWith(caches.match(event.request).then(cached => {
+    const refresh = fetch(event.request).then(response => {
+      if (response.ok) { const copy = response.clone(); caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy)); }
+      return response;
+    }).catch(() => cached || Response.error());
+    return cached || refresh;
+  }));
 });
 
 

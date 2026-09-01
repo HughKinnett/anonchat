@@ -1,4 +1,7 @@
 import { auth, db } from "./firebase-config.js";
+import { hasPremiumAccess } from "./premium-policy.mjs";
+import { applyPremiumAvatar, applyPremiumCover, resolvedPremiumSettings } from "./premium-theme.mjs";
+import { applyFreeAvatar, applyFreeCover } from "./free-profile-theme.mjs";
 import { exitAfterAuthLoss } from "./push-exit.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -23,7 +26,7 @@ const replaceDisplayedImage = async (imageId, source, custom = true) => {
   current.replaceWith(replacement);
 };
 
-const compressImage = (file, maxWidth, maxHeight, quality = 0.72) => new Promise((resolve, reject) => {
+const compressImage = (file, maxWidth, maxHeight, quality = 0.65) => new Promise((resolve, reject) => {
   if (!file?.type.startsWith("image/") || file.size > 10 * 1024 * 1024) {
     reject(new Error("Choose an image smaller than 10 MB."));
     return;
@@ -40,7 +43,7 @@ const compressImage = (file, maxWidth, maxHeight, quality = 0.72) => new Promise
       canvas.height = Math.max(1, Math.round(image.height * scale));
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       const data = canvas.toDataURL("image/jpeg", quality);
-      if (data.length > 360000) {
+      if (data.length > 140000) {
         reject(new Error("That image is still too large after compression."));
         return;
       }
@@ -57,7 +60,11 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   const profileRef = doc(db, "users", user.uid);
-  const snapshot = await getDoc(profileRef);
+  const [snapshot, accessSnapshot, settingsSnapshot] = await Promise.all([
+    getDoc(profileRef),
+    getDoc(doc(db, "premiumAccess", user.uid)),
+    getDoc(doc(db, "premiumSettings", user.uid))
+  ]);
   const profile = snapshot.exists() ? snapshot.data() : {};
   await replaceDisplayedImage(
     "profile-pic",
@@ -69,6 +76,23 @@ onAuthStateChanged(auth, async (user) => {
     profile.coverImage || "anonchat-anonymous.png",
     Boolean(profile.coverImage)
   );
+  const access = accessSnapshot.exists() ? accessSnapshot.data() : null;
+  let premiumAvatarApplied = false, premiumCoverApplied = false;
+  if (settingsSnapshot.exists() && hasPremiumAccess(access)) {
+    const settings = resolvedPremiumSettings(user.uid, settingsSnapshot.data());
+    const profileButton = document.getElementById("profile-upload-button");
+    const bannerButton = document.getElementById("banner-upload-button");
+    if (applyPremiumAvatar(profileButton, settings.avatarId)) {
+      premiumAvatarApplied = true;
+      document.getElementById("profile-pic").hidden = true;
+    }
+    if (applyPremiumCover(bannerButton, settings.coverId)) {
+      premiumCoverApplied = true;
+      document.getElementById("banner-pic").hidden = true;
+    }
+  }
+  if (!premiumAvatarApplied && applyFreeAvatar(document.getElementById("profile-upload-button"), profile.freeAvatarId || "")) document.getElementById("profile-pic").hidden = true;
+  if (!premiumCoverApplied && applyFreeCover(document.getElementById("banner-upload-button"), profile.freeCoverId || "")) document.getElementById("banner-pic").hidden = true;
 
   const bindUpload = (inputId, imageId, field, maxWidth, maxHeight) => {
     document.getElementById(inputId).addEventListener("change", async (event) => {
@@ -90,6 +114,6 @@ onAuthStateChanged(auth, async (user) => {
     });
   };
 
-  bindUpload("profile-upload", "profile-pic", "profileImage", 512, 512);
-  bindUpload("banner-upload", "banner-pic", "coverImage", 1400, 500);
+  bindUpload("profile-upload", "profile-pic", "profileImage", 320, 320);
+  bindUpload("banner-upload", "banner-pic", "coverImage", 1024, 366);
 });

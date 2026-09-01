@@ -219,3 +219,4 @@
 }
 button,.primary,.secondary,select{min-height:43px!important;border:0!important;border-radius:999px!important;background:#7c3aed!important;color:#fff!important;font-weight:850!important}select{padding-right:38px!important}
 .community-menu-panel,dialog{border-color:#7c3aed!important;border-radius:22px!important}.community-menu-panel{background:#7c3aed!important}.community-menu-panel a{border-radius:999px!important}
+@import url("controls.css");

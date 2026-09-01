@@ -1,22 +1,8 @@
-import { PREMIUM_AVATARS, PREMIUM_COVERS, PREMIUM_SURFACE_FIELDS, PREMIUM_SWATCHES, premiumDefaults } from "./premium-policy.mjs";
+import { PREMIUM_AVATARS, PREMIUM_COVERS, premiumDefaults } from "./premium-policy.mjs";
 
 export const resolvedPremiumSettings = (uid, value = {}) => ({ ...premiumDefaults(uid), ...value });
 
-export const applyPremiumTheme = (element, settings) => {
-  if (!element || !settings) return;
-  const variables = {
-    pageColor: "page", headerColor: "header", menuColor: "menu", profileColor: "profile",
-    composerColor: "composer", timelineColor: "timeline", postColor: "post", buttonColor: "button",
-    inputColor: "input", textColor: "chosen-text", commentColor: "comment", privateBoxColor: "private-box",
-    privateChatBubbleColor: "private-bubble", temporaryBoxColor: "temporary-box", temporaryChatBubbleColor: "temporary-bubble"
-  };
-  Object.keys(PREMIUM_SURFACE_FIELDS).forEach(field => {
-    const color = PREMIUM_SWATCHES[settings[field]] || PREMIUM_SWATCHES.black;
-    element.style.setProperty(`--pt-${variables[field]}-bg`, field === "textColor" && color.background.includes("gradient") ? color.text : color.background);
-    element.style.setProperty(`--pt-${variables[field]}-text`, color.text);
-  });
-  element.classList.add("premium-full-theme");
-};
+export const applyPremiumTheme = element => element?.classList.remove("premium-full-theme");
 
 export const avatarIndex = avatarId => PREMIUM_AVATARS.indexOf(avatarId) - 1;
 export const applyPremiumAvatar = (element, avatarId) => {

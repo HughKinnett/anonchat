@@ -44,7 +44,7 @@ assert.doesNotMatch(timeline, /\.sort\(\(a, b\) =>/,
   "Timeline has no ad-hoc timestamp sort");
 for (const collectionName of ["posts", "communityPosts"]) {
   assert.match(timeline,
-    new RegExp(`query\\(collection\\(db, "${collectionName}"\\), where\\("moderationState", "==", "visible"\\), orderBy\\("createdAt", "desc"\\), limit\\(100\\)\\)`),
+    new RegExp(`query\\(collection\\(db, "${collectionName}"\\), where\\("moderationState", "==", "visible"\\), orderBy\\("createdAt", "desc"\\), limit\\(TIMELINE_POST_LIMIT\\)\\)`),
     `${collectionName} query can only receive visible content`
   );
 }

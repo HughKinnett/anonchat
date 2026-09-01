@@ -2,6 +2,7 @@ import { auth, db } from "./firebase-config.js";
 import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
 import { hasPremiumAccess, premiumLabel } from "./premium-policy.mjs";
 import { applyPremiumAvatar, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
+import { applyFreeAvatar } from "./free-profile-theme.mjs";
 import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
@@ -35,6 +36,8 @@ import {
   doc,
   documentId,
   getDoc,
+  getCountFromServer,
+  getDocs,
   increment,
   limit,
   onSnapshot,
@@ -43,6 +46,8 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  startAt,
+  endAt,
   Timestamp,
   updateDoc,
   where,
@@ -61,9 +66,14 @@ let postDocs = [];
 let reactions = [];
 let comments = [];
 let follows = [];
+let followerCountsByUid = new Map();
 let users = [];
 let premiumSettingsByUid = new Map();
 let premiumAccessUids = new Set();
+let userProfilesByUid = new Map();
+let hydratedAuthorUids = new Set();
+let userSearchTimer = 0;
+let draftTimer = 0;
 let currentUserIsPremium = false;
 let notificationReads = [];
 let communityPostDocs = [];
@@ -91,6 +101,7 @@ const notificationPanel = document.getElementById("notification-panel");
 const notificationList = document.getElementById("notification-list");
 const notificationBadge = document.getElementById("notification-badge");
 const searchInput = document.getElementById("site-search");
+const dailyPromptButton = document.getElementById("daily-prompt");
 const searchResults = document.getElementById("search-results");
 let currentNotificationIds = [];
 let seenNotificationIds = new Set();
@@ -304,13 +315,13 @@ const compressPostImage = (file) => new Promise((resolve, reject) => {
     const image = new Image();
     image.onerror = () => reject(new Error("Could not open that image."));
     image.onload = () => {
-      const scale = Math.min(1, 1400 / image.width, 1400 / image.height);
+      const scale = Math.min(1, 1024 / image.width, 1024 / image.height);
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(image.width * scale));
       canvas.height = Math.max(1, Math.round(image.height * scale));
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-      const data = canvas.toDataURL("image/jpeg", 0.7);
-      if (data.length > 780000) {
+      const data = canvas.toDataURL("image/jpeg", 0.62);
+      if (data.length > 240000) {
         reject(new Error("That image is still too large after compression."));
         return;
       }
@@ -443,12 +454,52 @@ const renderSearchResults = () => {
   searchInput.setAttribute("aria-expanded", "true");
 };
 
-searchInput.addEventListener("input", renderSearchResults);
+const refreshUserSearch = async () => {
+  const term = searchInput.value.trim().toLowerCase();
+  if (term.length < 2) return;
+  try {
+    const matches = await getDocs(query(collection(db, "usernames"), orderBy(documentId()), startAt(term), endAt(`${term}\uf8ff`), limit(5)));
+    const profiles = await Promise.all(matches.docs.map(entry => getDoc(doc(db, "users", entry.data().uid))));
+    if (searchInput.value.trim().toLowerCase() !== term) return;
+    profiles.filter(entry => entry.exists()).forEach(entry => userProfilesByUid.set(entry.id, entry));
+    users = [...userProfilesByUid.values()];
+    renderSearchResults();
+  } catch { /* Post search remains available if username search is unavailable. */ }
+};
+searchInput.addEventListener("input", () => {
+  renderSearchResults();
+  window.clearTimeout(userSearchTimer);
+  userSearchTimer = window.setTimeout(refreshUserSearch, 280);
+});
 searchInput.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     searchInput.value = "";
     closeSearch();
   }
+});
+
+const DAILY_PROMPTS = Object.freeze([
+  "What is something you wish people understood about you?",
+  "What truth have you been afraid to say out loud?",
+  "What small thing made today better?",
+  "What advice would you give your younger self?",
+  "What opinion changed for you recently, and why?",
+  "What are you quietly proud of?",
+  "What is one question you wish someone would ask you?"
+]);
+dailyPromptButton?.addEventListener("click", () => {
+  const day = Math.floor(Date.now() / 86400000);
+  content.value = DAILY_PROMPTS[day % DAILY_PROMPTS.length];
+  content.dispatchEvent(new Event("input", { bubbles: true }));
+  content.focus();
+});
+content.addEventListener("input", () => {
+  if (!currentUser) return;
+  window.clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(() => {
+    const key = `anonchat:post-draft:${currentUser.uid}`;
+    if (content.value) localStorage.setItem(key, content.value); else localStorage.removeItem(key);
+  }, 300);
 });
 
 const validProfile = (profile, userId) =>
@@ -840,8 +891,7 @@ const postComments = (postDoc) => {
     .sort(compareOldestFirst);
 };
 
-const followerCount = (userId) =>
-  visibleFollows().filter((follow) => follow.data().followingId === userId).length;
+const followerCount = userId => followerCountsByUid.get(userId) || 0;
 
 const isFollowing = (userId) =>
   visibleFollows().some((follow) =>
@@ -850,7 +900,8 @@ const isFollowing = (userId) =>
 
 const toggleFollow = async (userId) => {
   const followRef = doc(db, "follows", `${currentUser.uid}_${userId}`);
-  if (isFollowing(userId)) {
+  const wasFollowing = isFollowing(userId);
+  if (wasFollowing) {
     await deleteDoc(followRef);
   } else {
     await setDoc(followRef, {
@@ -859,6 +910,8 @@ const toggleFollow = async (userId) => {
       createdAt: serverTimestamp()
     });
   }
+  followerCountsByUid.set(userId, Math.max(0, followerCount(userId) + (wasFollowing ? -1 : 1)));
+  renderFeed();
 };
 
 const createFollowControl = (userId) => {
@@ -954,6 +1007,37 @@ const sharePost = async (postDoc) => {
   }));
 };
 
+const hydrateVisibleAuthorMetadata = async () => {
+  const ids = new Set([currentUser?.uid].filter(Boolean));
+  [...postDocs, ...communityPostDocs].forEach(entry => {
+    const data = entry.data();
+    ids.add(data.authorId);
+    if (data.originalAuthorId) ids.add(data.originalAuthorId);
+  });
+  const missing = [...ids].filter(uid => uid && !hydratedAuthorUids.has(uid));
+  missing.forEach(uid => hydratedAuthorUids.add(uid));
+  await Promise.all(missing.map(async uid => {
+    try {
+      const [profileSnapshot, accessSnapshot, followerCountSnapshot] = await Promise.all([
+        getDoc(doc(db, "users", uid)),
+        getDoc(doc(db, "premiumAccess", uid)),
+        getCountFromServer(query(collection(db, "follows"), where("followingId", "==", uid)))
+      ]);
+      if (profileSnapshot.exists()) userProfilesByUid.set(uid, profileSnapshot);
+      followerCountsByUid.set(uid, followerCountSnapshot.data().count);
+      if (accessSnapshot.exists() && hasPremiumAccess(accessSnapshot.data())) {
+        premiumAccessUids.add(uid);
+        const settingsSnapshot = await getDoc(doc(db, "premiumSettings", uid));
+        if (settingsSnapshot.exists()) premiumSettingsByUid.set(uid, resolvedPremiumSettings(uid, settingsSnapshot.data()));
+      }
+    } catch { hydratedAuthorUids.delete(uid); }
+  }));
+  users = [...userProfilesByUid.values()];
+  renderFeed();
+  renderNotifications();
+  renderSearchResults();
+};
+
 const renderPost = (postDoc) => {
   const post = postDoc.data();
   const sourceId = originalPostId(postDoc);
@@ -973,6 +1057,7 @@ const renderPost = (postDoc) => {
 
   const displayedAuthorId = post.type === "repost" ? post.originalAuthorId : post.authorId;
   const displayedUsername = post.type === "repost" ? post.originalUsername : post.username;
+  const displayedProfile = users.find(entry => entry.id === displayedAuthorId)?.data?.() || null;
   const publicPremiumSettings = premiumAccessUids.has(displayedAuthorId) ? premiumSettingsByUid.get(displayedAuthorId) : null;
   if (publicPremiumSettings) applyPremiumTheme(item, publicPremiumSettings);
   const authorRow = document.createElement("div");
@@ -983,6 +1068,8 @@ const renderPost = (postDoc) => {
   author.textContent = `@${displayedUsername}`;
   if (publicPremiumSettings?.avatarId && publicPremiumSettings.avatarId !== "none") {
     const avatar = document.createElement("span"); avatar.className = "feed-premium-avatar"; applyPremiumAvatar(avatar, publicPremiumSettings.avatarId); authorRow.append(avatar);
+  } else if (displayedProfile?.freeAvatarId) {
+    const avatar = document.createElement("span"); avatar.className = "feed-premium-avatar"; if (applyFreeAvatar(avatar, displayedProfile.freeAvatarId)) authorRow.append(avatar);
   }
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
@@ -990,6 +1077,8 @@ const renderPost = (postDoc) => {
   const postImage = post.imageData ? document.createElement("img") : null;
   if (postImage) {
     postImage.className = "post-image";
+    postImage.loading = "lazy";
+    postImage.decoding = "async";
     postImage.src = post.imageData;
     postImage.alt = "Photo attached to this post";
   }
@@ -1531,21 +1620,25 @@ const syncPollVoteListeners = () => {
   clearPollVoteListeners();
   const generation = pollVoteGeneration;
   const votesByPoll = new Map();
-  visiblePollTargets().forEach((target) => {
-    pollVoteListeners.push(onSnapshot(
-      query(
-        collection(db, "communityVotes"),
-        where("postCollection", "==", target.collection),
-        where("postId", "==", target.id)
-      ),
-      (snapshot) => {
-        if (generation !== pollVoteGeneration) return;
-        votesByPoll.set(target.path, snapshot.docs);
-        pollVotes = [...votesByPoll.values()].flat();
-        renderFeed();
-      },
-      () => setStatus("Could not load poll votes.", true)
-    ));
+  const grouped = new Map();
+  visiblePollTargets().forEach(target => {
+    if (!grouped.has(target.collection)) grouped.set(target.collection, []);
+    grouped.get(target.collection).push(target.id);
+  });
+  grouped.forEach((postIds, postCollection) => {
+    for (let offset = 0; offset < postIds.length; offset += 30) {
+      const chunk = postIds.slice(offset, offset + 30);
+      pollVoteListeners.push(onSnapshot(
+        query(collection(db, "communityVotes"), where("postCollection", "==", postCollection), where("postId", "in", chunk)),
+        snapshot => {
+          if (generation !== pollVoteGeneration) return;
+          votesByPoll.set(`${postCollection}:${offset}`, snapshot.docs);
+          pollVotes = [...votesByPoll.values()].flat();
+          renderFeed();
+        },
+        () => setStatus("Could not load poll votes.", true)
+      ));
+    }
   });
 };
 
@@ -1571,9 +1664,13 @@ const stopTimelineResources = () => {
   postDocs = [];
   communityPostDocs = [];
   follows = [];
+  followerCountsByUid = new Map();
   users = [];
   premiumSettingsByUid = new Map();
   premiumAccessUids = new Set();
+  userProfilesByUid = new Map();
+  hydratedAuthorUids = new Set();
+  window.clearTimeout(userSearchTimer);
   currentUserIsPremium = false;
   notificationReads = [];
   messageRequests = [];
@@ -1613,6 +1710,8 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  const savedDraft = localStorage.getItem(`anonchat:post-draft:${user.uid}`);
+  if (savedDraft && !content.value) content.value = savedDraft;
   blockTracker = createViewerBlockTracker(user.uid);
   viewerBlocks = blockTracker.current();
   moderationClient = createModerationClient({
@@ -1641,6 +1740,9 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     profileUsername = profile.data().username;
   }
+  userProfilesByUid.set(user.uid, profile);
+  hydratedAuthorUids.add(user.uid);
+  users = [profile];
   void pushAlertsClient.reconcileExisting(user);
   void recordPageActivity({
     surface: "timeline",
@@ -1657,6 +1759,12 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("membership-badge").textContent = premiumAccess.exists()
     ? premiumLabel(premiumAccess.data()) : "Member";
   currentUserIsPremium = premiumAccess.exists() && ["founder", "founding", "subscriber"].includes(premiumAccess.data().tier) && premiumAccess.data().status === "active";
+  if (currentUserIsPremium) {
+    premiumAccessUids.add(user.uid);
+    const ownSettings = await getDoc(doc(db, "premiumSettings", user.uid));
+    if (!sessionIsCurrent()) return;
+    if (ownSettings.exists()) premiumSettingsByUid.set(user.uid, resolvedPremiumSettings(user.uid, ownSettings.data()));
+  }
   content.maxLength = currentUserIsPremium ? 20000 : 500;
   document.getElementById("post-limit-note").textContent = currentUserIsPremium ? "Premium limit: 1,000 words." : "Up to 500 characters. Premium members get 1,000 words.";
   document.getElementById("my-profile-link").href =
@@ -1696,6 +1804,7 @@ onAuthStateChanged(auth, async (user) => {
       syncInteractionListeners();
       renderFeed();
       renderSearchResults();
+      void hydrateVisibleAuthorMetadata();
     },
     () => setStatus("Could not load posts.", true)
   ));
@@ -1708,31 +1817,9 @@ onAuthStateChanged(auth, async (user) => {
       syncPollVoteListeners();
       syncInteractionListeners();
       renderFeed();
+      void hydrateVisibleAuthorMetadata();
     },
     () => setStatus("Could not load earlier community posts.", true)
-  ));
-
-  listeners.push(listenForSession(
-    collection(db, "users"),
-    (snapshot) => {
-      users = snapshot.docs;
-      renderNotifications();
-      renderSearchResults();
-    },
-    () => setStatus("Could not load notification names.", true)
-  ));
-  listeners.push(listenForSession(
-    collection(db, "premiumSettings"),
-    snapshot => {
-      premiumSettingsByUid = new Map(snapshot.docs.map(entry => [entry.id, resolvedPremiumSettings(entry.id, entry.data())]));
-      renderFeed();
-    },
-    () => { premiumSettingsByUid = new Map(); }
-  ));
-  listeners.push(listenForSession(
-    collection(db, "premiumAccess"),
-    snapshot => { premiumAccessUids = new Set(snapshot.docs.filter(entry => hasPremiumAccess(entry.data())).map(entry => entry.id)); renderFeed(); },
-    () => { premiumAccessUids = new Set(); }
   ));
 
   listeners.push(listenForSession(
@@ -1745,12 +1832,12 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(listenForSession(
-    collection(db, "follows"),
+    query(collection(db, "follows"), where("followerId", "==", user.uid)),
     (snapshot) => {
       follows = snapshot.docs;
       renderFeed();
     },
-    () => setStatus("Could not load follower counts.", true)
+    () => setStatus("Could not load accounts you follow.", true)
   ));
 
   listeners.push(listenForSession(
@@ -1797,7 +1884,7 @@ onAuthStateChanged(auth, async (user) => {
     }
   ));
 
-  listeners.push(listenForSession(query(collection(db, "roomMessages"), where("moderationState", "==", "visible")), (snapshot) => {
+  listeners.push(listenForSession(query(collection(db, "roomMessages"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(100)), (snapshot) => {
     roomMessages = snapshot.docs;
     renderNotifications();
   }));
@@ -1842,6 +1929,7 @@ form.addEventListener("submit", async (event) => {
       createdAt: serverTimestamp()
     }));
     content.value = "";
+    localStorage.removeItem(`anonchat:post-draft:${currentUser.uid}`);
     pendingPostImage = "";
     postImageInput.value = "";
     postImagePreviewWrap.hidden = true;

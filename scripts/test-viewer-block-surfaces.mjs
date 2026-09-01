@@ -39,10 +39,12 @@ assert.match(sources["timeline.js"], /const matchedUsers = visibleUsers\(\)/,
   "Timeline search hides blocked profiles");
 assert.match(sources["profile.js"], /isBlockedPost\(post, viewerBlocks\)/,
   "profile feeds hide reposts whose original author is blocked");
-assert.match(sources["profile.js"], /sessionListeners\.push\(onSnapshot\(collection\(db, "users"\)/,
-  "Profile retains its users listener for auth-session cleanup");
-assert.match(sources["profile.js"], /sessionListeners\.push\(onSnapshot\(collection\(db, "follows"\)/,
-  "Profile retains its follows listener for auth-session cleanup");
+assert.doesNotMatch(sources["profile.js"], /onSnapshot\(collection\(db, "users"\)/,
+  "Profile never opens an unbounded users listener");
+assert.match(sources["profile.js"], /getDocs\(query\(collection\(db, "usernames"\)/,
+  "Profile mention search performs a bounded username lookup");
+assert.match(sources["profile.js"], /onSnapshot\(query\(collection\(db, "follows"\), where\("followingId"/,
+  "Profile follower listener is constrained to the viewed account");
 assert.match(sources["profile.js"], /sessionListeners\.splice\(0\)\.forEach\(\(unsubscribe\) => unsubscribe\(\)\)/,
   "Profile unsubscribes every retained session listener before auth state is replaced");
 assert.match(sources["profile.js"], /const clearProtectedProfileMetadata = \(message\) => \{[\s\S]{0,180}clearProfileProtectedMetadata/,

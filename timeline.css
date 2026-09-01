@@ -748,7 +748,9 @@ button:disabled { cursor: wait; opacity: 0.6; }
   display: block;
   width: 100%;
   height: 190px;
-  object-fit: cover;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
   opacity: 0.62;
 }
 
@@ -767,7 +769,9 @@ button:disabled { cursor: wait; opacity: 0.6; }
   border: 4px solid var(--surface);
   border-radius: 50%;
   background: white;
-  object-fit: cover;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 
 .view-profile-identity h1 { margin: 0; font-size: clamp(1.6rem, 4vw, 2.2rem); }
@@ -1192,3 +1196,4 @@ button:not(.avatar-button):not(.banner-button):hover, .nav-button:hover,
 .profile-banner{min-height:340px}.profile-content{bottom:28px;align-items:flex-end}.view-profile-content{padding-top:28px !important;padding-bottom:30px !important;row-gap:16px}@media(max-width:560px){.profile-banner{min-height:325px}.profile-content{right:18px;bottom:24px;left:18px;align-items:flex-end;gap:16px}.view-profile-content{padding-top:24px !important;padding-bottom:26px !important}.view-profile-identity{width:100%}.profile-social-actions{margin-top:2px}}
 button,.primary-button,.secondary-button,.follow-button,.nav-button,select{min-height:43px!important;border:0!important;border-radius:999px!important;background:#7c3aed!important;color:#fff!important;font-weight:850!important}select{padding-right:38px!important}button:disabled{opacity:.55}
 .main-menu-panel,dialog{border-color:#7c3aed!important;border-radius:22px!important}.main-menu-panel{background:#7c3aed!important}.main-menu-panel a{border-radius:999px!important}
+@import url("controls.css");

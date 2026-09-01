@@ -871,6 +871,15 @@ service cloud.firestore {
               && request.resource.data.get('profileImage', '').size() <= 360000
               && request.resource.data.get('coverImage', '').size() <= 360000)
             ||
+            (request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['freeAvatarId', 'freeCoverId'])
+              && request.resource.data.get('freeAvatarId', '') is string
+              && request.resource.data.get('freeCoverId', '') is string
+              && (request.resource.data.get('freeAvatarId', '') == ''
+                || request.resource.data.get('freeAvatarId', '').matches('free-avatar-[1-8]'))
+              && (request.resource.data.get('freeCoverId', '') == ''
+                || request.resource.data.get('freeCoverId', '').matches('free-cover-[1-4]')))
+            ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
               && (!isProtectedAdministrator(resource.data.username)
                 || request.resource.data.username.lower() == resource.data.username.lower())

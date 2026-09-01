@@ -177,13 +177,13 @@ const compressMessageImage = (file) => new Promise((resolve, reject) => {
     const image = new Image();
     image.onerror = () => reject(new Error("Could not open that image."));
     image.onload = () => {
-      const scale = Math.min(1, 1400 / image.width, 1400 / image.height);
+      const scale = Math.min(1, 1024 / image.width, 1024 / image.height);
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(image.width * scale));
       canvas.height = Math.max(1, Math.round(image.height * scale));
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-      const data = canvas.toDataURL("image/jpeg", 0.7);
-      if (data.length > 780000) reject(new Error("That image is still too large after compression."));
+      const data = canvas.toDataURL("image/jpeg", 0.62);
+      if (data.length > 240000) reject(new Error("That image is still too large after compression."));
       else resolve(data);
     };
     image.src = reader.result;
@@ -415,6 +415,7 @@ const renderRoomMessages = () => {
     if (data.imageData) {
       const photo = document.createElement("img");
       photo.className = "message-photo";
+      photo.loading = "lazy"; photo.decoding = "async";
       photo.src = data.imageData;
       photo.alt = "Photo sent in this temporary room";
       item.append(photo);
@@ -742,6 +743,7 @@ const renderDirectMessages = () => {
     if (imageData) {
       const photo = document.createElement("img");
       photo.className = "message-photo";
+      photo.loading = "lazy"; photo.decoding = "async";
       photo.src = imageData;
       photo.alt = "Photo sent in this private conversation";
       item.append(photo);
