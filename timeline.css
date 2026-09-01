@@ -1037,6 +1037,7 @@ button:disabled { cursor: wait; opacity: 0.6; }
 .spotify-song-form small,.spotify-song-status{display:block;margin-top:8px;color:var(--muted)}
 #spotify-player-wrap,#profile-spotify-player{margin-top:14px}
 #spotify-player-wrap iframe,#profile-spotify-player iframe{display:block;width:100%;height:152px;border:0;border-radius:14px}
+.spotify-profile-card.has-playlist #spotify-player-wrap iframe{height:352px}
 #profile-playlist-player iframe,.premium-playlist-player iframe{display:block;width:100%;height:352px;border:0;border-radius:14px}
 .profile-spotify-card{margin-bottom:22px}
 @media(max-width:640px){.spotify-profile-card{padding:14px}.spotify-card-heading{align-items:flex-start}.spotify-input-row{flex-wrap:wrap}.spotify-input-row input{flex-basis:100%}#spotify-player-wrap iframe,#profile-spotify-player iframe{height:152px}}

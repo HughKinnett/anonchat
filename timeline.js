@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
-import { hasPremiumAccess, premiumLabel } from "./premium-policy.mjs";
+import { hasPremiumAccess, premiumDefaults, premiumLabel } from "./premium-policy.mjs";
 import { applyPremiumAvatar, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
 import { applyFreeAvatar } from "./free-profile-theme.mjs";
 import { isBookmarked, recordContribution, toggleBookmark } from "./experience-preferences.mjs";
@@ -76,6 +76,7 @@ let hydratedAuthorUids = new Set();
 let userSearchTimer = 0;
 let draftTimer = 0;
 let currentUserIsPremium = false;
+let currentPremiumSettings = null;
 let notificationReads = [];
 let communityPostDocs = [];
 let pollVotes = [];
@@ -160,18 +161,27 @@ const spotifyTrackId = (value) => {
     return "";
   }
 };
+const spotifyPlaylistId = (value) => {
+  try { const url = new URL(String(value || "").trim()); if (!/(^|\.)spotify\.com$/i.test(url.hostname)) return ""; return url.pathname.match(/^\/playlist\/([A-Za-z0-9]+)(?:\/|$)/)?.[1] || ""; } catch { return ""; }
+};
 
 const renderSpotifySong = (url = "") => {
-  const id = spotifyTrackId(url);
+  const isPlaylist = currentUserIsPremium;
+  const id = isPlaylist ? spotifyPlaylistId(url) : spotifyTrackId(url);
   spotifyPlayerWrap.replaceChildren();
   spotifyPlayerWrap.hidden = !id;
   spotifyCard?.classList.toggle("has-song", Boolean(id));
-  spotifyToggle.textContent = id ? "Change song" : "Add song";
-  spotifyInput.value = id ? `https://open.spotify.com/track/${id}` : "";
+  spotifyCard?.classList.toggle("has-playlist", isPlaylist);
+  document.getElementById("spotify-profile-title").textContent = isPlaylist ? "Add a Spotify playlist" : "Add a Spotify song";
+  spotifyForm.querySelector("label").textContent = isPlaylist ? "Spotify playlist link" : "Spotify song link";
+  spotifyInput.placeholder = isPlaylist ? "https://open.spotify.com/playlist/..." : "https://open.spotify.com/track/...";
+  document.getElementById("spotify-link-help").textContent = `Open a ${isPlaylist ? "playlist" : "song"} in Spotify, tap Share, then copy its link.`;
+  spotifyToggle.textContent = id ? `Change ${isPlaylist ? "playlist" : "song"}` : `Add ${isPlaylist ? "playlist" : "song"}`;
+  spotifyInput.value = id ? `https://open.spotify.com/${isPlaylist ? "playlist" : "track"}/${id}` : "";
   if (!id) return;
   const frame = document.createElement("iframe");
-  frame.src = `https://open.spotify.com/embed/track/${id}?utm_source=generator&theme=0`;
-  frame.title = "Spotify profile song";
+  frame.src = `https://open.spotify.com/embed/${isPlaylist ? "playlist" : "track"}/${id}?utm_source=generator&theme=0`;
+  frame.title = `Spotify profile ${isPlaylist ? "playlist" : "song"}`;
   frame.loading = "lazy";
   frame.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";
   spotifyPlayerWrap.append(frame);
@@ -184,30 +194,36 @@ spotifyToggle?.addEventListener("click", () => {
 
 spotifyForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const id = spotifyTrackId(spotifyInput.value);
+  const id = currentUserIsPremium ? spotifyPlaylistId(spotifyInput.value) : spotifyTrackId(spotifyInput.value);
   if (!id) {
-    spotifyStatus.textContent = "Paste a valid Spotify song link.";
+    spotifyStatus.textContent = `Paste a valid Spotify ${currentUserIsPremium ? "playlist" : "song"} link.`;
     return;
   }
-  const url = `https://open.spotify.com/track/${id}`;
+  const url = `https://open.spotify.com/${currentUserIsPremium ? "playlist" : "track"}/${id}`;
   try {
-    await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: url });
+    if (currentUserIsPremium) {
+      currentPremiumSettings = { ...premiumDefaults(currentUser.uid), ...currentPremiumSettings, uid: currentUser.uid, spotifyPlaylistUrl: url };
+      await setDoc(doc(db, "premiumSettings", currentUser.uid), { ...currentPremiumSettings, updatedAt: serverTimestamp() });
+    } else await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: url });
     renderSpotifySong(url);
     spotifyForm.hidden = true;
-    spotifyStatus.textContent = "Your profile song was saved.";
+    spotifyStatus.textContent = `Your profile ${currentUserIsPremium ? "playlist" : "song"} was saved.`;
   } catch {
-    spotifyStatus.textContent = "Could not save that song. Please try again.";
+    spotifyStatus.textContent = `Could not save that ${currentUserIsPremium ? "playlist" : "song"}. Please try again.`;
   }
 });
 
 spotifyRemove?.addEventListener("click", async () => {
   try {
-    await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: "" });
+    if (currentUserIsPremium) {
+      currentPremiumSettings = { ...premiumDefaults(currentUser.uid), ...currentPremiumSettings, uid: currentUser.uid, spotifyPlaylistUrl: "" };
+      await setDoc(doc(db, "premiumSettings", currentUser.uid), { ...currentPremiumSettings, updatedAt: serverTimestamp() });
+    } else await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: "" });
     renderSpotifySong("");
     spotifyForm.hidden = true;
-    spotifyStatus.textContent = "Profile song removed.";
+    spotifyStatus.textContent = `Profile ${currentUserIsPremium ? "playlist" : "song"} removed.`;
   } catch {
-    spotifyStatus.textContent = "Could not remove that song.";
+    spotifyStatus.textContent = `Could not remove that ${currentUserIsPremium ? "playlist" : "song"}.`;
   }
 });
 
@@ -1783,8 +1799,10 @@ onAuthStateChanged(auth, async (user) => {
     premiumAccessUids.add(user.uid);
     const ownSettings = await getDoc(doc(db, "premiumSettings", user.uid));
     if (!sessionIsCurrent()) return;
-    if (ownSettings.exists()) premiumSettingsByUid.set(user.uid, resolvedPremiumSettings(user.uid, ownSettings.data()));
+    currentPremiumSettings = ownSettings.exists() ? resolvedPremiumSettings(user.uid, ownSettings.data()) : premiumDefaults(user.uid);
+    premiumSettingsByUid.set(user.uid, currentPremiumSettings);
   }
+  renderSpotifySong(currentUserIsPremium ? currentPremiumSettings.spotifyPlaylistUrl : profile.data().spotifyTrackUrl || "");
   content.maxLength = currentUserIsPremium ? 20000 : 500;
   document.getElementById("post-limit-note").textContent = currentUserIsPremium ? "Premium limit: 1,000 words." : "Up to 500 characters. Premium members get 1,000 words.";
   document.getElementById("my-profile-link").href =
