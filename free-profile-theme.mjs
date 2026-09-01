@@ -5,8 +5,8 @@ export const applyFreeAvatar = (element, avatarId) => {
   const index = FREE_AVATARS.indexOf(avatarId) - 1;
   if (!element || index < 0) return false;
   element.classList.add("free-avatar-choice");
-  element.style.setProperty("--free-avatar-x", `${(index % 4) * 100 / 3}%`);
-  element.style.setProperty("--free-avatar-y", `${Math.floor(index / 4) * 100}%`);
+  element.dataset.freeArtwork = avatarId;
+  element.style.setProperty("background-position", `${(index % 4) * 100 / 3}% ${Math.floor(index / 4) * 100}%`, "important");
   return true;
 };
 
@@ -14,7 +14,7 @@ export const applyFreeCover = (element, coverId) => {
   const index = FREE_COVERS.indexOf(coverId) - 1;
   if (!element || index < 0) return false;
   element.classList.add("free-cover-choice");
-  element.style.setProperty("--free-cover-x", `${(index % 2) * 100}%`);
-  element.style.setProperty("--free-cover-y", `${Math.floor(index / 2) * 100}%`);
+  element.dataset.freeArtwork = coverId;
+  element.style.setProperty("background-position", `${(index % 2) * 100}% ${Math.floor(index / 2) * 100}%`, "important");
   return true;
 };

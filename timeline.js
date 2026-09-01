@@ -3,6 +3,7 @@ import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
 import { hasPremiumAccess, premiumLabel } from "./premium-policy.mjs";
 import { applyPremiumAvatar, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
 import { applyFreeAvatar } from "./free-profile-theme.mjs";
+import { isBookmarked, recordContribution, toggleBookmark } from "./experience-preferences.mjs";
 import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
@@ -1081,6 +1082,12 @@ const renderPost = (postDoc) => {
     postImage.decoding = "async";
     postImage.src = post.imageData;
     postImage.alt = "Photo attached to this post";
+    postImage.tabIndex = 0;
+    postImage.title = "Tap to reveal this photograph in Data Saver mode";
+    postImage.addEventListener("click", () => postImage.classList.add("data-saver-revealed"));
+    postImage.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") postImage.classList.add("data-saver-revealed");
+    });
   }
   const time = document.createElement("small");
   const expiresAt = post.expiresAt?.toMillis?.();
@@ -1097,7 +1104,7 @@ const renderPost = (postDoc) => {
 
   const interactionEntry = interactionSubscriptions.get(parent.path);
   const reactionDocs = postReactions(postDoc);
-  const interactionState = interactionParentLoadState(interactionEntry);
+  const interactionState = interactionParentLoadState(interactionSubscriptions.get(parent.path));
   const reactionsReady = Boolean(interactionEntry?.ready?.reactions && interactionEntry?.ready?.viewerReaction);
   const commentsReady = Boolean(interactionEntry?.ready?.comments);
   const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");
@@ -1120,9 +1127,11 @@ const renderPost = (postDoc) => {
   const activeReactionTypes = [...new Set(reactionDocs.map((reaction) => reaction.data().type))];
   const reactionEmoji = { heart: "❤️", middle_finger: "🖕", laugh: "😂", sad: "😢" };
   const activeReactionIcons = activeReactionTypes.map((type) => reactionEmoji[type]).filter(Boolean).join(" ");
-  interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${reactionDocs.length}`;
+  const count = reactionDocs.length;
+  const reactionTotal = boundedInteractionCount(count, reactionsTruncated);
+  interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${reactionTotal}`;
   interactionSummaryLabel.setAttribute("aria-label",
-    `${reactionDocs.length} interaction${reactionDocs.length === 1 ? "" : "s"}. Show who interacted.`);
+    `${reactionTotal} interaction${count === 1 ? "" : "s"}. Show who interacted.`);
   interactionSummaryLabel.title = "Show who interacted with this post";
   const interactionPeople = document.createElement("ul");
   if (!reactionDocs.length) {
@@ -1285,6 +1294,16 @@ const renderPost = (postDoc) => {
 
   const actions = document.createElement("div");
   actions.className = "post-actions";
+  const bookmark = document.createElement("button");
+  bookmark.type = "button";
+  bookmark.className = "bookmark-button";
+  const updateBookmarkLabel = () => { bookmark.textContent = isBookmarked(parent.path) ? "Saved" : "Save"; };
+  updateBookmarkLabel();
+  bookmark.addEventListener("click", () => {
+    toggleBookmark({ path: parent.path, author: displayedUsername, excerpt: post.content });
+    updateBookmarkLabel();
+  });
+  actions.append(bookmark);
   const repostId = `repost_${currentUser.uid}_${sourceId}`;
   const alreadyShared = postDocs.some((candidate) => candidate.id === repostId);
 
@@ -1457,6 +1476,8 @@ const startInteractionChildren = (entry) => {
     entry.childUnsubscribes.push(onSnapshot(
       query(
         collection(db, entry.parent.collection, entry.parent.id, kind),
+        orderBy("createdAt", "desc"),
+        orderBy(documentId(), "desc"),
         limit(MAX_INTERACTION_ITEMS_PER_PARENT)
       ),
       (snapshot) => {
@@ -1937,6 +1958,7 @@ form.addEventListener("submit", async (event) => {
     postCategory.value = "Post";
     postExpiry.value = "0";
     pollOptions.hidden = true;
+    recordContribution();
   } catch {
     setStatus("Could not publish your post.", true);
   } finally {

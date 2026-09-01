@@ -551,12 +551,12 @@ function observe(ref, key, onData, transform = records) {
 function startLiveData() {
   if (!pageActive || !adminUid || listenersStarted) return;
   listenersStarted = true;
-  observe(collection(db, "users"), "users", () => { renderMetrics(); renderUsers(); renderReports(); renderAnalytics(); });
-  observe(query(collection(db, "posts"), orderBy("createdAt", "desc")), "posts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
-  observe(query(collection(db, "communityPosts"), orderBy("createdAt", "desc")), "communityPosts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
-  observe(collection(db, "pageViews"), "views", renderAnalytics); observe(collectionGroup(db, "comments"), "comments", renderAnalytics); observe(collectionGroup(db, "reactions"), "reactions", renderAnalytics);
-  observe(collection(db, "follows"), "follows", renderAnalytics); observe(collection(db, "circles"), "circles", renderAnalytics); observe(collection(db, "circleMembers"), "members", renderAnalytics);
-  observe(collection(db, "rooms"), "rooms", renderAnalytics); observe(collection(db, "communityVotes"), "votes", () => { renderMetrics(); renderAnalytics(); });
+  observe(query(collection(db, "users"), limit(500)), "users", () => { renderMetrics(); renderUsers(); renderReports(); renderAnalytics(); });
+  observe(query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(500)), "posts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
+  observe(query(collection(db, "communityPosts"), orderBy("createdAt", "desc"), limit(500)), "communityPosts", () => { renderMetrics(); renderContent(); renderAnalytics(); });
+  observe(query(collection(db, "pageViews"), limit(1000)), "views", renderAnalytics); observe(query(collectionGroup(db, "comments"), limit(1000)), "comments", renderAnalytics); observe(query(collectionGroup(db, "reactions"), limit(1000)), "reactions", renderAnalytics);
+  observe(query(collection(db, "follows"), limit(1000)), "follows", renderAnalytics); observe(query(collection(db, "circles"), limit(500)), "circles", renderAnalytics); observe(query(collection(db, "circleMembers"), limit(1000)), "members", renderAnalytics);
+  observe(query(collection(db, "rooms"), limit(500)), "rooms", renderAnalytics); observe(query(collection(db, "communityVotes"), limit(1000)), "votes", () => { renderMetrics(); renderAnalytics(); });
   startReportQueue();
   startLegacyRoomQueue();
   unsubs.push(onSnapshot(collection(db, "adminDeletionJobs"), handleJobSnapshot, () => setStatus("Could not load live deletion status.", true)));

@@ -1,15 +1,18 @@
 import { auth, db } from "./firebase-config.js";
 import { hasPremiumAccess, premiumDefaults } from "./premium-policy.mjs";
 import { applyPremiumTheme } from "./premium-theme.mjs";
+import { applyExperienceSettings } from "./experience-preferences.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 onAuthStateChanged(auth, async user => {
+  applyExperienceSettings();
   if (!user) return;
   const menu = document.getElementById("main-menu-panel");
   if (!menu || menu.querySelector(".premium-menu-section")) return;
   const section = document.createElement("section"); section.className = "premium-menu-section";
   const appearanceLink = document.createElement("a"); appearanceLink.href = "profile-style.html"; appearanceLink.textContent = "Profile appearance"; section.append(appearanceLink);
+  const experienceLink = document.createElement("a"); experienceLink.href = "experience.html"; experienceLink.textContent = "Experience & accessibility"; section.append(experienceLink);
   const premiumLink = document.createElement("a"); premiumLink.href = "premium.html"; premiumLink.textContent = "Premium · $4.99/month"; section.append(premiumLink);
   const shareLink = async (title, text, url) => {
     try { if (navigator.share) await navigator.share({ title, text, url }); else { await navigator.clipboard.writeText(url); window.alert("Link copied."); } } catch { /* The user can cancel the share sheet. */ }

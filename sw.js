@@ -1,10 +1,11 @@
-const CACHE_NAME = "anonchat-v94";
+const CACHE_NAME = "anonchat-v95";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./timeline.html",
   "./profile.html",
   "./profile-style.html",
+  "./experience.html",
   "./forgot-password.html",
   "./connections.html",
   "./community.html",
@@ -50,6 +51,8 @@ const APP_SHELL = [
   "./premium-policy.mjs",
   "./premium-theme.mjs",
   "./free-profile-theme.mjs",
+  "./experience-preferences.mjs",
+  "./experience.js",
   "./profile-style.js",
   "./premium-menu.js",
   "./premium.js",
@@ -81,7 +84,8 @@ const APP_SHELL = [
   "./upload.js",
   "./pwa.js",
   "./manifest.webmanifest",
-  "./anonchat-background-mobile.jpg"
+  "./anonchat-background-mobile.jpg",
+  "./anonchat-anonymous.png"
 ];
 
 self.addEventListener("install", (event) => {
