@@ -149,7 +149,7 @@ const renderTargetProfileIdentity = () => {
   if (!targetProfile || !viewerBlocks.ready) return;
   const targetHasPremium = hasPremiumAccess(targetPremiumAccess);
   renderProfileSpotifySong(targetBlocked || targetHasPremium ? "" : targetProfile.spotifyTrackUrl || "");
-  renderProfileSpotifyPlaylist(targetBlocked || !targetHasPremium ? "" : targetPremiumSettings?.spotifyPlaylistUrl || "");
+  renderProfileSpotifyPlaylist(targetBlocked || !targetHasPremium ? "" : targetProfile.spotifyPlaylistUrl || targetPremiumSettings?.spotifyPlaylistUrl || "");
   document.title = targetBlocked ? "Unavailable profile — AnonChat" : `@${targetProfile.username} — AnonChat`;
   document.getElementById("profile-name").textContent = targetBlocked ? "Unavailable profile" : targetProfile.username;
   document.getElementById("profile-handle").textContent = targetBlocked ? "" : `@${targetProfile.username}`;

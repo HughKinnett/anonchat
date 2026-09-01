@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
-import { hasPremiumAccess, premiumDefaults, premiumLabel, sanitizedPremiumSettings } from "./premium-policy.mjs";
+import { hasPremiumAccess, premiumDefaults, premiumLabel } from "./premium-policy.mjs";
 import { applyPremiumAvatar, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
 import { applyFreeAvatar } from "./free-profile-theme.mjs";
 import { isBookmarked, recordContribution, toggleBookmark } from "./experience-preferences.mjs";
@@ -202,8 +202,8 @@ spotifyForm?.addEventListener("submit", async (event) => {
   const url = `https://open.spotify.com/${currentUserIsPremium ? "playlist" : "track"}/${id}`;
   try {
     if (currentUserIsPremium) {
-      currentPremiumSettings = { ...sanitizedPremiumSettings(currentUser.uid, currentPremiumSettings), spotifyPlaylistUrl: url };
-      await setDoc(doc(db, "premiumSettings", currentUser.uid), { ...currentPremiumSettings, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, "users", currentUser.uid), { spotifyPlaylistUrl: url });
+      currentPremiumSettings = { ...currentPremiumSettings, spotifyPlaylistUrl: url };
     } else await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: url });
     renderSpotifySong(url);
     spotifyForm.hidden = true;
@@ -216,8 +216,8 @@ spotifyForm?.addEventListener("submit", async (event) => {
 spotifyRemove?.addEventListener("click", async () => {
   try {
     if (currentUserIsPremium) {
-      currentPremiumSettings = { ...sanitizedPremiumSettings(currentUser.uid, currentPremiumSettings), spotifyPlaylistUrl: "" };
-      await setDoc(doc(db, "premiumSettings", currentUser.uid), { ...currentPremiumSettings, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, "users", currentUser.uid), { spotifyPlaylistUrl: "" });
+      currentPremiumSettings = { ...currentPremiumSettings, spotifyPlaylistUrl: "" };
     } else await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: "" });
     renderSpotifySong("");
     spotifyForm.hidden = true;
@@ -791,6 +791,7 @@ document.addEventListener("click", (event) => {
 
 const setStatus = (message, isError = false) => {
   status.textContent = message;
+  status.hidden = !message;
   status.style.color = isError ? "#fca5a5" : "inherit";
 };
 
@@ -998,6 +999,11 @@ const reactionButton = (parent, type, emoji, reactionDocs) => {
       const entry = interactionSubscriptions.get(parent.path);
       if (entry) {
         entry.viewerReaction = latest.exists() ? latest : undefined;
+        entry.reactions = [
+          ...entry.reactions.filter((reaction) => reaction.data().uid !== currentUser.uid),
+          ...(latest.exists() ? [latest] : [])
+        ];
+        entry.ready.reactions = true;
         entry.ready.viewerReaction = true;
         queueInteractionRender();
       } else button.disabled = false;
@@ -1805,7 +1811,7 @@ onAuthStateChanged(auth, async (user) => {
     currentPremiumSettings = ownSettings.exists() ? resolvedPremiumSettings(user.uid, ownSettings.data()) : premiumDefaults(user.uid);
     premiumSettingsByUid.set(user.uid, currentPremiumSettings);
   }
-  renderSpotifySong(currentUserIsPremium ? currentPremiumSettings.spotifyPlaylistUrl : profile.data().spotifyTrackUrl || "");
+  renderSpotifySong(currentUserIsPremium ? (profile.data().spotifyPlaylistUrl || currentPremiumSettings.spotifyPlaylistUrl) : profile.data().spotifyTrackUrl || "");
   content.maxLength = currentUserIsPremium ? 20000 : 500;
   document.getElementById("post-limit-note").textContent = currentUserIsPremium ? "Premium limit: 1,000 words." : "Up to 500 characters. Premium members get 1,000 words.";
   document.getElementById("my-profile-link").href =
