@@ -1113,7 +1113,7 @@ service cloud.firestore {
         && reactionId == request.auth.uid
         && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.type in ['heart', 'middle_finger', 'laugh', 'sad']
+        && request.resource.data.type in ['wow', 'middle_finger', 'laugh', 'smile', 'fire', 'heart', 'sad']
         && request.resource.data.createdAt == request.time;
       allow update: if activeUserAfter()
         && contentAvailableAfter(documentPath)
@@ -1121,7 +1121,7 @@ service cloud.firestore {
         && resource.data.uid == request.auth.uid
         && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.type in ['heart', 'middle_finger', 'laugh', 'sad']
+        && request.resource.data.type in ['wow', 'middle_finger', 'laugh', 'smile', 'fire', 'heart', 'sad']
         && request.resource.data.createdAt == request.time;
       allow delete: if (signedIn()
           && reactionId == request.auth.uid

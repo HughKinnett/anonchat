@@ -51,7 +51,32 @@ const openRoom = async roomId => { stopRoom(); activeRoom = roomId; members = []
   roomUnsubs.push(onSnapshot(query(collection(db,"premiumRooms",roomId,"messages"),orderBy("createdAt","desc"),limit(100)), snap => { const list = $("premium-messages"); list.replaceChildren(); [...snap.docs].reverse().forEach(entry => { const data = entry.data(), item = document.createElement("article"), head = document.createElement("header"), name = document.createElement("strong"), body = document.createElement("div"); item.className = "premium-message"; item.tabIndex = 0; name.textContent = `@${data.username}`; body.textContent = data.text; head.append(name); item.append(head, body); attachHoldMenu(item, entry, data); list.append(item); }); list.scrollTop = list.scrollHeight; })); setStatus("Room opened. Hold a message for actions."); };
 
 $("create-premium-room").onsubmit = async event => { event.preventDefault(); const name = $("premium-room-name").value.trim(), topic = $("premium-room-topic").value.trim(), roomColor = roomColorSelect.value; if (!name) return; const roomRef = doc(collection(db,"premiumRooms")), batch = writeBatch(db), now = serverTimestamp(); batch.set(roomRef,{name,topic,roomColor,ownerId:user.uid,moderatorIds:[],createdAt:now,updatedAt:now,moderationState:"visible"}); batch.set(doc(db,"premiumRoomMembers",`${roomRef.id}_${user.uid}`),{roomId:roomRef.id,uid:user.uid,role:"owner",invitedBy:user.uid,joinedAt:now}); try { await batch.commit(); event.target.reset(); roomColorSelect.value="purple"; setStatus("Premium room created."); } catch { setStatus("Could not create that room.",true); } };
-$("premium-message-form").onsubmit = async event => { event.preventDefault(); const text = $("premium-message").value.trim(); if(!text||!activeRoom)return; try { await addDoc(collection(db,"premiumRooms",activeRoom,"messages"),{senderId:user.uid,username:profile.username,text,createdAt:serverTimestamp()}); event.target.reset(); } catch { setStatus("Could not send that message.",true); } };
+$("premium-message-form").onsubmit = async event => {
+  event.preventDefault();
+  const input = $("premium-message"), button = event.target.querySelector("button[type='submit']");
+  const text = input.value.trim();
+  if (!user || !activeRoom) return setStatus("Open an invite-only room before sending.", true);
+  if (!text) return setStatus("Write a message before sending.", true);
+  button.disabled = true;
+  try {
+    const [memberSnap, profileSnap] = await Promise.all([
+      getDoc(doc(db, "premiumRoomMembers", `${activeRoom}_${user.uid}`)),
+      getDoc(doc(db, "users", user.uid))
+    ]);
+    if (!memberSnap.exists()) throw new Error("You are no longer a member of this room.");
+    const username = profileSnap.data()?.username;
+    if (!username) throw new Error("Your AnonChat profile could not be loaded.");
+    await addDoc(collection(db, "premiumRooms", activeRoom, "messages"), {
+      senderId: user.uid, username, text, createdAt: serverTimestamp()
+    });
+    input.value = "";
+    setStatus("Message sent.");
+  } catch (error) {
+    setStatus(error?.message || "Could not send that message.", true);
+  } finally {
+    button.disabled = false;
+  }
+};
 $("premium-invite").onclick = async () => { const uid = $("premium-invite-user").value; if(!uid||!activeRoom)return; try { await setDoc(doc(db,"premiumRoomMembers",`${activeRoom}_${uid}`),{roomId:activeRoom,uid,role:"member",invitedBy:user.uid,joinedAt:serverTimestamp()}); setStatus(`${displayName(uid)} was invited.`); } catch { setStatus("Could not invite that member.",true); } };
 $("premium-delete-room").onclick = async () => { if(!activeRoom||currentRole()!=="owner"||!confirm("Delete this invite-only room?"))return; try { await deleteDoc(doc(db,"premiumRooms",activeRoom)); stopRoom(); rooms.delete(activeRoom); activeRoom=null; renderRoomList(); $("active-premium-room").textContent="Room deleted"; $("premium-message-form").hidden=true; setStatus("Room deleted."); } catch { setStatus("Could not delete that room.",true); } };
 onAuthStateChanged(auth, async current => { if(!current)return location.replace("index.html"); const [accessSnap,profileSnap,userSnaps,accessSnaps]=await Promise.all([getDoc(doc(db,"premiumAccess",current.uid)),getDoc(doc(db,"users",current.uid)),getDocs(query(collection(db,"users"),limit(500))),getDocs(collection(db,"premiumAccess"))]); if(!accessSnap.exists()||!hasPremiumAccess(accessSnap.data()))return location.replace("premium.html"); user=current; profile=profileSnap.data(); users=new Map(userSnaps.docs.map(entry=>[entry.id,entry.data()])); entitled=new Set(accessSnaps.docs.filter(entry=>hasPremiumAccess(entry.data())).map(entry=>entry.id)); moderationClient=createModerationClient({db,firestore:{deleteDoc,doc,getDoc,setDoc,writeBatch},currentUid:user.uid,timestamp:serverTimestamp}); const select=$("premium-invite-user"); select.replaceChildren(new Option("Choose Premium member",""),...[...entitled].filter(uid=>uid!==user.uid).map(uid=>new Option(displayName(uid),uid))); onSnapshot(query(collection(db,"premiumRoomMembers"),where("uid","==",user.uid)),async snap=>{const next=new Map();await Promise.all(snap.docs.map(async member=>{const room=await getDoc(doc(db,"premiumRooms",member.data().roomId));if(room.exists())next.set(room.id,{id:room.id,...room.data(),role:member.data().role});}));rooms=next;renderRoomList();setStatus("Your Premium rooms are ready.");}); });

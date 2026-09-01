@@ -753,6 +753,7 @@ button:disabled { cursor: wait; opacity: 0.6; }
   background-repeat: no-repeat;
   opacity: 0.62;
 }
+.feed-item,.post-card{padding-bottom:22px!important}.post-actions{margin-top:18px;padding-top:14px;border-top:1px solid rgba(167,139,250,.22)}.reactions{margin-top:14px;margin-bottom:8px;order:0}.post-interaction-summary{margin-bottom:8px}#timeline-status:empty,.install-help:empty{display:none}
 
 .view-profile-content {
   display: grid;

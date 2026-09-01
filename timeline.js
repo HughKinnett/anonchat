@@ -980,6 +980,8 @@ const reactionButton = (parent, type, emoji, reactionDocs) => {
     button.disabled = true;
     try {
       await toggleReaction(parent, type, currentType);
+      manuallyLoadedInteractionPaths.add(parent.path);
+      syncInteractionListeners();
     } catch {
       setStatus("Could not update your reaction.", true);
       button.disabled = false;
@@ -1110,22 +1112,19 @@ const renderPost = (postDoc) => {
   const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");
   const reactionsBar = document.createElement("div");
   reactionsBar.className = "reactions";
-  if (reactionsReady) {
-    if (sourceCollection === "posts") {
-      reactionsBar.append(
-        reactionButton(parent, "heart", "❤️", reactionDocs, reactionsTruncated),
-        reactionButton(parent, "middle_finger", "🖕", reactionDocs, reactionsTruncated),
-        reactionButton(parent, "laugh", "😂", reactionDocs, reactionsTruncated),
-        reactionButton(parent, "sad", "😢", reactionDocs, reactionsTruncated)
-      );
-    }
-  }
+  reactionsBar.append(
+    reactionButton(parent, "wow", "😮", reactionDocs, reactionsTruncated),
+    reactionButton(parent, "middle_finger", "🖕", reactionDocs, reactionsTruncated),
+    reactionButton(parent, "laugh", "😂", reactionDocs, reactionsTruncated),
+    reactionButton(parent, "smile", "😊", reactionDocs, reactionsTruncated),
+    reactionButton(parent, "fire", "🔥", reactionDocs, reactionsTruncated)
+  );
 
   const interactionSummary = document.createElement("details");
   interactionSummary.className = "post-interaction-summary";
   const interactionSummaryLabel = document.createElement("summary");
   const activeReactionTypes = [...new Set(reactionDocs.map((reaction) => reaction.data().type))];
-  const reactionEmoji = { heart: "❤️", middle_finger: "🖕", laugh: "😂", sad: "😢" };
+  const reactionEmoji = { wow: "😮", middle_finger: "🖕", laugh: "😂", smile: "😊", fire: "🔥", heart: "❤️", sad: "😢" };
   const activeReactionIcons = activeReactionTypes.map((type) => reactionEmoji[type]).filter(Boolean).join(" ");
   const count = reactionDocs.length;
   const reactionTotal = boundedInteractionCount(count, reactionsTruncated);
@@ -1391,7 +1390,7 @@ const renderPost = (postDoc) => {
   item.append(time);
   if (poll.childElementCount) item.append(poll);
   if (reactionsBar.childElementCount) item.append(reactionsBar);
-  if (reactionsReady) item.append(interactionSummary);
+  item.append(interactionSummary);
   item.append(commentsSection, actions);
   return item;
 };
