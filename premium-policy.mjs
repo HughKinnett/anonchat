@@ -55,6 +55,20 @@ export const premiumDefaults = uid => ({
   temporaryChatBubbleColor: "teal", chatBubbleColor: "purple", timelineFeedColor: "black", communityBackgroundColor: "black"
 });
 
+export const sanitizedPremiumSettings = (uid, value = {}) => {
+  const defaults = premiumDefaults(uid), clean = { ...defaults };
+  clean.onlineVisible = typeof value.onlineVisible === "boolean" ? value.onlineVisible : defaults.onlineVisible;
+  clean.spotifyPlaylistUrl = typeof value.spotifyPlaylistUrl === "string" && /^https:\/\/open[.]spotify[.]com\/playlist\/[A-Za-z0-9]+$/.test(value.spotifyPlaylistUrl) ? value.spotifyPlaylistUrl : "";
+  clean.avatarId = PREMIUM_AVATARS.includes(value.avatarId) ? value.avatarId : defaults.avatarId;
+  clean.coverId = PREMIUM_COVERS.includes(value.coverId) ? value.coverId : defaults.coverId;
+  clean.accent = PREMIUM_ACCENTS.includes(value.accent) ? value.accent : defaults.accent;
+  clean.profileFrame = PREMIUM_FRAMES.includes(value.profileFrame) ? value.profileFrame : defaults.profileFrame;
+  clean.cardStyle = PREMIUM_CARDS.includes(value.cardStyle) ? value.cardStyle : defaults.cardStyle;
+  clean.bannerStyle = PREMIUM_BANNERS.includes(value.bannerStyle) ? value.bannerStyle : defaults.bannerStyle;
+  Object.keys(PREMIUM_SURFACE_FIELDS).forEach((field) => { clean[field] = PREMIUM_COLOR_NAMES.includes(value[field]) ? value[field] : defaults[field]; });
+  return clean;
+};
+
 export const validPremiumSettings = (value, uid) => Boolean(value && value.uid === uid
   && typeof value.spotifyPlaylistUrl === "string" && value.spotifyPlaylistUrl.length <= 220
   && (value.spotifyPlaylistUrl === "" || /^https:\/\/open[.]spotify[.]com\/playlist\/[A-Za-z0-9]+$/.test(value.spotifyPlaylistUrl))

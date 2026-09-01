@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
-import { hasPremiumAccess, premiumDefaults, premiumLabel } from "./premium-policy.mjs";
+import { hasPremiumAccess, premiumDefaults, premiumLabel, sanitizedPremiumSettings } from "./premium-policy.mjs";
 import { applyPremiumAvatar, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
 import { applyFreeAvatar } from "./free-profile-theme.mjs";
 import { isBookmarked, recordContribution, toggleBookmark } from "./experience-preferences.mjs";
@@ -202,7 +202,7 @@ spotifyForm?.addEventListener("submit", async (event) => {
   const url = `https://open.spotify.com/${currentUserIsPremium ? "playlist" : "track"}/${id}`;
   try {
     if (currentUserIsPremium) {
-      currentPremiumSettings = { ...premiumDefaults(currentUser.uid), ...currentPremiumSettings, uid: currentUser.uid, spotifyPlaylistUrl: url };
+      currentPremiumSettings = { ...sanitizedPremiumSettings(currentUser.uid, currentPremiumSettings), spotifyPlaylistUrl: url };
       await setDoc(doc(db, "premiumSettings", currentUser.uid), { ...currentPremiumSettings, updatedAt: serverTimestamp() });
     } else await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: url });
     renderSpotifySong(url);
@@ -216,7 +216,7 @@ spotifyForm?.addEventListener("submit", async (event) => {
 spotifyRemove?.addEventListener("click", async () => {
   try {
     if (currentUserIsPremium) {
-      currentPremiumSettings = { ...premiumDefaults(currentUser.uid), ...currentPremiumSettings, uid: currentUser.uid, spotifyPlaylistUrl: "" };
+      currentPremiumSettings = { ...sanitizedPremiumSettings(currentUser.uid, currentPremiumSettings), spotifyPlaylistUrl: "" };
       await setDoc(doc(db, "premiumSettings", currentUser.uid), { ...currentPremiumSettings, updatedAt: serverTimestamp() });
     } else await updateDoc(doc(db, "users", currentUser.uid), { spotifyTrackUrl: "" });
     renderSpotifySong("");
@@ -965,17 +965,14 @@ const createFollowControl = (userId) => {
   return wrapper;
 };
 
-const toggleReaction = async (parent, type, currentType) => {
+const toggleReaction = async (parent, type) => {
   const reactionRef = doc(db, parent.collection, parent.id, "reactions", currentUser.uid);
-  if (currentType === type) {
-    await deleteDoc(reactionRef);
-    return;
-  }
-  await setDoc(reactionRef, {
-    uid: currentUser.uid,
-    type,
-    createdAt: serverTimestamp()
+  await runTransaction(db, async (transaction) => {
+    const current = await transaction.get(reactionRef);
+    if (current.exists() && current.data().type === type) transaction.delete(reactionRef);
+    else transaction.set(reactionRef, { uid: currentUser.uid, type, createdAt: serverTimestamp() });
   });
+  return getDoc(reactionRef);
 };
 
 const reactionButton = (parent, type, emoji, reactionDocs) => {
@@ -995,9 +992,15 @@ const reactionButton = (parent, type, emoji, reactionDocs) => {
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      await toggleReaction(parent, type, currentType);
       manuallyLoadedInteractionPaths.add(parent.path);
       syncInteractionListeners();
+      const latest = await toggleReaction(parent, type);
+      const entry = interactionSubscriptions.get(parent.path);
+      if (entry) {
+        entry.viewerReaction = latest.exists() ? latest : undefined;
+        entry.ready.viewerReaction = true;
+        queueInteractionRender();
+      } else button.disabled = false;
     } catch {
       setStatus("Could not update your reaction.", true);
       button.disabled = false;
@@ -1808,7 +1811,7 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
-    !["i_love_you_h", "cybercapone"].includes(profileUsername.toLowerCase());
+    profileUsername.toLowerCase() !== "cybercapone";
   const statsRef = doc(db, "system", "accountStats");
   const statsSnapshot = await getDoc(statsRef);
   if (!sessionIsCurrent()) return;

@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { hasPremiumAccess, premiumDefaults } from "./premium-policy.mjs";
+import { hasPremiumAccess, premiumDefaults, sanitizedPremiumSettings } from "./premium-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { doc, getDoc, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -14,7 +14,7 @@ const render = (url = "") => {
   const frame = document.createElement("iframe"); frame.src = `https://open.spotify.com/embed/playlist/${id}?utm_source=generator&theme=0`; frame.title = "Your Spotify playlist"; frame.loading = "lazy"; frame.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"; player.append(frame);
 };
 const save = async (url) => {
-  const next = { ...premiumDefaults(currentUser.uid), ...settings, uid: currentUser.uid, spotifyPlaylistUrl: url, updatedAt: serverTimestamp() };
+  const next = { ...sanitizedPremiumSettings(currentUser.uid, settings), spotifyPlaylistUrl: url, updatedAt: serverTimestamp() };
   await setDoc(doc(db, "premiumSettings", currentUser.uid), next); settings = { ...next, updatedAt: null }; render(url);
 };
 onAuthStateChanged(auth, async (user) => {

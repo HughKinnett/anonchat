@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { hasPremiumAccess, premiumDefaults, premiumLabel, PREMIUM_COLOR_NAMES, validPremiumSettings } from "../premium-policy.mjs";
+import { hasPremiumAccess, premiumDefaults, premiumLabel, PREMIUM_COLOR_NAMES, sanitizedPremiumSettings, validPremiumSettings } from "../premium-policy.mjs";
 
 for (const tier of ["founder", "founding", "subscriber"]) assert.equal(hasPremiumAccess({ tier, status: "active" }), true);
 assert.equal(hasPremiumAccess({ tier: "subscriber", status: "canceled" }), false);
@@ -11,6 +11,7 @@ assert.equal(premiumLabel({ tier: "subscriber" }), "Premium Member");
 assert.equal(validPremiumSettings(premiumDefaults("member"), "member"), true);
 assert.equal(validPremiumSettings({ ...premiumDefaults("member"), spotifyPlaylistUrl: "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" }, "member"), true);
 assert.equal(validPremiumSettings({ ...premiumDefaults("member"), spotifyPlaylistUrl: "https://example.com/playlist/not-spotify" }, "member"), false);
+assert.equal(validPremiumSettings(sanitizedPremiumSettings("member", { unknownLegacyField: true, pageColor: "retired-color" }), "member"), true);
 assert.equal(validPremiumSettings({ ...premiumDefaults("member"), onlineVisible: "yes" }, "member"), false);
 assert.equal(PREMIUM_COLOR_NAMES.length >= 30, true);
 assert.equal(PREMIUM_COLOR_NAMES.includes("neonPink"), true);

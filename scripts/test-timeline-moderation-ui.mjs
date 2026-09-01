@@ -32,8 +32,10 @@ assert.match(timeline, /postReactions = \(postDoc\) => \{[\s\S]*interactionParen
   "reaction reads use the canonical interaction parent path");
 assert.match(timeline, /postComments = \(postDoc\) => \{[\s\S]*interactionParentForPost\(postDoc\)[\s\S]*comment\.ref\.parent\.parent\?\.path === parent\.path[\s\S]*\.sort\(compareOldestFirst\)/,
   "comment reads use the canonical interaction parent path and shared oldest-first comparator");
-assert.match(timeline, /const parent = interactionParentForPost\(postDoc\);[\s\S]*toggleReaction\(parent, type, currentType\)/,
+assert.match(timeline, /const parent = interactionParentForPost\(postDoc\);[\s\S]*toggleReaction\(parent, type\)/,
   "reaction writes use the canonical interaction parent");
+assert.match(timeline, /runTransaction\(db,[\s\S]*transaction[.]get\(reactionRef\)[\s\S]*transaction[.]delete\(reactionRef\)[\s\S]*transaction[.]set\(reactionRef/,
+  "reaction toggling atomically uses the viewer's current stored reaction");
 assert.match(timeline, /addDoc\(collection\(db, parent\.collection, parent\.id, "comments"\), \{/,
   "comment writes use the canonical interaction parent");
 assert.match(timeline, /\.sort\(compareNewestFirst\)/,
