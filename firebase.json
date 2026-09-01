@@ -15,6 +15,7 @@
       "scripts/**",
       "docs/**",
       "android/**",
+      ".android-release-*/**",
       ".git/**",
       ".github/**",
       ".worktrees/**",
