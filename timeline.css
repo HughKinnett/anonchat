@@ -411,6 +411,9 @@ button:disabled { cursor: wait; opacity: 0.6; }
   box-shadow: none !important;
 }
 
+.composer-card #timeline-status[hidden] { display: none !important; }
+.composer-footer { width: fit-content; margin-left: auto; }
+
 .photo-upload-button {
   display: inline-flex;
   min-height: 42px;
