@@ -18,19 +18,20 @@ const items = buildInAppNotifications({
   roomMessages: [entry("room-message-a", "roomMessages/room-message-a", { senderId: actorUid, roomId: "room-a", tempName: "private alias", text: "private room body", createdAt: time(13), expiresAt: time(100) })],
   roomMemberships: [entry("membership", "roomMembers/membership", { uid: currentUid, roomId: "room-a" })],
   reveals: [entry(`${actorUid}_${currentUid}`, `reveals/${actorUid}_${currentUid}`, { fromId: actorUid, toId: currentUid, fields: { region: true }, status: "pending", createdAt: time(14) })],
+  actorNames: new Map([[actorUid, "private_name"]]),
   nowMillis: 50
 });
 assert.deepEqual(items.map((item) => item.type).sort(), ["comment", "message-request", "reaction", "reveal-request", "room-message"]);
 assert.deepEqual(items.map((item) => item.message).sort(), [
-  "A temporary room you joined has a new message.",
-  "Someone commented on your post.",
-  "Someone reacted to your post.",
-  "You have a new mutual reveal request.",
-  "You have a new private conversation request."
+  "@private alias sent a message in a temporary room.",
+  "@private_name commented on your post.",
+  "@private_name reacted ❤️ to your post.",
+  "@private_name sent you a mutual reveal request.",
+  "@private_name sent you a private conversation request."
 ].sort());
 assert.equal(items.find((item) => item.type === "reveal-request").url, "community.html#messages-panel");
 const visible = JSON.stringify(items.map(({ id, message, url }) => ({ id, message, url })));
-for (const forbidden of [currentUid, actorUid, "private_name", "private comment body", "private alias", "private room body"]) {
+for (const forbidden of [currentUid, actorUid, "private comment body", "private room body"]) {
   assert.equal(visible.includes(forbidden), false, `${forbidden} is absent from visible notifications`);
 }
 assert.equal(notificationUiId("message-request", `${actorUid}_${currentUid}`, time(12)), notificationUiId("message-request", `${actorUid}_${currentUid}`, time(12)));
@@ -64,7 +65,7 @@ assert.doesNotMatch(communitySource, /\bnew\s+Notification\s*\(/, "page code nev
 const timelineSource = await readFile(new URL("../timeline.js", import.meta.url), "utf8");
 assert.match(timelineSource, /blockedUids:\s*viewerBlocks\.blockedUids/,
   "Timeline notifications use the centralized two-direction block snapshot");
-assert.match(timelineSource, /query\(collection\(db, "roomMessages"\), where\("moderationState", "==", "visible"\)\)/);
+assert.match(timelineSource, /query\(collection\(db, "roomMessages"\), where\("moderationState", "==", "visible"\)[\s\S]{0,120}limit\(100\)\)/);
 assert.match(timelineSource, /scheduleExpiryBoundary\(/, "room notification expiry is boundary-driven");
 assert.match(timelineSource, /pagehide/, "room notification timer is cleaned up with the page");
 

@@ -1,10 +1,4 @@
-const TEXT = Object.freeze({
-  reaction: "Someone reacted to your post.",
-  comment: "Someone commented on your post.",
-  "message-request": "You have a new private conversation request.",
-  "room-message": "A temporary room you joined has a new message.",
-  "reveal-request": "You have a new mutual reveal request."
-});
+const REACTION_EMOJI = Object.freeze({ wow: "😮", middle_finger: "🖕", laugh: "😂", smile: "😊", fire: "🔥", heart: "❤️", sad: "😢" });
 const ROUTES = Object.freeze({
   reaction: "timeline.html",
   comment: "timeline.html",
@@ -31,13 +25,36 @@ export const notificationUiId = (type, sourceId, createdAt) => {
   return `event-${fnv(input, 2166136261)}${fnv(input, 3339675911)}`;
 };
 
-const item = (type, source, extra = {}) => {
+const cleanLabel = (value) => {
+  const label = String(value || "").trim().replace(/^@+/, "");
+  return label && label.length <= 40 ? label : "Someone";
+};
+const actorName = (actorNames, uid, fallback) => cleanLabel(
+  fallback || (actorNames instanceof Map ? actorNames.get(uid) : actorNames?.[uid])
+);
+const messageFor = (type, data, label) => {
+  const actor = label === "Someone" ? "Someone" : `@${label}`;
+  if (type === "reaction") return `${actor} reacted ${REACTION_EMOJI[data.type] || ""} to your post.`.replace("  ", " ");
+  if (type === "comment") return `${actor} commented on your post.`;
+  if (type === "message-request") return `${actor} sent you a private conversation request.`;
+  if (type === "room-message") return `${actor} sent a message in a temporary room.`;
+  if (type === "reveal-request") return `${actor} sent you a mutual reveal request.`;
+  return `${actor} sent you a notification.`;
+};
+
+const item = (type, source, actorNames, extra = {}) => {
   const data = dataOf(source);
+  const actorUid = type === "reaction" || type === "comment" ? data.uid
+    : type === "room-message" ? data.senderId : data.fromId;
+  const fallback = type === "comment" ? data.username : type === "room-message" ? data.tempName : "";
+  const actorLabel = actorName(actorNames, actorUid, fallback);
   return {
     id: notificationUiId(type, pathOf(source) || source.id, data.createdAt),
     type,
     createdAt: data.createdAt,
-    message: TEXT[type],
+    actorUid,
+    actorLabel,
+    message: messageFor(type, data, actorLabel),
     url: ROUTES[type],
     ...extra
   };
@@ -53,6 +70,7 @@ export const buildInAppNotifications = ({
   roomMemberships = [],
   blockedUids = [],
   reveals = [],
+  actorNames = new Map(),
   nowMillis = Date.now()
 }) => {
   if (typeof currentUid !== "string" || !currentUid) return [];
@@ -66,29 +84,29 @@ export const buildInAppNotifications = ({
   reactions.forEach((reaction) => {
     const data = dataOf(reaction);
     const postId = sourceParentId(reaction);
-    if (data.uid !== currentUid && !blocked.has(data.uid) && ownedPostIds.has(postId)) items.push(item("reaction", reaction, { postId }));
+    if (data.uid !== currentUid && !blocked.has(data.uid) && ownedPostIds.has(postId)) items.push(item("reaction", reaction, actorNames, { postId }));
   });
   comments.forEach((comment) => {
     const data = dataOf(comment);
     const postId = sourceParentId(comment);
-    if (data.uid !== currentUid && !blocked.has(data.uid) && ownedPostIds.has(postId)) items.push(item("comment", comment, { postId }));
+    if (data.uid !== currentUid && !blocked.has(data.uid) && ownedPostIds.has(postId)) items.push(item("comment", comment, actorNames, { postId }));
   });
   messageRequests.forEach((request) => {
     const data = dataOf(request);
-    if (data.toId === currentUid && data.fromId !== currentUid && !blocked.has(data.fromId) && data.status === "pending") items.push(item("message-request", request));
+    if (data.toId === currentUid && data.fromId !== currentUid && !blocked.has(data.fromId) && data.status === "pending") items.push(item("message-request", request, actorNames));
   });
   roomMessages.forEach((message) => {
     const data = dataOf(message);
     if (data.senderId !== currentUid && !blocked.has(data.senderId)
       && joinedRoomIds.has(data.roomId) && timestampMillis(data.expiresAt) > nowMillis) {
-      items.push(item("room-message", message));
+      items.push(item("room-message", message, actorNames));
     }
   });
   reveals.forEach((reveal) => {
     const data = dataOf(reveal);
-    if (data.toId === currentUid && data.fromId !== currentUid && !blocked.has(data.fromId) && data.status === "pending") items.push(item("reveal-request", reveal));
+    if (data.toId === currentUid && data.fromId !== currentUid && !blocked.has(data.fromId) && data.status === "pending") items.push(item("reveal-request", reveal, actorNames));
   });
   return items.sort((left, right) => timestampMillis(right.createdAt) - timestampMillis(left.createdAt));
 };
 
-export const inAppNotificationText = (type) => TEXT[type];
+export const inAppNotificationText = (type, actorLabel = "Someone", data = {}) => messageFor(type, data, cleanLabel(actorLabel));

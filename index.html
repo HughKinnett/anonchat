@@ -46,7 +46,7 @@
         <h2 id="sign-up-title">Create an account</h2>
         <p>New account registration is temporarily closed.</p>
         <p class="signup-closed-notice" role="status">Existing users can continue signing in normally.</p>
-        <form id="sign-up-form" hidden aria-hidden="true" style="display:none">
+        <form id="sign-up-form" class="signup-locked-form" aria-disabled="true">
           <label for="username">Anonymous username</label>
           <input id="username" type="text" placeholder="hidden_voice" autocomplete="username" minlength="3" maxlength="30" required>
           <label for="sign-up-email">Email</label>
@@ -55,7 +55,7 @@
           <input id="sign-up-password" type="password" placeholder="12+ characters, number, and symbol" autocomplete="new-password" minlength="12" required>
           <label class="signup-confirmation"><input id="age-confirmation" type="checkbox" required> I confirm that I am at least 18 years old.</label>
           <label class="signup-confirmation"><input id="terms-confirmation" type="checkbox" required> I accept the <a href="terms.html">Terms of Use</a> and <a href="privacy.html">Privacy Policy</a>.</label>
-          <button class="primary-button" id="sign-up" type="submit">Create Account</button>
+          <button class="primary-button" id="sign-up" type="submit">Signups Paused</button>
         </form>
       </section>
     </div>

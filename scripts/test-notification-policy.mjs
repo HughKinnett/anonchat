@@ -33,7 +33,7 @@ const createdAt = { toMillis: () => 1_700_000_000_123 };
 const later = { toMillis: () => 1_700_000_000_124 };
 const preciseEarly = new Timestamp(1_700_000_000, 123_000_001);
 const preciseLater = new Timestamp(1_700_000_000, 123_000_999);
-assert.deepEqual([...NOTIFICATION_TYPES], ["reaction", "comment", "private-message", "message-request", "room-message", "reveal-request"]);
+assert.deepEqual([...NOTIFICATION_TYPES], ["reaction", "comment", "private-message", "message-request", "room-message", "premium-room-message", "reveal-request"]);
 assert.equal(MAX_SUBSCRIPTIONS_PER_RECIPIENT, 100);
 assert.equal(MAX_NOTIFICATION_ATTEMPTS, 5);
 assert.equal(MAX_NOTIFICATION_AGE_MS, 7 * 24 * 60 * 60 * 1000);
@@ -51,15 +51,16 @@ assert.deepEqual(canonicalTimestamp(1_700_000_000_123), { seconds: 1_700_000_000
 
 const expectedPayloads = {
   reaction: ["New reaction", "reacted to your post.", "/timeline.html"],
-  comment: ["New comment", "commented on your post.", "/timeline.html"],
+  comment: ["New comment or reply", "commented on your post or replied to you.", "/timeline.html"],
   "private-message": ["New private message", "sent you a private message.", "/community.html#messages-panel"],
   "message-request": ["New message request", "sent you a private conversation request.", "/community.html#messages-panel"],
   "room-message": ["New room message", "sent a message in a temporary room.", "/community.html#rooms-panel"],
+  "premium-room-message": ["New invite-only room message", "sent a message in an invite-only room.", "/premium-rooms.html"],
   "reveal-request": ["New mutual reveal request", "sent you a mutual reveal request.", "/community.html#messages-panel"]
 };
 for (const [type, [title, body, url]] of Object.entries(expectedPayloads)) {
   const payload = notificationPayload(type, "a".repeat(64));
-  assert.deepEqual(payload, { type, title, body, url, tag: `anonchat-${"a".repeat(64)}` });
+  assert.deepEqual(payload, { type, actorLabel: "Someone", title, body, url, tag: `anonchat-${"a".repeat(64)}` });
   assert.equal(JSON.stringify(payload).includes("private-uid"), false);
 }
 assert.throws(() => notificationPayload("arbitrary", "a".repeat(64)), /INVALID_NOTIFICATION_TYPE/);
@@ -129,6 +130,7 @@ assert.equal(validateTrustedSource("message-request", { fromId: "actor", toId: "
 assert.equal(validateTrustedSource("message-request", { fromId: "actor", toId: "recipient", status: "declined", createdAt }, 1_700_000_000_000), false);
 assert.equal(validateTrustedSource("message-request", { fromId: "same", toId: "same", status: "pending", createdAt }, 1_700_000_000_000), false);
 assert.equal(validateTrustedSource("room-message", { senderId: "actor", roomId: "room", createdAt, expiresAt: later }, 1_700_000_000_123), true);
+assert.equal(validateTrustedSource("premium-room-message", { senderId: "actor", roomId: "premium-room", createdAt }, 1_700_000_000_123), true);
 assert.equal(validateTrustedSource("room-message", { senderId: "actor", roomId: "room", createdAt, expiresAt: createdAt }, 1_700_000_000_123), false);
 assert.equal(validateTrustedSource("reveal-request", { fromId: "actor", toId: "recipient", status: "pending", createdAt }, 1_700_000_000_000), true);
 assert.equal(validateTrustedSource("reaction", { uid: "", createdAt }, 1_700_000_000_000), false);

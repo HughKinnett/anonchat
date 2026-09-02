@@ -109,8 +109,12 @@ document.getElementById("sign-in-form").addEventListener("submit", async (event)
 
 const SIGNUPS_OPEN = false;
 const signUpForm = document.getElementById("sign-up-form");
-signUpForm.hidden = !SIGNUPS_OPEN;
-signUpForm.setAttribute("aria-hidden", String(!SIGNUPS_OPEN));
+signUpForm.hidden = false;
+signUpForm.setAttribute("aria-hidden", "false");
+signUpForm.setAttribute("aria-disabled", String(!SIGNUPS_OPEN));
+if (!SIGNUPS_OPEN) {
+  signUpForm.querySelectorAll("input, button").forEach((control) => { control.disabled = true; });
+}
 
 signUpForm.addEventListener("submit", async (event) => {
   event.preventDefault();

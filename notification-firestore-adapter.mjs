@@ -24,6 +24,7 @@ const SOURCE_COLLECTIONS = Object.freeze({
   "private-message": { collection: "messages", group: true },
   "message-request": { collection: "messageRequests" },
   "room-message": { collection: "roomMessages" },
+  "premium-room-message": { collection: "premiumRoomNotifications" },
   "reveal-request": { collection: "reveals" }
 });
 const codedError = (code) => Object.assign(new Error(code), { code });
@@ -156,6 +157,16 @@ export class FirestoreNotificationAdapter {
       : "Someone";
   }
 
+  async mentionedUsers(text) {
+    const handles = [...new Set((String(text || "").match(/@[A-Za-z0-9_]{3,30}/g) || [])
+      .map((handle) => handle.slice(1).toLowerCase()))].slice(0, 10);
+    if (!handles.length) return [];
+    const snapshots = await this.db.getAll(...handles.map((handle) => this.db.collection("usernames").doc(handle)));
+    return snapshots.filter((snapshot) => snapshot.exists)
+      .map((snapshot) => snapshot.data().uid)
+      .filter((uid) => typeof uid === "string" && uid);
+  }
+
   async roomAlias(roomId, senderId, sourceCreatedAt) {
     const snapshot = await this.db.collection("roomMessages")
       .where("roomId", "==", roomId)
@@ -169,13 +180,20 @@ export class FirestoreNotificationAdapter {
       : "Someone";
   }
 
-  async roomMembers(source) {
-    const snapshot = await this.db.collection("roomMembers")
+  async roomMembers(source, type = "room-message") {
+    const snapshot = await this.db.collection(type === "premium-room-message" ? "premiumRoomMembers" : "roomMembers")
       .where("roomId", "==", source?.data?.roomId)
       .orderBy(this.FieldPath.documentId())
       .limit(ACCOUNT_LIMIT)
       .get();
     return snapshot.docs.map((document) => document.data().uid);
+  }
+
+  async premiumRoomAvailable(roomId) {
+    if (typeof roomId !== "string" || !roomId || roomId.includes("/")) return false;
+    const room = await this.db.collection("premiumRooms").doc(roomId).get();
+    return room.exists && room.data().moderationState === "visible"
+      && typeof room.data().ownerId === "string" && await this.recipientAvailable(room.data().ownerId);
   }
 
   async roomAvailable(roomId) {

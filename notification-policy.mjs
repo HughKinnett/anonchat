@@ -4,6 +4,7 @@ export const NOTIFICATION_TYPES = Object.freeze([
   "private-message",
   "message-request",
   "room-message",
+  "premium-room-message",
   "reveal-request"
 ]);
 export const NOTIFICATION_PAGE_LIMIT = 100;
@@ -25,10 +26,11 @@ export const TERMINAL_NOTIFICATION_STATUSES = Object.freeze(["delivered", "suppr
 const TYPE_SET = new Set(NOTIFICATION_TYPES);
 const PAYLOADS = Object.freeze({
   reaction: Object.freeze({ title: "New reaction", body: "reacted to your post.", url: "/timeline.html" }),
-  comment: Object.freeze({ title: "New comment", body: "commented on your post.", url: "/timeline.html" }),
+  comment: Object.freeze({ title: "New comment or reply", body: "commented on your post or replied to you.", url: "/timeline.html" }),
   "private-message": Object.freeze({ title: "New private message", body: "sent you a private message.", url: "/community.html#messages-panel" }),
   "message-request": Object.freeze({ title: "New message request", body: "sent you a private conversation request.", url: "/community.html#messages-panel" }),
   "room-message": Object.freeze({ title: "New room message", body: "sent a message in a temporary room.", url: "/community.html#rooms-panel" }),
+  "premium-room-message": Object.freeze({ title: "New invite-only room message", body: "sent a message in an invite-only room.", url: "/premium-rooms.html" }),
   "reveal-request": Object.freeze({ title: "New mutual reveal request", body: "sent you a mutual reveal request.", url: "/community.html#messages-panel" })
 });
 
@@ -162,6 +164,7 @@ export const validateTrustedSource = (type, data, nowMillis) => {
   if (["message-request", "reveal-request"].includes(type)) {
     return nonempty(data.fromId) && nonempty(data.toId) && data.fromId !== data.toId && data.status === "pending";
   }
+  if (type === "premium-room-message") return nonempty(data.senderId) && nonempty(data.roomId);
   return nonempty(data.senderId) && nonempty(data.roomId)
     && Number.isFinite(timestampMillis(data.expiresAt)) && timestampMillis(data.expiresAt) > nowMillis;
 };
@@ -170,12 +173,12 @@ export const queuedEvent = ({ type, actorUid, recipientUid, roomId, route, sourc
   if (!TYPE_SET.has(type) || !nonempty(actorUid) || !nonempty(recipientUid) || actorUid === recipientUid
     || PAYLOADS[type].url !== route || !Number.isFinite(timestampMillis(sourceCreatedAt))
     || !Number.isFinite(timestampMillis(now))
-    || (type === "room-message" ? !nonempty(roomId) : roomId !== undefined)) throw codedError("INVALID_EVENT_INPUT");
+    || (["room-message", "premium-room-message"].includes(type) ? !nonempty(roomId) : roomId !== undefined)) throw codedError("INVALID_EVENT_INPUT");
   return {
     type,
     actorUid,
     recipientUid,
-    ...(type === "room-message" ? { roomId } : {}),
+    ...(["room-message", "premium-room-message"].includes(type) ? { roomId } : {}),
     route,
     sourceCreatedAt,
     status: "pending",
@@ -186,7 +189,7 @@ export const queuedEvent = ({ type, actorUid, recipientUid, roomId, route, sourc
 };
 
 export const isValidQueueEvent = (event) => {
-  const baseKeys = ["type", "actorUid", "recipientUid", ...(event?.type === "room-message" ? ["roomId"] : []), "route", "sourceCreatedAt", "status", "attempts", "createdAt", "updatedAt"];
+  const baseKeys = ["type", "actorUid", "recipientUid", ...(["room-message", "premium-room-message"].includes(event?.type) ? ["roomId"] : []), "route", "sourceCreatedAt", "status", "attempts", "createdAt", "updatedAt"];
   const expectedKeySets = event?.status === "processing"
     ? [[...baseKeys, "leaseOwner", "leaseToken", "leaseExpiresAt"]]
     : event?.status === "failed"
@@ -197,7 +200,7 @@ export const isValidQueueEvent = (event) => {
   if (!expectedKeySets.some((keys) => exactKeys(event, keys))
     || !TYPE_SET.has(event.type) || PAYLOADS[event.type].url !== event.route
     || !nonempty(event.actorUid) || !nonempty(event.recipientUid) || event.actorUid === event.recipientUid
-    || (event.type === "room-message" && !nonempty(event.roomId))
+    || (["room-message", "premium-room-message"].includes(event.type) && !nonempty(event.roomId))
     || !Number.isInteger(event.attempts) || event.attempts < 0
     || !["pending", "processing", "failed", ...TERMINAL_NOTIFICATION_STATUSES].includes(event.status)
     || !Number.isFinite(timestampMillis(event.sourceCreatedAt))

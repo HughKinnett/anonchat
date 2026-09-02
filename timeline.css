@@ -1191,6 +1191,11 @@ button:not(.avatar-button):not(.banner-button):hover, .nav-button:hover,
 /* Facebook-style interaction summary */
 .reactions { align-items: center; }
 .reaction-button { min-width: 38px; justify-content: center; }
+.reaction-button {
+  transition: transform 100ms ease, background-color 120ms ease, box-shadow 120ms ease;
+  will-change: transform;
+}
+.reaction-button:active { transform: scale(.9); }
 .reaction-button[aria-pressed="true"] {
   border-color: rgba(196, 181, 253, .95) !important;
   background: rgba(139, 92, 246, .38) !important;
@@ -1207,6 +1212,9 @@ button:not(.avatar-button):not(.banner-button):hover, .nav-button:hover,
 #admin-link[hidden],
 #profile-admin-link[hidden] {
   display: none !important;
+}
+@media (hover: none) and (pointer: coarse) {
+  .reaction-button { min-width: 46px; min-height: 46px !important; font-size: 1.18rem; }
 }
 .membership-badge{display:flex;width:fit-content;margin-top:12px;text-decoration:none;pointer-events:none}.view-profile-identity .membership-badge{margin:12px auto 0}.membership-badge[hidden]{display:none !important}@media(max-width:560px){.membership-badge{margin-top:14px}.profile-links{row-gap:10px}}
 .online-followers-menu{margin:7px 0;padding:10px 5px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.online-followers-heading{margin:0 7px 7px;color:#c4b5fd;font-size:.74rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.online-followers-list{display:grid;max-height:180px;overflow:auto}.online-followers-list small{padding:7px;color:var(--muted);line-height:1.35}.main-menu-panel .online-followers-list a{min-height:38px}.online-dot{width:9px;height:9px;margin-right:9px;border-radius:50%;background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.14)}

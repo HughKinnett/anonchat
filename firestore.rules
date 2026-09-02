@@ -1346,6 +1346,18 @@ service cloud.firestore {
         && (resource.data.senderId == request.auth.uid || premiumRoomOwner(roomId) || premiumRoomModerator(roomId)));
     }
 
+    match /premiumRoomNotifications/{notificationId} {
+      allow read: if false;
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'createdAt'])
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && premiumRoomMemberAfter(request.resource.data.roomId, request.auth.uid)
+        && existsAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId))
+        && getAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId)).data.moderationState == 'visible';
+      allow update, delete: if false;
+    }
+
     match /rooms/{roomId} {
       allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter()

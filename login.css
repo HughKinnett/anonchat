@@ -257,3 +257,11 @@ input:focus {
   .auth-panels { max-width: 980px; grid-template-columns: minmax(420px, 1.2fr) minmax(360px, .8fr); }
   .auth-card { padding: 34px 38px; }
 }
+.signup-locked-form { opacity: .72; }
+.signup-locked-form input:disabled {
+  cursor: not-allowed;
+  border-color: rgba(167, 139, 250, .28);
+  background: rgba(255, 255, 255, .045);
+  color: #c4c7d1;
+}
+.signup-locked-form button:disabled { cursor: not-allowed; opacity: .72; }

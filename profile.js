@@ -503,8 +503,14 @@ const renderPosts = () => {
       button.setAttribute("aria-pressed", String(myReaction === type));
       button.title = myReaction === type ? "Remove this reaction" : `React ${reactionEmoji[type]}`;
       button.addEventListener("click", async () => {
-        button.disabled = true;
         const reactionRef = doc(db, parent.collection, parent.id, "reactions", currentUser.uid);
+        const previousReactions = [...reactions];
+        const selected = myReaction === type;
+        reactions = [
+          ...reactions.filter((reaction) => reaction.ref.path !== reactionRef.path),
+          ...(!selected ? [{ ref: reactionRef, data: () => ({ uid: currentUser.uid, type, createdAt: new Date() }) }] : [])
+        ];
+        schedulePostsRender();
         try {
           await runTransaction(db, async (transaction) => {
             const existing = await transaction.get(reactionRef);
@@ -518,6 +524,8 @@ const renderPosts = () => {
           ];
           schedulePostsRender();
         } catch {
+          reactions = previousReactions;
+          schedulePostsRender();
           setStatus("Could not update your reaction.", true);
           button.disabled = false;
         }

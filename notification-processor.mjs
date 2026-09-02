@@ -27,7 +27,7 @@ const safeLog = (logger, level, code) => {
   if (typeof method === "function") method.call(logger, code);
 };
 
-const actorFor = (type, data) => ["room-message", "private-message"].includes(type)
+const actorFor = (type, data) => ["room-message", "premium-room-message", "private-message"].includes(type)
   ? data.senderId
   : ["message-request", "reveal-request"].includes(type)
     ? data.fromId
@@ -64,13 +64,16 @@ const recipientsFor = async (adapter, type, source) => {
   const actorUid = actorFor(type, source.data);
   if (["reaction", "comment"].includes(type)) {
     const author = await adapter.postAuthor(source);
-    return author && author !== actorUid ? [author] : [];
+    const mentioned = type === "comment" && adapter.mentionedUsers
+      ? await adapter.mentionedUsers(source.data.text)
+      : [];
+    return [...new Set([author, ...mentioned])].filter((uid) => uid && uid !== actorUid);
   }
   if (type === "private-message") {
     return source.data.participants.filter((uid) => uid !== actorUid);
   }
   if (["message-request", "reveal-request"].includes(type)) return [source.data.toId];
-  const members = await adapter.roomMembers(source);
+  const members = await adapter.roomMembers(source, type);
   return [...new Set(members.filter((uid) => typeof uid === "string" && uid && uid !== actorUid))]
     .slice(0, ACCOUNT_LIMIT - 1);
 };
@@ -170,7 +173,7 @@ export const scanTrustedNotificationSources = async ({ adapter, budget, limits =
           type: state.type,
           actorUid,
           recipientUid,
-          ...(state.type === "room-message" ? { roomId: source.data.roomId } : {}),
+          ...(["room-message", "premium-room-message"].includes(state.type) ? { roomId: source.data.roomId } : {}),
           route: notificationRoute(state.type),
           sourceCreatedAt: source.data.createdAt,
           now: adapter.timestamp(adapter.now())
@@ -259,7 +262,10 @@ export const deliverNotificationEvents = async ({
           continue;
         }
         const roomUnavailable = async () => claim.data.type === "room-message"
-          && !(await adapter.roomAvailable(claim.data.roomId));
+          ? !(await adapter.roomAvailable(claim.data.roomId))
+          : claim.data.type === "premium-room-message"
+            ? !(await adapter.premiumRoomAvailable(claim.data.roomId))
+            : false;
         if (await roomUnavailable()) {
           await adapter.suppressEvent(claim.id, claim.token, "ROOM_UNAVAILABLE");
           result.suppressed += 1;

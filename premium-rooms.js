@@ -63,9 +63,12 @@ $("premium-message-form").onsubmit = async event => {
     if (!memberSnap.exists()) throw new Error("You are no longer a member of this room.");
     const username = profileSnap.data()?.username;
     if (!username) throw new Error("Your AnonChat profile could not be loaded.");
-    await addDoc(collection(db, "premiumRooms", activeRoom, "messages"), {
-      senderId: user.uid, username, text, createdAt: serverTimestamp()
-    });
+    const messageRef = doc(collection(db, "premiumRooms", activeRoom, "messages"));
+    const notificationRef = doc(db, "premiumRoomNotifications", messageRef.id);
+    const batch = writeBatch(db);
+    batch.set(messageRef, { senderId: user.uid, username, text, createdAt: serverTimestamp() });
+    batch.set(notificationRef, { roomId: activeRoom, senderId: user.uid, createdAt: serverTimestamp() });
+    await batch.commit();
     input.value = "";
     setStatus("Message sent.");
   } catch (error) {

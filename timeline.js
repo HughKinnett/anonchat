@@ -73,6 +73,7 @@ let premiumSettingsByUid = new Map();
 let premiumAccessUids = new Set();
 let userProfilesByUid = new Map();
 let hydratedAuthorUids = new Set();
+let hydratedNotificationActorUids = new Set();
 let userSearchTimer = 0;
 let draftTimer = 0;
 let currentUserIsPremium = false;
@@ -642,8 +643,32 @@ const compareNotificationsNewestFirst = (left, right) => compareNewestFirst(
   { path: `notificationReads/${right.id}`, data: { createdAt: right.createdAt } }
 );
 
+const hydrateNotificationActors = async () => {
+  const actorIds = new Set();
+  reactions.forEach((entry) => actorIds.add(entry.data().uid));
+  comments.forEach((entry) => actorIds.add(entry.data().uid));
+  messageRequests.forEach((entry) => actorIds.add(entry.data().fromId));
+  roomMessages.forEach((entry) => actorIds.add(entry.data().senderId));
+  reveals.forEach((entry) => actorIds.add(entry.data().fromId));
+  const missing = [...actorIds].filter((uid) => uid && !userProfilesByUid.has(uid)
+    && !hydratedNotificationActorUids.has(uid));
+  if (!missing.length) return;
+  missing.forEach((uid) => hydratedNotificationActorUids.add(uid));
+  await Promise.all(missing.map(async (uid) => {
+    try {
+      const snapshot = await getDoc(doc(db, "users", uid));
+      if (snapshot.exists()) userProfilesByUid.set(uid, snapshot);
+    } catch {
+      hydratedNotificationActorUids.delete(uid);
+    }
+  }));
+  users = [...userProfilesByUid.values()];
+  renderNotifications();
+};
+
 const renderNotifications = () => {
   if (!currentUser) { clearNotificationExpiryTimer(); return; }
+  void hydrateNotificationActors();
   if (!viewerBlocks.ready) {
     clearNotificationExpiryTimer();
     currentNotificationIds = [];
@@ -666,7 +691,8 @@ const renderNotifications = () => {
     roomMessages,
     roomMemberships,
     blockedUids: viewerBlocks.blockedUids,
-    reveals
+    reveals,
+    actorNames: new Map(users.map((entry) => [entry.id, entry.data().username]))
   });
   const joinedRoomIds = new Set(roomMemberships.map((membership) => membership.data().roomId));
   const blockedUids = new Set(viewerBlocks.blockedUids);
@@ -690,7 +716,7 @@ const renderNotifications = () => {
       id: notificationUiId("comment-mention", comment.ref.path, data.createdAt),
       postId,
       createdAt: data.createdAt,
-      message: "Someone tagged you in a comment."
+      message: `@${data.username || users.find((entry) => entry.id === data.uid)?.data().username || "Someone"} replied to your comment.`
     });
   });
 
@@ -706,7 +732,7 @@ const renderNotifications = () => {
       id: notificationUiId("post-mention", postDoc.ref.path, post.createdAt),
       postId: postDoc.id,
       createdAt: post.createdAt,
-      message: "Someone tagged you in a post."
+      message: `@${users.find((entry) => entry.id === post.authorId)?.data().username || "Someone"} tagged you in a post.`
     });
   });
 
@@ -955,7 +981,20 @@ const createFollowControl = (userId) => {
   button.textContent = `${isFollowing(userId) ? "Following" : "Follow"} · ${count}`;
   button.title = `${count} ${count === 1 ? "follower" : "followers"}`;
   button.addEventListener("click", async () => {
-    button.disabled = true;
+    const entry = interactionSubscriptions.get(parent.path);
+    const previousReactions = entry ? [...entry.reactions] : null;
+    const reactionRef = doc(db, parent.collection, parent.id, "reactions", currentUser.uid);
+    const nextType = selected ? "" : type;
+    if (entry) {
+      entry.reactions = [
+        ...entry.reactions.filter((reaction) => reaction.data().uid !== currentUser.uid),
+        ...(nextType ? [{ ref: reactionRef, data: () => ({ uid: currentUser.uid, type: nextType, createdAt: Timestamp.now() }) }] : [])
+      ];
+      entry.ready.reactions = true;
+      queueInteractionRender();
+    } else {
+      button.setAttribute("aria-pressed", String(!selected));
+    }
     try {
       await toggleFollow(userId);
     } catch {
@@ -997,18 +1036,22 @@ const reactionButton = (parent, type, emoji, reactionDocs) => {
       manuallyLoadedInteractionPaths.add(parent.path);
       syncInteractionListeners();
       const latest = await toggleReaction(parent, type);
-      const entry = interactionSubscriptions.get(parent.path);
-      if (entry) {
-        entry.viewerReaction = latest.exists() ? latest : undefined;
-        entry.reactions = [
-          ...entry.reactions.filter((reaction) => reaction.data().uid !== currentUser.uid),
+      const currentEntry = interactionSubscriptions.get(parent.path);
+      if (currentEntry) {
+        currentEntry.viewerReaction = latest.exists() ? latest : undefined;
+        currentEntry.reactions = [
+          ...currentEntry.reactions.filter((reaction) => reaction.data().uid !== currentUser.uid),
           ...(latest.exists() ? [latest] : [])
         ];
-        entry.ready.reactions = true;
-        entry.ready.viewerReaction = true;
+        currentEntry.ready.reactions = true;
+        currentEntry.ready.viewerReaction = true;
         queueInteractionRender();
       } else button.disabled = false;
     } catch {
+      if (entry && previousReactions) {
+        entry.reactions = previousReactions;
+        queueInteractionRender();
+      }
       setStatus("Could not update your reaction.", true);
       button.disabled = false;
     }
@@ -1710,6 +1753,7 @@ const stopTimelineResources = () => {
   premiumAccessUids = new Set();
   userProfilesByUid = new Map();
   hydratedAuthorUids = new Set();
+  hydratedNotificationActorUids = new Set();
   window.clearTimeout(userSearchTimer);
   currentUserIsPremium = false;
   notificationReads = [];
@@ -1812,7 +1856,7 @@ onAuthStateChanged(auth, async (user) => {
   document.getElementById("my-profile-link").href =
     `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
-    profileUsername.toLowerCase() !== "cybercapone";
+    !isDesignatedAdmin(profileUsername);
   const statsRef = doc(db, "system", "accountStats");
   const statsSnapshot = await getDoc(statsRef);
   if (!sessionIsCurrent()) return;

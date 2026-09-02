@@ -245,7 +245,7 @@ const subscription = (uid, idValue, overrides = {}) => ({
 
 const queued = (id, type, recipientUid) => ({
   id,
-  data: { type, actorUid: "actor", recipientUid, ...(type === "room-message" ? { roomId: "room-1" } : {}), route: notificationPayload(type, id).url, sourceCreatedAt: time(1), status: "pending", attempts: 0, createdAt: time(1), updatedAt: time(1) }
+  data: { type, actorUid: "actor", recipientUid, ...(["room-message", "premium-room-message"].includes(type) ? { roomId: "room-1" } : {}), route: notificationPayload(type, id).url, sourceCreatedAt: time(1), status: "pending", attempts: 0, createdAt: time(1), updatedAt: time(1) }
 });
 const id = (digit) => digit.repeat(64);
 
@@ -735,10 +735,19 @@ const fairSource = (type, index, { memberCount = 1 } = {}) => {
     `messageRequests/request-${index}`,
     { fromId: `request-actor-${index}`, toId: `request-recipient-${index}`, status: "pending", createdAt }
   );
+  if (type === "private-message") return document(
+    `messageRequests/request-${index}/messages/message-${index}`,
+    { senderId: `message-actor-${index}`, participants: [`message-actor-${index}`, `message-recipient-${index}`], text: "hello", createdAt }
+  );
   if (type === "room-message") return document(
     `roomMessages/message-${index}`,
     { senderId: `room-sender-${index}`, roomId: `room-${index}`, createdAt, expiresAt: time(20_000) },
     { memberUids: Array.from({ length: memberCount }, (_, memberIndex) => `room-${index}-member-${memberIndex}`) }
+  );
+  if (type === "premium-room-message") return document(
+    `premiumRoomNotifications/message-${index}`,
+    { senderId: `premium-room-sender-${index}`, roomId: `premium-room-${index}`, createdAt },
+    { memberUids: Array.from({ length: memberCount }, (_, memberIndex) => `premium-room-${index}-member-${memberIndex}`) }
   );
   return document(
     `reveals/reveal-${index}`,
@@ -787,7 +796,9 @@ class FairSourceAdapter extends ScanAdapter {
     ["reaction", Array.from({ length: 105 }, (_, index) => fairSource("reaction", index))],
     ["comment", [fairSource("comment", 200)]],
     ["message-request", [fairSource("message-request", 201)]],
+    ["private-message", [fairSource("private-message", 204)]],
     ["room-message", [fairSource("room-message", 202)]],
+    ["premium-room-message", [fairSource("premium-room-message", 205)]],
     ["reveal-request", [fairSource("reveal-request", 203)]]
   ]);
   const fairness = new FairSourceAdapter(fairnessPages);
@@ -886,11 +897,12 @@ class FairSourceAdapter extends ScanAdapter {
         "private-message": true,
         "message-request": true,
         "room-message": true,
+        "premium-room-message": true,
         "reveal-request": true
       },
-      totalMaterialized: 109,
-      eventCountAfterSecondRun: 109,
-      finalEventCount: 109,
+      totalMaterialized: 111,
+      eventCountAfterSecondRun: 111,
+      finalEventCount: 111,
       finalReactionCursor: "posts/reaction-104/reactions/reaction-104",
       replayMaterialized: 0
     },
