@@ -17,6 +17,7 @@ import { buildInAppNotifications, notificationUiId } from "./notification-ui-pol
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
+import { rankFeedPosts } from "./feed-ranking-policy.mjs";
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
 import { pollVoteDocumentId as voteDocumentId } from "./poll-vote-policy.mjs";
 import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
@@ -60,6 +61,7 @@ const form = document.getElementById("post-form");
 const content = document.getElementById("post-content");
 const status = document.getElementById("timeline-status");
 const allPostsButton = document.getElementById("show-all-posts");
+const latestPostsButton = document.getElementById("show-latest-posts");
 const profilePostsButton = document.getElementById("show-profile-posts");
 let currentUser;
 let profileUsername;
@@ -98,6 +100,7 @@ const sessionGeneration = createSessionGeneration();
 let activeTimelineSession = 0;
 let clearNotificationExpiryTimer = () => {};
 let showingProfile = false;
+let feedMode = "for-you";
 const TIMELINE_POST_LIMIT = 20;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -982,24 +985,12 @@ const createFollowControl = (userId) => {
   button.textContent = `${isFollowing(userId) ? "Following" : "Follow"} · ${count}`;
   button.title = `${count} ${count === 1 ? "follower" : "followers"}`;
   button.addEventListener("click", async () => {
-    const entry = interactionSubscriptions.get(parent.path);
-    const previousReactions = entry ? [...entry.reactions] : null;
-    const reactionRef = doc(db, parent.collection, parent.id, "reactions", currentUser.uid);
-    const nextType = selected ? "" : type;
-    if (entry) {
-      entry.reactions = [
-        ...entry.reactions.filter((reaction) => reaction.data().uid !== currentUser.uid),
-        ...(nextType ? [{ ref: reactionRef, data: () => ({ uid: currentUser.uid, type: nextType, createdAt: Timestamp.now() }) }] : [])
-      ];
-      entry.ready.reactions = true;
-      queueInteractionRender();
-    } else {
-      button.setAttribute("aria-pressed", String(!selected));
-    }
+    button.disabled = true;
     try {
       await toggleFollow(userId);
     } catch {
       setStatus("Could not update that follow.", true);
+    } finally {
       button.disabled = false;
     }
   });
@@ -1031,7 +1022,19 @@ const reactionButton = (parent, type, emoji, reactionDocs) => {
       ? `Change your reaction to ${emoji}`
       : `React ${emoji}`;
   button.addEventListener("click", async () => {
+    const entry = interactionSubscriptions.get(parent.path);
+    const previousReactions = entry ? [...entry.reactions] : null;
+    const reactionRef = doc(db, parent.collection, parent.id, "reactions", currentUser.uid);
+    const nextType = selected ? "" : type;
     button.disabled = true;
+    if (entry) {
+      entry.reactions = [
+        ...entry.reactions.filter((reaction) => reaction.data().uid !== currentUser.uid),
+        ...(nextType ? [{ ref: reactionRef, data: () => ({ uid: currentUser.uid, type: nextType, createdAt: Timestamp.now() }) }] : [])
+      ];
+      entry.ready.reactions = true;
+      queueInteractionRender();
+    } else button.setAttribute("aria-pressed", String(!selected));
     try {
       manuallyLoadedInteractionPaths.add(parent.path);
       syncInteractionListeners();
@@ -1458,9 +1461,19 @@ const renderFeed = () => {
     return;
   }
   const unexpiredPosts = visibleTimelinePosts().sort(compareNewestFirst);
-  const visiblePosts = showingProfile
-    ? unexpiredPosts.filter((post) => post.data().authorId === currentUser.uid)
+  const reactionCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postReactions(post).length]));
+  const commentCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postComments(post).length]));
+  const orderedPosts = feedMode === "for-you"
+    ? rankFeedPosts(unexpiredPosts, {
+        viewerUid: currentUser?.uid,
+        followedUids: new Set(visibleFollows().filter(follow => follow.data().followerId === currentUser?.uid).map(follow => follow.data().followingId)),
+        reactionCounts,
+        commentCounts
+      })
     : unexpiredPosts;
+  const visiblePosts = showingProfile
+    ? orderedPosts.filter((post) => post.data().authorId === currentUser.uid)
+    : orderedPosts;
 
   feed.replaceChildren(...visiblePosts.map(renderPost));
   interactionVisibilityObserver?.disconnect();
@@ -1755,16 +1768,19 @@ const syncPollVoteListeners = () => {
 
 document.addEventListener("visibilitychange", syncInteractionListeners);
 
-const setFeedView = (profileOnly) => {
-  showingProfile = profileOnly;
-  allPostsButton.setAttribute("aria-pressed", String(!profileOnly));
-  profilePostsButton.setAttribute("aria-pressed", String(profileOnly));
-  document.getElementById("feed-title").textContent = profileOnly ? "My profile posts" : "Latest posts";
+const setFeedView = (mode) => {
+  feedMode = mode;
+  showingProfile = mode === "profile";
+  allPostsButton.setAttribute("aria-pressed", String(mode === "for-you"));
+  latestPostsButton.setAttribute("aria-pressed", String(mode === "latest"));
+  profilePostsButton.setAttribute("aria-pressed", String(mode === "profile"));
+  document.getElementById("feed-title").textContent = mode === "profile" ? "My profile posts" : mode === "latest" ? "Latest posts" : "For You";
   renderFeed();
 };
 
-allPostsButton.addEventListener("click", () => setFeedView(false));
-profilePostsButton.addEventListener("click", () => setFeedView(true));
+allPostsButton.addEventListener("click", () => setFeedView("for-you"));
+latestPostsButton.addEventListener("click", () => setFeedView("latest"));
+profilePostsButton.addEventListener("click", () => setFeedView("profile"));
 
 const stopTimelineResources = () => {
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());

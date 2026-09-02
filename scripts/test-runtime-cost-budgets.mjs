@@ -8,6 +8,10 @@ const [timeline, profile, community, connections, rooms, onlineFollowers, admin,
 ].map(source));
 
 assert.match(timeline, /const TIMELINE_POST_LIMIT = 20/);
+assert.match(timeline, /rankFeedPosts\(unexpiredPosts/,
+  "For You ranking reuses the bounded timeline window on the device");
+assert.doesNotMatch(timeline, /collection\(db, "feedScores"\)|collection\(db, "recommendations"\)/,
+  "ranking does not add a Firebase scoring or recommendation collection");
 assert.match(profile, /const PROFILE_FEED_LIMIT = 30/);
 assert.match(community, /otherId !== selectedOther/,
   "only the selected private conversation receives a message listener");
