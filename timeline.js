@@ -506,8 +506,9 @@ const DAILY_PROMPTS = Object.freeze([
   "What is one question you wish someone would ask you?"
 ]);
 dailyPromptButton?.addEventListener("click", () => {
-  const day = Math.floor(Date.now() / 86400000);
-  content.value = DAILY_PROMPTS[day % DAILY_PROMPTS.length];
+  const previous = content.value.trim();
+  const choices = DAILY_PROMPTS.filter((prompt) => prompt !== previous);
+  content.value = choices[Math.floor(Math.random() * choices.length)];
   content.dispatchEvent(new Event("input", { bubbles: true }));
   content.focus();
 });
@@ -1322,7 +1323,7 @@ const renderPost = (postDoc) => {
   const bookmark = document.createElement("button");
   bookmark.type = "button";
   bookmark.className = "bookmark-button";
-  const updateBookmarkLabel = () => { bookmark.textContent = isBookmarked(parent.path) ? "Saved" : "Save"; };
+  const updateBookmarkLabel = () => { bookmark.textContent = isBookmarked(parent.path) ? "🔖 Saved" : "🔖 Bookmark"; };
   updateBookmarkLabel();
   bookmark.addEventListener("click", () => {
     toggleBookmark({ path: parent.path, author: displayedUsername, excerpt: post.content });

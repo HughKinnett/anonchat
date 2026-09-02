@@ -525,11 +525,18 @@ const acceptedUsers = () => state.users.filter((user) =>
   user.id !== state.user.uid && !isBlockedUid(user.id) && requestFor(user.id)?.data().status === "accepted"
 );
 
-const createMessageRequest = (to) => {
+const createMessageRequest = async (to) => {
   const id = [state.user.uid, to].sort().join("_");
-  return setDoc(doc(db, "messageRequests", id), {
-    fromId: state.user.uid, toId: to, status: "pending", createdAt: serverTimestamp()
+  const [outgoingFollow, incomingFollow] = await Promise.all([
+    getDoc(doc(db, "follows", `${state.user.uid}_${to}`)),
+    getDoc(doc(db, "follows", `${to}_${state.user.uid}`))
+  ]);
+  const mutual = outgoingFollow.exists() && incomingFollow.exists();
+  await setDoc(doc(db, "messageRequests", id), {
+    fromId: state.user.uid, toId: to, status: mutual ? "accepted" : "pending",
+    createdAt: serverTimestamp(), ...(mutual ? { respondedAt: serverTimestamp() } : {})
   });
+  return mutual;
 };
 
 const renderMessageUsers = () => {
@@ -626,7 +633,13 @@ $("request-chat").addEventListener("click", async () => {
         fromId: state.user.uid, toId: to, status: "pending", createdAt: serverTimestamp()
       });
     } else {
-      await createMessageRequest(to);
+      const mutual = await createMessageRequest(to);
+      if (mutual) {
+        succeeded = true;
+        $("request-chat").textContent = "Conversation ready";
+        setRequestStatus("You follow one another, so this conversation is ready.");
+        return;
+      }
     }
     succeeded = true;
     $("request-chat").textContent = "Request sent";

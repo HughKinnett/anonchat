@@ -14,6 +14,7 @@ import { isDesignatedAdmin } from "./designated-admin-policy.mjs";
 import { hasPremiumAccess, premiumLabel } from "./premium-policy.mjs";
 import { applyPremiumAvatar, applyPremiumCover, applyPremiumTheme, resolvedPremiumSettings } from "./premium-theme.mjs";
 import { applyFreeAvatar, applyFreeCover } from "./free-profile-theme.mjs";
+import { isBookmarked, toggleBookmark } from "./experience-preferences.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc,
@@ -29,6 +30,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   startAt,
@@ -47,6 +49,7 @@ const blockButton = document.getElementById("profile-block-button");
 let currentUser;
 let currentProfileUsername;
 let comments = [];
+let reactions = [];
 let follows = [];
 let exactFollowerCount = null;
 let exactFollowingCount = null;
@@ -63,6 +66,7 @@ let blockTracker = createViewerBlockTracker();
 let viewerBlocks = blockTracker.current();
 let profileContentStarted = false;
 const commentListeners = new Map();
+const reactionListeners = new Map();
 const reportStateLoads = new Set();
 const reportStateWatches = new Map();
 let profileContentListeners = [];
@@ -349,10 +353,16 @@ const renderFollowControl = () => {
 };
 
 const commentParentPath = (comment) => comment.ref.parent.parent?.path || "";
+const reactionParentPath = (reaction) => reaction.ref.parent.parent?.path || "";
 
 const postComments = (postDoc) => commentsForPost(
   visibleRecords(comments, viewerBlocks, ["uid"]), postDoc
 );
+const postReactions = (postDoc) => {
+  const path = interactionParentForPost(postDoc).path;
+  return visibleRecords(reactions, viewerBlocks, ["uid"])
+    .filter((reaction) => reactionParentPath(reaction) === path);
+};
 
 const removeReportedPostFromLocalState = (path) => {
   targetPosts = targetPosts.filter((entry) => entry.ref.path !== path);
@@ -371,6 +381,12 @@ const syncProfilePostResources = (postDocs) => {
     commentListeners.delete(path);
     comments = comments.filter((comment) => commentParentPath(comment) !== path);
   });
+  reactionListeners.forEach((unsubscribe, path) => {
+    if (postPaths.has(path)) return;
+    unsubscribe();
+    reactionListeners.delete(path);
+    reactions = reactions.filter((reaction) => reactionParentPath(reaction) !== path);
+  });
   const reportKeys = new Set(postDocs.filter((postDoc) => postDoc.data().authorId !== currentUser.uid)
     .map((postDoc) => reportTargetKey(postReportTarget(postDoc, postDoc.data()))));
   for (const [key, unsubscribe] of reportStateWatches) if (!key.startsWith("user:") && !reportKeys.has(key)) {
@@ -378,22 +394,30 @@ const syncProfilePostResources = (postDocs) => {
   }
   postDocs.forEach((postDoc) => {
     const parent = interactionParentForPost(postDoc);
-    if (commentListeners.has(parent.path)) return;
-    const unsubscribe = onSnapshot(
-      query(collection(db, parent.collection, parent.id, "comments"), orderBy("createdAt", "desc"), limit(20)),
-      (snapshot) => {
-        if (!sessionGeneration.isCurrent(session, uid)) return;
-        comments = [
-          ...comments.filter((comment) => commentParentPath(comment) !== parent.path),
-          ...snapshot.docs
-        ];
-        schedulePostsRender();
-      },
-      () => {
-        if (sessionGeneration.isCurrent(session, uid)) setStatus("Could not load comments.", true);
-      }
-    );
-    commentListeners.set(parent.path, unsubscribe);
+    if (!commentListeners.has(parent.path)) {
+      const unsubscribe = onSnapshot(
+        query(collection(db, parent.collection, parent.id, "comments"), orderBy("createdAt", "desc"), limit(20)),
+        (snapshot) => {
+          if (!sessionGeneration.isCurrent(session, uid)) return;
+          comments = [...comments.filter((comment) => commentParentPath(comment) !== parent.path), ...snapshot.docs];
+          schedulePostsRender();
+        },
+        () => { if (sessionGeneration.isCurrent(session, uid)) setStatus("Could not load comments.", true); }
+      );
+      commentListeners.set(parent.path, unsubscribe);
+    }
+    if (!reactionListeners.has(parent.path)) {
+      const unsubscribe = onSnapshot(
+        query(collection(db, parent.collection, parent.id, "reactions"), orderBy("createdAt", "desc"), limit(50)),
+        (snapshot) => {
+          if (!sessionGeneration.isCurrent(session, uid)) return;
+          reactions = [...reactions.filter((reaction) => reactionParentPath(reaction) !== parent.path), ...snapshot.docs];
+          schedulePostsRender();
+        },
+        () => { if (sessionGeneration.isCurrent(session, uid)) setStatus("Could not load reactions.", true); }
+      );
+      reactionListeners.set(parent.path, unsubscribe);
+    }
   });
 };
 
@@ -403,6 +427,9 @@ const stopProfileContent = () => {
   commentListeners.forEach((unsubscribe) => unsubscribe());
   commentListeners.clear();
   comments = [];
+  reactionListeners.forEach((unsubscribe) => unsubscribe());
+  reactionListeners.clear();
+  reactions = [];
   targetPosts = [];
   targetCommunityPosts = [];
   profileContentStarted = false;
@@ -463,6 +490,55 @@ const renderPosts = () => {
       : "Posting…";
     const parent = interactionParentForPost(postDoc);
     const sourceCollection = postDoc.ref.parent.id;
+    const reactionDocs = postReactions(postDoc);
+    const reactionEmoji = { wow: "😮", middle_finger: "🖕", laugh: "😂", smile: "😊", fire: "🔥", heart: "❤️", sad: "😢" };
+    const reactionsBar = document.createElement("div");
+    reactionsBar.className = "reactions";
+    const myReaction = reactionDocs.find((reaction) => reaction.data().uid === currentUser.uid)?.data().type;
+    ["wow", "middle_finger", "laugh", "smile", "fire"].forEach((type) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "reaction-button";
+      button.textContent = reactionEmoji[type];
+      button.setAttribute("aria-pressed", String(myReaction === type));
+      button.title = myReaction === type ? "Remove this reaction" : `React ${reactionEmoji[type]}`;
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        const reactionRef = doc(db, parent.collection, parent.id, "reactions", currentUser.uid);
+        try {
+          await runTransaction(db, async (transaction) => {
+            const existing = await transaction.get(reactionRef);
+            if (existing.exists() && existing.data().type === type) transaction.delete(reactionRef);
+            else transaction.set(reactionRef, { uid: currentUser.uid, type, createdAt: serverTimestamp() });
+          });
+        } catch {
+          setStatus("Could not update your reaction.", true);
+          button.disabled = false;
+        }
+      });
+      reactionsBar.append(button);
+    });
+    const reactionDetails = document.createElement("details");
+    reactionDetails.className = "post-interaction-summary";
+    const reactionSummary = document.createElement("summary");
+    const icons = [...new Set(reactionDocs.map((reaction) => reactionEmoji[reaction.data().type]).filter(Boolean))].join(" ");
+    reactionSummary.textContent = `${icons ? `${icons} · ` : ""}${reactionDocs.length} interaction${reactionDocs.length === 1 ? "" : "s"}`;
+    reactionSummary.title = "Show who interacted";
+    const reactionList = document.createElement("ul");
+    if (!reactionDocs.length) {
+      const empty = document.createElement("li");
+      empty.textContent = "No reactions yet.";
+      reactionList.append(empty);
+    } else reactionDocs.forEach((reaction) => {
+      const row = document.createElement("li");
+      const actor = users.find((entry) => entry.id === reaction.data().uid)?.data();
+      const link = document.createElement("a");
+      link.href = `profile.html?uid=${encodeURIComponent(reaction.data().uid)}`;
+      link.textContent = `@${actor?.username || "anonymous"}`;
+      row.append(link, document.createTextNode(` reacted ${reactionEmoji[reaction.data().type] || "•"}`));
+      reactionList.append(row);
+    });
+    reactionDetails.append(reactionSummary, reactionList);
     const commentDocs = postComments(postDoc);
     const commentsSection = document.createElement("details");
     commentsSection.className = "comments-section";
@@ -553,6 +629,15 @@ const renderPosts = () => {
 
     const postActions = document.createElement("div");
     postActions.className = "post-actions";
+    const bookmark = document.createElement("button");
+    bookmark.type = "button";
+    const updateBookmark = () => { bookmark.textContent = isBookmarked(parent.path) ? "🔖 Saved" : "🔖 Bookmark"; };
+    updateBookmark();
+    bookmark.addEventListener("click", () => {
+      toggleBookmark({ path: parent.path, author: targetProfile.username, excerpt: post.content });
+      updateBookmark();
+    });
+    postActions.append(bookmark);
     if (post.authorId !== currentUser.uid) {
       const reportTarget = postReportTarget(postDoc, post);
       const reported = moderationClient.cachedReported(reportTarget);
@@ -613,7 +698,7 @@ const renderPosts = () => {
 
     item.append(text);
     if (postImage) item.append(postImage);
-    item.append(time, commentsSection, postActions);
+    item.append(time, reactionsBar, reactionDetails, commentsSection, postActions);
     return item;
   }));
 

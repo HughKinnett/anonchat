@@ -117,6 +117,11 @@ service cloud.firestore {
       return exists(blockPath(left, right)) || exists(blockPath(right, left));
     }
 
+    function mutuallyFollowAfter(left, right) {
+      return existsAfter(/databases/$(database)/documents/follows/$(left + '_' + right))
+        && existsAfter(/databases/$(database)/documents/follows/$(right + '_' + left));
+    }
+
     function visibleOrAdmin() {
       return isAdmin() || resource.data.get('moderationState', 'visible') != 'hidden';
     }
@@ -509,14 +514,12 @@ service cloud.firestore {
 
     function isPremiumUid(uid) {
       return exists(/databases/$(database)/documents/premiumAccess/$(uid))
-        && get(/databases/$(database)/documents/premiumAccess/$(uid)).data.uid == uid
         && get(/databases/$(database)/documents/premiumAccess/$(uid)).data.status == 'active'
         && get(/databases/$(database)/documents/premiumAccess/$(uid)).data.tier in ['founder', 'founding', 'subscriber'];
     }
 
     function isPremiumUidAfter(uid) {
       return existsAfter(/databases/$(database)/documents/premiumAccess/$(uid))
-        && getAfter(/databases/$(database)/documents/premiumAccess/$(uid)).data.uid == uid
         && getAfter(/databases/$(database)/documents/premiumAccess/$(uid)).data.status == 'active'
         && getAfter(/databases/$(database)/documents/premiumAccess/$(uid)).data.tier in ['founder', 'founding', 'subscriber'];
     }
@@ -1422,14 +1425,19 @@ service cloud.firestore {
         && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
       allow create: if activeUserAfter()
         && accountAvailableAfter(request.resource.data.toId)
-        && request.resource.data.keys().hasOnly(['fromId', 'toId', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['fromId', 'toId', 'status', 'createdAt', 'respondedAt'])
         && request.resource.data.fromId == request.auth.uid
         && request.resource.data.toId != request.auth.uid
         && !pairIsBlocked(request.auth.uid, request.resource.data.toId)
-        && request.resource.data.status == 'pending'
+        && (request.resource.data.status == 'pending'
+          || (request.resource.data.status == 'accepted'
+            && mutuallyFollowAfter(request.resource.data.fromId, request.resource.data.toId)
+            && request.resource.data.respondedAt == request.time))
         && (requestId == request.resource.data.fromId + '_' + request.resource.data.toId
           || requestId == request.resource.data.toId + '_' + request.resource.data.fromId)
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && (request.resource.data.status == 'accepted'
+          || !request.resource.data.keys().hasAny(['respondedAt']));
       allow update: if activeUserAfter()
         && accountAvailableAfter(request.resource.data.fromId)
         && accountAvailableAfter(request.resource.data.toId)
