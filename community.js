@@ -1,7 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
 import { createModerationClient } from "./moderation-client.mjs";
-import { REPORT_BUTTON_CLASS, isRoomActive, roomExpiry } from "./moderation-policy.mjs";
+import { REPORT_BUTTON_CLASS, REPORT_REASONS, isRoomActive, roomExpiry } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
 import { formatDisappearsAt, scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
 import { recordPageActivity } from "./activity-integration.mjs";
@@ -33,6 +33,59 @@ let pendingDirectImage = "";
 const revealedPrivatePhotos = new Map();
 const directMessageListeners = new Map();
 const directMessageBuckets = new Map();
+const roomMessageActions = document.createElement("dialog");
+roomMessageActions.className = "room-message-actions";
+document.body.append(roomMessageActions);
+const showRoomMessageActions = (message) => {
+  const data = message.data();
+  roomMessageActions.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = `Report ${data.tempName || "this temporary user"}`;
+  const help = document.createElement("p");
+  help.textContent = "Choose why this message should be reviewed.";
+  roomMessageActions.append(heading, help);
+  REPORT_REASONS.forEach((reason) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = reason.replaceAll("-", " ");
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await state.moderation.report({
+          targetKind: "roomMessage", targetCollection: "roomMessages", targetId: message.id,
+          targetPath: message.ref.path, reportedUserId: data.senderId
+        }, reason);
+        roomMessageActions.close();
+        setStatus("Message reported for administrator review.");
+      } catch (error) {
+        setStatus(error?.code === "already-reported" ? "You already reported this message." : "Could not report that message.", true);
+        button.disabled = false;
+      }
+    });
+    roomMessageActions.append(button);
+  });
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => roomMessageActions.close());
+  roomMessageActions.append(cancel);
+  roomMessageActions.showModal();
+};
+const attachRoomMessageHold = (element, message) => {
+  if (message.data().senderId === state.user.uid) return;
+  let timer = 0;
+  const cancel = () => window.clearTimeout(timer);
+  element.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    timer = window.setTimeout(() => showRoomMessageActions(message), 550);
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((type) => element.addEventListener(type, cancel));
+  element.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    cancel();
+    showRoomMessageActions(message);
+  });
+};
 let syncDirectMessageListeners = () => {};
 const stopDirectMessageListeners = () => {
   directMessageListeners.forEach((unsubscribe) => unsubscribe());
@@ -421,6 +474,7 @@ const renderRoomMessages = () => {
       photo.alt = "Photo sent in this temporary room";
       item.append(photo);
     }
+    attachRoomMessageHold(item, message);
     return item;
   }));
   $("room-messages").scrollTop = $("room-messages").scrollHeight;

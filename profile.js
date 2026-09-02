@@ -511,6 +511,12 @@ const renderPosts = () => {
             if (existing.exists() && existing.data().type === type) transaction.delete(reactionRef);
             else transaction.set(reactionRef, { uid: currentUser.uid, type, createdAt: serverTimestamp() });
           });
+          const savedReaction = await getDoc(reactionRef);
+          reactions = [
+            ...reactions.filter((reaction) => reaction.ref.path !== reactionRef.path),
+            ...(savedReaction.exists() ? [savedReaction] : [])
+          ];
+          schedulePostsRender();
         } catch {
           setStatus("Could not update your reaction.", true);
           button.disabled = false;
@@ -611,12 +617,17 @@ const renderPosts = () => {
       if (!commentText) return;
       submit.disabled = true;
       try {
-        await addDoc(collection(db, parent.collection, parent.id, "comments"), {
+        const commentRef = await addDoc(collection(db, parent.collection, parent.id, "comments"), {
           uid: currentUser.uid,
           username: currentProfileUsername,
           text: commentText,
           createdAt: serverTimestamp()
         });
+        const savedComment = await getDoc(commentRef);
+        if (savedComment.exists()) {
+          comments = [...comments.filter((comment) => comment.ref.path !== savedComment.ref.path), savedComment];
+          schedulePostsRender();
+        }
         input.value = "";
         commentsSection.open = true;
       } catch {

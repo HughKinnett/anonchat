@@ -204,6 +204,19 @@
 
 
 /* One consistent pill treatment for temporary-room and private-chat actions. */
+.room-message-actions {
+  width: min(390px, calc(100vw - 28px));
+  padding: 20px;
+  border: 1px solid rgba(167,139,250,.55);
+  border-radius: 22px;
+  background: #17131f;
+  color: #f5f3ff;
+  box-shadow: 0 24px 70px rgba(0,0,0,.58);
+}
+.room-message-actions::backdrop { background: rgba(3,4,8,.78); }
+.room-message-actions h3 { margin: 0 0 8px; }
+.room-message-actions p { margin: 0 0 14px; color: #c4b5fd; }
+.room-message-actions button { width: 100%; margin-top: 8px; text-transform: capitalize; }
 #room-form .primary,
 .room-card-actions .primary,
 #delete-chat,

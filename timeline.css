@@ -397,7 +397,7 @@ button:disabled { cursor: wait; opacity: 0.6; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   margin-top: 12px;
   border: 0 !important;

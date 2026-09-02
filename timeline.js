@@ -25,7 +25,6 @@ import { createSessionGeneration } from "./session-generation-policy.mjs";
 import {
   boundedInteractionCount,
   interactionParentLoadState,
-  interactionParentStateMessage,
   MAX_INTERACTION_ITEMS_PER_PARENT,
   MAX_INTERACTION_PARENTS,
   timelineInteractionPlan
@@ -1131,11 +1130,7 @@ const renderPost = (postDoc) => {
     item.append(category);
   }
 
-  const interactionEntry = interactionSubscriptions.get(parent.path);
   const reactionDocs = postReactions(postDoc);
-  const interactionState = interactionParentLoadState(interactionSubscriptions.get(parent.path));
-  const reactionsReady = Boolean(interactionEntry?.ready?.reactions && interactionEntry?.ready?.viewerReaction);
-  const commentsReady = Boolean(interactionEntry?.ready?.comments);
   const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");
   const reactionsBar = document.createElement("div");
   reactionsBar.className = "reactions";
@@ -1217,7 +1212,7 @@ const renderPost = (postDoc) => {
   }
 
   let commentsSection;
-  if (commentsReady) {
+  {
     const commentDocs = postComments(postDoc);
     commentsSection = document.createElement("details");
   commentsSection.className = "comments-section";
@@ -1293,12 +1288,19 @@ const renderPost = (postDoc) => {
     if (!text) return;
     commentSubmit.disabled = true;
     try {
-      await addDoc(collection(db, parent.collection, parent.id, "comments"), {
+      const commentRef = await addDoc(collection(db, parent.collection, parent.id, "comments"), {
         uid: currentUser.uid,
         username: profileUsername,
         text,
         createdAt: serverTimestamp()
       });
+      const savedComment = await getDoc(commentRef);
+      const entry = interactionSubscriptions.get(parent.path);
+      if (entry && savedComment.exists()) {
+        entry.comments = [...entry.comments.filter((comment) => comment.ref.path !== savedComment.ref.path), savedComment];
+        entry.ready.comments = true;
+        queueInteractionRender();
+      }
       commentInput.value = "";
       commentsSection.open = true;
     } catch {
@@ -1309,13 +1311,6 @@ const renderPost = (postDoc) => {
   });
 
   commentsSection.append(commentsSummary, commentsList, commentForm);
-  } else if (interactionState === "unavailable") {
-    commentsSection = document.createElement("div");
-    commentsSection.hidden = true;
-  } else {
-    commentsSection = document.createElement("p");
-    commentsSection.className = "interaction-load-state muted";
-    commentsSection.textContent = interactionParentStateMessage(interactionState);
   }
 
   const actions = document.createElement("div");
@@ -1550,7 +1545,7 @@ const syncInteractionListeners = () => {
     return;
   }
   const posts = visibleTimelinePosts().sort(compareNewestFirst);
-  const visibleParents = new Map(posts.map((post) => [post.ref.path, post]));
+  const visibleParents = new Map(posts.map((post) => [interactionParentForPost(post).path, post]));
   const desired = new Map(timelineInteractionPlan(posts, MAX_INTERACTION_PARENTS)
     .map((parent) => [parent.path, parent]));
   posts.forEach((post) => {
