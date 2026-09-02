@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v110";
+const CACHE_NAME = "anonchat-v111";
 const APP_SHELL = [
   "./",
   "./index.html",

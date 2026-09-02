@@ -27,6 +27,7 @@ const followersList = document.getElementById("followers-list");
 const followingList = document.getElementById("following-list");
 let currentUser;
 let users = [];
+const userProfileCache = new Map();
 let follows = [];
 let exactFollowerCount = null;
 let exactFollowingCount = null;
@@ -50,8 +51,10 @@ const profileFor = (uid) => users.find((entry) => entry.id === uid);
 const hydrateProfiles = async () => {
   const ids = new Set([currentUser?.uid, targetUserId]);
   follows.forEach((entry) => { ids.add(entry.data().followerId); ids.add(entry.data().followingId); });
-  const snapshots = await Promise.all([...ids].filter(Boolean).map((uid) => getDoc(doc(db, "users", uid))));
-  users = snapshots.filter((snapshot) => snapshot.exists());
+  const missing = [...ids].filter((uid) => uid && !userProfileCache.has(uid));
+  const snapshots = await Promise.all(missing.map((uid) => getDoc(doc(db, "users", uid))));
+  snapshots.filter((snapshot) => snapshot.exists()).forEach((snapshot) => userProfileCache.set(snapshot.id, snapshot));
+  users = [...userProfileCache.values()];
   render();
 };
 const blockedUid = (uid) => isBlockedActor(uid, viewerBlocks);
@@ -164,6 +167,7 @@ document.getElementById("connections-sign-out").addEventListener("click", async 
 const stopConnectionsListeners = () => {
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
   users = [];
+  userProfileCache.clear();
   follows = [];
   exactFollowerCount = null;
   exactFollowingCount = null;

@@ -91,6 +91,7 @@ let blockTracker = createViewerBlockTracker();
 let viewerBlocks = blockTracker.current();
 const interactionSubscriptions = new Map();
 const manuallyLoadedInteractionPaths = new Set();
+const visibleInteractionPaths = new Set();
 let interactionGeneration = 0;
 let interactionRenderQueued = false;
 const sessionGeneration = createSessionGeneration();
@@ -1106,6 +1107,7 @@ const renderPost = (postDoc) => {
   const sourceCollection = collectionName === "communityPosts" ? "communityPosts" : "posts";
   const item = document.createElement("li");
   item.className = "feed-item";
+  item.dataset.interactionPath = parent.path;
   item.id = `post-${sourceCollection}-${postDoc.id}`;
 
   if (post.type === "repost") {
@@ -1461,6 +1463,8 @@ const renderFeed = () => {
     : unexpiredPosts;
 
   feed.replaceChildren(...visiblePosts.map(renderPost));
+  interactionVisibilityObserver?.disconnect();
+  feed.querySelectorAll("[data-interaction-path]").forEach((item) => interactionVisibilityObserver?.observe(item));
   renderNotifications();
   setStatus(visiblePosts.length
     ? ""
@@ -1468,6 +1472,23 @@ const renderFeed = () => {
       ? "You have not posted or shared anything yet."
       : "No posts yet. Start the conversation.");
 };
+
+const interactionVisibilityObserver = typeof IntersectionObserver === "function"
+  ? new IntersectionObserver((entries) => {
+      let changed = false;
+      entries.forEach((entry) => {
+        const path = entry.target.dataset.interactionPath;
+        if (!path) return;
+        if (entry.isIntersecting && !visibleInteractionPaths.has(path)) {
+          visibleInteractionPaths.add(path);
+          changed = true;
+        } else if (!entry.isIntersecting && visibleInteractionPaths.delete(path)) {
+          changed = true;
+        }
+      });
+      if (changed) syncInteractionListeners();
+    }, { rootMargin: "600px 0px" })
+  : null;
 
 const clearInteractionListeners = () => {
   interactionGeneration += 1;
@@ -1477,6 +1498,7 @@ const clearInteractionListeners = () => {
   });
   interactionSubscriptions.clear();
   manuallyLoadedInteractionPaths.clear();
+  visibleInteractionPaths.clear();
   reactions = [];
   comments = [];
   interactionRenderQueued = false;
@@ -1518,6 +1540,17 @@ const stopInteractionEntry = (entry) => {
   entry.parentDoc = undefined;
 };
 
+const pauseInteractionChildren = (entry) => {
+  entry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
+  entry.childUnsubscribes = [];
+  entry.childrenStarted = false;
+  entry.reactions = [];
+  entry.comments = [];
+  entry.viewerReaction = undefined;
+  entry.truncated = { reactions: false, comments: false };
+  entry.ready = { reactions: false, comments: false, viewerReaction: false };
+};
+
 const startInteractionChildren = (entry) => {
   if (entry.childrenStarted) return;
   entry.childrenStarted = true;
@@ -1528,6 +1561,8 @@ const startInteractionChildren = (entry) => {
     entry.childUnsubscribes.push(onSnapshot(
       query(
         collection(db, entry.parent.collection, entry.parent.id, kind),
+        orderBy("createdAt", "desc"),
+        orderBy(documentId(), "desc"),
         limit(MAX_INTERACTION_ITEMS_PER_PARENT)
       ),
       (snapshot) => {
@@ -1590,7 +1625,11 @@ const syncInteractionListeners = () => {
     const existing = interactionSubscriptions.get(path);
     const visibleParent = visibleParents.get(path);
     if (existing) {
-      if (visibleParent && !existing.childrenStarted) {
+      const shouldListen = !document.hidden
+        && (!interactionVisibilityObserver || visibleInteractionPaths.has(path) || manuallyLoadedInteractionPaths.has(path));
+      if (!shouldListen && existing.childrenStarted) pauseInteractionChildren(existing);
+      if (visibleParent && !existing.childrenStarted
+        && shouldListen) {
         existing.sourceUnsubscribe?.();
         existing.sourceUnsubscribe = undefined;
         existing.parentDoc = visibleParent;
@@ -1616,7 +1655,8 @@ const syncInteractionListeners = () => {
     };
     interactionSubscriptions.set(path, entry);
     if (visibleParent) {
-      startInteractionChildren(entry);
+      if (!document.hidden
+        && (!interactionVisibilityObserver || visibleInteractionPaths.has(path) || manuallyLoadedInteractionPaths.has(path))) startInteractionChildren(entry);
       return;
     }
     entry.sourceUnsubscribe = onSnapshot(
@@ -1712,6 +1752,8 @@ const syncPollVoteListeners = () => {
     }
   });
 };
+
+document.addEventListener("visibilitychange", syncInteractionListeners);
 
 const setFeedView = (profileOnly) => {
   showingProfile = profileOnly;
