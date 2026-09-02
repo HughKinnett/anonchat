@@ -56,12 +56,8 @@ $("premium-message-form").onsubmit = async event => {
   if (!text) return setStatus("Write a message before sending.", true);
   button.disabled = true;
   try {
-    const [memberSnap, profileSnap] = await Promise.all([
-      getDoc(doc(db, "premiumRoomMembers", `${activeRoom}_${user.uid}`)),
-      getDoc(doc(db, "users", user.uid))
-    ]);
-    if (!memberSnap.exists()) throw new Error("You are no longer a member of this room.");
-    const username = profileSnap.data()?.username;
+    if (!memberFor(user.uid)) throw new Error("You are no longer a member of this room.");
+    const username = profile?.username;
     if (!username) throw new Error("Your AnonChat profile could not be loaded.");
     const messageRef = doc(collection(db, "premiumRooms", activeRoom, "messages"));
     const notificationRef = doc(db, "premiumRoomNotifications", messageRef.id);

@@ -1013,7 +1013,6 @@ const toggleReaction = async (parent, type) => {
     if (current.exists() && current.data().type === type) transaction.delete(reactionRef);
     else transaction.set(reactionRef, { uid: currentUser.uid, type, createdAt: serverTimestamp() });
   });
-  return getDoc(reactionRef);
 };
 
 const reactionButton = (parent, type, emoji, reactionDocs) => {
@@ -1035,18 +1034,7 @@ const reactionButton = (parent, type, emoji, reactionDocs) => {
     try {
       manuallyLoadedInteractionPaths.add(parent.path);
       syncInteractionListeners();
-      const latest = await toggleReaction(parent, type);
-      const currentEntry = interactionSubscriptions.get(parent.path);
-      if (currentEntry) {
-        currentEntry.viewerReaction = latest.exists() ? latest : undefined;
-        currentEntry.reactions = [
-          ...currentEntry.reactions.filter((reaction) => reaction.data().uid !== currentUser.uid),
-          ...(latest.exists() ? [latest] : [])
-        ];
-        currentEntry.ready.reactions = true;
-        currentEntry.ready.viewerReaction = true;
-        queueInteractionRender();
-      } else button.disabled = false;
+      await toggleReaction(parent, type);
     } catch {
       if (entry && previousReactions) {
         entry.reactions = previousReactions;
@@ -1337,10 +1325,10 @@ const renderPost = (postDoc) => {
         text,
         createdAt: serverTimestamp()
       });
-      const savedComment = await getDoc(commentRef);
       const entry = interactionSubscriptions.get(parent.path);
-      if (entry && savedComment.exists()) {
-        entry.comments = [...entry.comments.filter((comment) => comment.ref.path !== savedComment.ref.path), savedComment];
+      if (entry) {
+        const pendingComment = { ref: commentRef, data: () => ({ uid: currentUser.uid, username: profileUsername, text, createdAt: new Date() }) };
+        entry.comments = [...entry.comments.filter((comment) => comment.ref.path !== commentRef.path), pendingComment];
         entry.ready.comments = true;
         queueInteractionRender();
       }
