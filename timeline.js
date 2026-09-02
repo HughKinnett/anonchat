@@ -1497,8 +1497,6 @@ const startInteractionChildren = (entry) => {
     entry.childUnsubscribes.push(onSnapshot(
       query(
         collection(db, entry.parent.collection, entry.parent.id, kind),
-        orderBy("createdAt", "desc"),
-        orderBy(documentId(), "desc"),
         limit(MAX_INTERACTION_ITEMS_PER_PARENT)
       ),
       (snapshot) => {

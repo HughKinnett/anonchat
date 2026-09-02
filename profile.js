@@ -396,7 +396,7 @@ const syncProfilePostResources = (postDocs) => {
     const parent = interactionParentForPost(postDoc);
     if (!commentListeners.has(parent.path)) {
       const unsubscribe = onSnapshot(
-        query(collection(db, parent.collection, parent.id, "comments"), orderBy("createdAt", "desc"), limit(20)),
+        query(collection(db, parent.collection, parent.id, "comments"), limit(50)),
         (snapshot) => {
           if (!sessionGeneration.isCurrent(session, uid)) return;
           comments = [...comments.filter((comment) => commentParentPath(comment) !== parent.path), ...snapshot.docs];
@@ -408,7 +408,7 @@ const syncProfilePostResources = (postDocs) => {
     }
     if (!reactionListeners.has(parent.path)) {
       const unsubscribe = onSnapshot(
-        query(collection(db, parent.collection, parent.id, "reactions"), orderBy("createdAt", "desc"), limit(50)),
+        query(collection(db, parent.collection, parent.id, "reactions"), limit(50)),
         (snapshot) => {
           if (!sessionGeneration.isCurrent(session, uid)) return;
           reactions = [...reactions.filter((reaction) => reactionParentPath(reaction) !== parent.path), ...snapshot.docs];
