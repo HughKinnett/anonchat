@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v109";
+const CACHE_NAME = "anonchat-v110";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -138,6 +138,7 @@ const PUSH_PAYLOADS = Object.freeze({
   "private-message": Object.freeze({ title: "New private message", action: "sent you a private message.", url: "/community.html#messages-panel" }),
   "message-request": Object.freeze({ title: "New message request", action: "sent you a private conversation request.", url: "/community.html#messages-panel" }),
   "room-message": Object.freeze({ title: "New room message", action: "sent a message in a temporary room.", url: "/community.html#rooms-panel" }),
+  "premium-room-message": Object.freeze({ title: "New invite-only room message", action: "sent a message in an invite-only room.", url: "/premium-rooms.html" }),
   "reveal-request": Object.freeze({ title: "New mutual reveal request", action: "sent you a mutual reveal request.", url: "/community.html#messages-panel" })
 });
 const FALLBACK_PUSH_PAYLOAD = Object.freeze({
@@ -175,7 +176,8 @@ const NOTIFICATION_ROUTES = new Set([
   "/timeline.html",
   "/community.html",
   "/profile.html",
-  "/connections.html"
+  "/connections.html",
+  "/premium-rooms.html"
 ]);
 
 const safeNotificationTarget = (value) => {

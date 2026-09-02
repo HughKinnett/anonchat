@@ -149,6 +149,17 @@ assert.equal(shown.options.body, "@HiddenFox commented on your post.");
 assert.equal(shown.options.tag, `anonchat-${validEventId}`);
 assert.equal(shown.options.data.url, "https://anonchatlogin.web.app/timeline.html");
 
+const premiumRoomShown = await push({ json: {
+  type: "premium-room-message",
+  title: "New invite-only room message",
+  actorLabel: "HiddenFox",
+  body: "sent a message in an invite-only room.",
+  url: "/premium-rooms.html",
+  tag: `anonchat-${validEventId}`
+} });
+assert.equal(premiumRoomShown.options.body, "@HiddenFox sent a message in an invite-only room.");
+assert.equal(premiumRoomShown.options.data.url, "https://anonchatlogin.web.app/premium-rooms.html");
+
 for (const malicious of [
   { type: "arbitrary", title: "Private title", body: "private message body", url: "https://evil.example", tag: "attacker" },
   { type: "reaction", title: "Forged title", body: "private post body", url: "/timeline.html", tag: `anonchat-${validEventId}` },
