@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v114";
+const CACHE_NAME = "anonchat-v115";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -18,6 +18,10 @@ const APP_SHELL = [
   "./terms.html",
   "./privacy.html",
   "./support.html",
+  "./community-guidelines.html",
+  "./child-safety.html",
+  "./copyright.html",
+  "./subscriptions.html",
   "./login.css",
   "./controls.css",
   "./timeline.css",
@@ -60,6 +64,7 @@ const APP_SHELL = [
   "./premium.js",
   "./customize.js",
   "./premium-profile.js",
+  "./premium-playlist.js",
   "./premium-rooms.js",
   "./profile.js",
   "./forgot-password.js",
