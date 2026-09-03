@@ -1814,7 +1814,6 @@ const stopTimelineResources = () => {
   renderSpotifySong("");
   document.getElementById("display-name").textContent = "Loading profile…";
   document.getElementById("user-handle").textContent = "";
-  document.getElementById("my-profile-link").removeAttribute("href");
   document.getElementById("admin-link").hidden = true;
   renderFeed();
   renderSearchResults();
@@ -1899,8 +1898,6 @@ onAuthStateChanged(auth, async (user) => {
   renderSpotifySong(currentUserIsPremium ? (profile.data().spotifyPlaylistUrl || currentPremiumSettings.spotifyPlaylistUrl) : profile.data().spotifyTrackUrl || "");
   content.maxLength = currentUserIsPremium ? 20000 : 500;
   document.getElementById("post-limit-note").textContent = currentUserIsPremium ? "Premium limit: 1,000 words." : "Up to 500 characters. Premium members get 1,000 words.";
-  document.getElementById("my-profile-link").href =
-    `profile.html?uid=${encodeURIComponent(user.uid)}`;
   document.getElementById("admin-link").hidden =
     !isDesignatedAdmin(profileUsername);
   const statsRef = doc(db, "system", "accountStats");
