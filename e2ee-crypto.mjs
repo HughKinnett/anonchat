@@ -15,6 +15,9 @@ const randomBytes = size => crypto.getRandomValues(new Uint8Array(size));
 const importPublicKey = jwk => crypto.subtle.importKey("jwk", jwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
 const importPrivateKey = jwk => crypto.subtle.importKey("jwk", jwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
 
+export const exportPrivateKeyJwk = privateKey => crypto.subtle.exportKey("jwk", privateKey);
+export const importPrivateKeyJwk = jwk => importPrivateKey(jwk);
+
 const passwordKey = async (passphrase, salt, iterations = PBKDF2_ITERATIONS) => {
   const material = await crypto.subtle.importKey("raw", encoder.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
