@@ -39,6 +39,7 @@ const repost = (originalPostId = "post-1", overrides = {}) => ({
 });
 const withoutModerationState = ({ moderationState, ...record }) => record;
 const roomExpiry = new Date(Date.now() + 86_400_000);
+const cipher = value => ({ version: 1, algorithm: "A256GCM", iv: "a".repeat(16), ciphertext: Buffer.from(value).toString("base64") });
 const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
   const db = context.firestore();
   await Promise.all([
@@ -139,8 +140,8 @@ try {
     postCollection: "communityPosts", postId: "community-1", uid: "reporter", option: 0, createdAt: serverTimestamp()
   }), "active Community posts retain voting controls");
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-message"), {
-    roomId: "room-1", senderId: "stranger", tempName: "Stranger", text: "active room", expiresAt: roomExpiry,
-    moderationState: "visible", createdAt: serverTimestamp()
+    roomId: "room-1", senderId: "stranger", tempName: "Stranger", encrypted: true, cipherVersion: 1,
+    bodyCipher: cipher("active room"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
   }), "active rooms retain messaging controls");
 
   await assertSucceeds(writeReport(reporter, intake()));
@@ -172,8 +173,8 @@ try {
   await assertFails(getDoc(doc(stranger, "roomMessages", "active-room-message")), "retained room messages inherit the hidden parent protection");
   await assertSucceeds(getDoc(doc(admin, "roomMessages", "active-room-message")), "admins retain transcript access while the room is hidden");
   await assertFails(setDoc(doc(stranger, "roomMessages", "after-room-report"), {
-    roomId: "room-1", senderId: "stranger", tempName: "Stranger", text: "hidden room", expiresAt: roomExpiry,
-    moderationState: "visible", createdAt: serverTimestamp()
+    roomId: "room-1", senderId: "stranger", tempName: "Stranger", encrypted: true, cipherVersion: 1,
+    bodyCipher: cipher("hidden room"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
   }), "reported rooms deny messaging immediately");
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await updateDoc(doc(context.firestore(), "rooms", "room-1"), { cleanupState: "closing" });
