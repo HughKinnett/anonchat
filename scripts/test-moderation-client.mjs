@@ -211,7 +211,7 @@ const rejectedRacePost = { ...post, targetId: "rejected-race" };
 await assert.rejects(() => rejectedRaceClient.report(rejectedRacePost, "other"), (error) => error?.code === "already-reported");
 assert.equal(rejectedRaceClient.cachedReported(rejectedRacePost), true,
   "a rejected local batch cannot erase an authoritative cross-tab receipt");
-assert.equal(rejectedRaceReads, 1, "recovery does not issue a stale read after reported=true becomes known");
+assert.equal(rejectedRaceReads, 2, "recovery path performs the initial receipt read plus the material snapshot read, without a third stale receipt read");
 rejectedRaceClient.destroy();
 
 const roomWrites = [];
