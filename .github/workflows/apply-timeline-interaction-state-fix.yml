@@ -1,0 +1,36 @@
+name: Apply timeline interaction-state fix
+
+on:
+  push:
+    branches:
+      - fix/e2ee-spotify-privacy
+    paths:
+      - scripts/apply-timeline-interaction-state-fix.mjs
+      - .github/workflows/apply-timeline-interaction-state-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/e2ee-spotify-privacy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/apply-timeline-interaction-state-fix.mjs
+      - name: Commit repair if needed
+        shell: bash
+        run: |
+          if git diff --quiet -- timeline.js; then
+            echo "Timeline already contains the interaction-state fix."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timeline.js
+          git commit -m "Restore consistent timeline interaction loading"
+          git push origin HEAD:fix/e2ee-spotify-privacy
