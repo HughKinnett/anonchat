@@ -9,8 +9,10 @@ export const MODERATION_WORKFLOW_PATH = ".github/workflows/process-moderation.ym
 const deletionCron = "*/5 * * * *";
 const secretReference = "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}";
 const credentialPathReference = "${{ steps.auth.outputs.credentials_file_path }}";
+const costIndexesTestCommand = "npm run test:cost-indexes";
 const premiumTestCommand = "npm run test:premium";
 const deployIndexesCommand = "npm run rollout:ensure-indexes";
+const ensureFieldExemptionsCommand = "npm run rollout:ensure-field-exemptions";
 const grantFoundersCommand = "npm run rollout:premium-founders";
 const waitIndexesCommand = "npm run rollout:wait-indexes";
 const processRolloutCommand = "npm run rollout:process-moderation";
@@ -195,8 +197,10 @@ export const validateDeployWorkflow = (workflow) => {
     "run:npm ci",
     "uses:google-github-actions/auth@v3",
     "uses:google-github-actions/setup-gcloud@v3",
+    `run:${costIndexesTestCommand}`,
     `run:${premiumTestCommand}`,
     `run:${deployIndexesCommand}`,
+    `run:${ensureFieldExemptionsCommand}`,
     `run:${grantFoundersCommand}`,
     `run:${waitIndexesCommand}`,
     `run:${processRolloutCommand}`,
@@ -212,17 +216,19 @@ export const validateDeployWorkflow = (workflow) => {
   validateStep(errors, steps[2], { name: "Install trusted dependencies", run: "npm ci" }, "deploy install step");
   validateStep(errors, steps[3], { name: "Authenticate to Google Cloud", id: "auth", uses: "google-github-actions/auth@v3", with: { credentials_json: secretReference, create_credentials_file: true } }, "deploy authentication step");
   validateStep(errors, steps[4], { name: "Set up Google Cloud CLI", uses: "google-github-actions/setup-gcloud@v3" }, "deploy Google Cloud CLI step");
-  validateStep(errors, steps[5], { name: "Verify Premium access policy", run: premiumTestCommand }, "premium verification step");
-  validateStep(errors, steps[6], { name: "Ensure required Firestore indexes", run: deployIndexesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "deploy index step");
-  validateStep(errors, steps[7], { name: "Grant launch accounts Founding access", run: grantFoundersCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "founder grant step");
-  validateStep(errors, steps[8], { name: "Wait for required Firestore indexes", run: waitIndexesCommand, "timeout-minutes": 22, env: { GCLOUD_PROJECT: "anonchatlogin", FIRESTORE_INDEX_TIMEOUT_SECONDS: "1200" } }, "index readiness step");
-  validateStep(errors, steps[9], { name: "Run moderation processor and backfills", run: processRolloutCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "production moderation step");
-  validateStep(errors, steps[10], { name: "Verify production rollout gates", run: verifyRolloutCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "production gate verification step");
-  validateStep(errors, steps[11], { name: "Migrate accepted private messages", run: migrateDirectMessagesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "pre-rules direct-message migration step");
-  validateStep(errors, steps[12], { name: "Deploy Firestore rules", run: deployRulesCommand }, "deploy rules step");
-  validateStep(errors, steps[13], { name: "Drain poll votes created during rules cutover", run: drainPollVotesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "post-rules poll-vote drain step");
-  validateStep(errors, steps[14], { name: "Deploy Firebase Hosting", run: deployHostingCommand }, "deploy Hosting step");
-  validateStep(errors, steps[15], { name: "Catch private messages created during cutover", run: migrateDirectMessagesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "post-hosting direct-message migration step");
+  validateStep(errors, steps[5], { name: "Verify Firebase cost index policy", run: costIndexesTestCommand }, "cost index verification step");
+  validateStep(errors, steps[6], { name: "Verify Premium access policy", run: premiumTestCommand }, "premium verification step");
+  validateStep(errors, steps[7], { name: "Ensure required Firestore indexes", run: deployIndexesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "deploy index step");
+  validateStep(errors, steps[8], { name: "Ensure Firestore field index exemptions", run: ensureFieldExemptionsCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "field exemption step");
+  validateStep(errors, steps[9], { name: "Grant launch accounts Founding access", run: grantFoundersCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "founder grant step");
+  validateStep(errors, steps[10], { name: "Wait for required Firestore indexes", run: waitIndexesCommand, "timeout-minutes": 22, env: { GCLOUD_PROJECT: "anonchatlogin", FIRESTORE_INDEX_TIMEOUT_SECONDS: "1200" } }, "index readiness step");
+  validateStep(errors, steps[11], { name: "Run moderation processor and backfills", run: processRolloutCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "production moderation step");
+  validateStep(errors, steps[12], { name: "Verify production rollout gates", run: verifyRolloutCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "production gate verification step");
+  validateStep(errors, steps[13], { name: "Migrate accepted private messages", run: migrateDirectMessagesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "pre-rules direct-message migration step");
+  validateStep(errors, steps[14], { name: "Deploy Firestore rules", run: deployRulesCommand }, "deploy rules step");
+  validateStep(errors, steps[15], { name: "Drain poll votes created during rules cutover", run: drainPollVotesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "post-rules poll-vote drain step");
+  validateStep(errors, steps[16], { name: "Deploy Firebase Hosting", run: deployHostingCommand }, "deploy Hosting step");
+  validateStep(errors, steps[17], { name: "Catch private messages created during cutover", run: migrateDirectMessagesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "post-hosting direct-message migration step");
   return errors;
 };
 
@@ -275,6 +281,7 @@ export const validatePackageScripts = (packageJson) => {
   exactly(errors, packageJson.scripts?.["test:timeline-query-compatibility"], "node scripts/test-timeline-moderation-ui.mjs", "timeline query compatibility package script");
   exactly(errors, packageJson.scripts?.["test:rollout-policy"], "node scripts/test-production-rollout.mjs", "rollout policy test package script");
   exactly(errors, packageJson.scripts?.["rollout:ensure-indexes"], "node scripts/ensure-firestore-indexes.mjs", "additive index deployment package script");
+  exactly(errors, packageJson.scripts?.["rollout:ensure-field-exemptions"], "node scripts/ensure-firestore-field-exemptions.mjs", "field exemption deployment package script");
   exactly(errors, packageJson.scripts?.["rollout:wait-indexes"], "node scripts/wait-firestore-indexes.mjs", "index readiness package script");
   exactly(errors, packageJson.scripts?.["rollout:process-moderation"], "node scripts/process-production-moderation.mjs", "production moderation package script");
   exactly(errors, packageJson.scripts?.["rollout:migrate-poll-votes"], "node scripts/poll-vote-migration.mjs", "poll-vote migration package script");
