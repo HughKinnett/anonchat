@@ -14,7 +14,7 @@ const channelFactory = () => {
 };
 const firestore = {
   doc: (_db, ...segments) => ({ path: segments.join("/") }),
-  getDoc: async (ref) => { reads.push(ref.path); return { exists: () => refs.has(ref.path) }; },
+  getDoc: async (ref) => { reads.push(ref.path); return { exists: () => refs.has(ref.path), data: () => refs.get(ref.path) }; },
   setDoc: async (ref, payload) => { writes.push({ ref, payload }); refs.set(ref.path, payload); },
   deleteDoc: async (ref) => { deletes.push(ref); refs.delete(ref.path); },
   writeBatch: () => {
@@ -116,11 +116,26 @@ assert.deepEqual(writes, [{
 }, {
   ref: { path: "posts/post-1" },
   payload: { moderationState: "hidden", moderationHoldId: "reporter_post_post-1", moderationHeldAt: "server-time" }
+}, {
+  ref: { path: "moderationCases/post_post-1" },
+  payload: {
+    targetKind: "post",
+    targetCollection: "posts",
+    targetId: "post-1",
+    targetPath: "posts/post-1",
+    reportedUserId: "author",
+    snapshot: { kind: "post", authorId: "author", authorName: "anonymous", text: "" },
+    status: "open",
+    reportCount: 1,
+    reasonTotals: { harassment: 1 },
+    createdAt: "server-time",
+    updatedAt: "server-time"
+  }
 }]);
 assert.equal(await client.hasReported(post), true);
 assert.equal(client.cachedReported(post), true);
 await assert.rejects(() => client.report(post, "harassment"), (error) => error?.code === "already-reported");
-assert.equal(writes.length, 3, "a duplicate does not overwrite either atomic report record or hidden hold");
+assert.equal(writes.length, 4, "a duplicate does not overwrite the atomic report, receipt, hold, or moderation case");
 assert.equal([...refs.keys()].filter(path => path === "reportIntakes/reporter_post_post-1").length, 1);
 await assert.rejects(() => client.report({ ...post, reportedUserId: "reporter" }, "spam-scam"), /self report/);
 await assert.rejects(() => client.report({ ...post, targetKind: "user", targetCollection: "users", targetId: "reporter", reportedUserId: "reporter" }, "other"), /self report/);
@@ -216,11 +231,15 @@ const roomClient = createModerationClient({
   }
 });
 await roomClient.report({ targetKind: "room", targetCollection: "rooms", targetId: "room-1", reportedUserId: "owner" }, "other");
-assert.deepEqual(roomWrites.at(-1), {
+assert.deepEqual(roomWrites.find(operation => operation.method === "update" && operation.path === "rooms/room-1"), {
   method: "update",
   path: "rooms/room-1",
   payload: { moderationState: "hidden", moderationHoldId: "room-reporter_room_room-1", moderationHeldAt: "server-time" }
 }, "room intake, receipt, and hidden hold share one client batch");
+const roomCase = roomWrites.find(operation => operation.method === "set" && operation.path === "moderationCases/room_room-1");
+assert.equal(roomCase?.payload?.targetKind, "room");
+assert.equal(roomCase?.payload?.status, "open");
+assert.equal(roomCase?.payload?.reportedUserId, "owner");
 roomClient.destroy();
 client.destroy();
 assert.equal(channels[0].closeCalled, true, "the one shared cross-tab channel is closed on teardown");
