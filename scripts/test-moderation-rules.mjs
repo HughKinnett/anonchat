@@ -271,7 +271,7 @@ try {
   }));
   await assertFails(setDoc(doc(admin, "moderationCases", "forged"), { status: "open" }));
   await assertFails(setDoc(doc(stranger, "moderationCases", "case-post-1", "reports", "forged"), { reporterUid: "stranger" }));
-  await assertFails(deleteDoc(doc(admin, "posts", "post-2")));
+  await assertSucceeds(deleteDoc(doc(admin, "posts", "post-2")), "authorized admins retain direct post deletion controls");
   const deletionTime = serverTimestamp(), deletionBatch = writeBatch(admin);
   deletionBatch.set(doc(admin, "moderationCases", "post_post-2"), {
     targetKind: "post", targetCollection: "posts", targetId: "post-2", targetPath: "posts/post-2", reportedUserId: "author",
