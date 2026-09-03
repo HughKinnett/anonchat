@@ -9,11 +9,14 @@ export const MODERATION_WORKFLOW_PATH = ".github/workflows/process-moderation.ym
 const deletionCron = "*/5 * * * *";
 const secretReference = "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}";
 const credentialPathReference = "${{ steps.auth.outputs.credentials_file_path }}";
+const premiumTestCommand = "npm run test:premium";
 const deployIndexesCommand = "npm run rollout:ensure-indexes";
+const grantFoundersCommand = "npm run rollout:premium-founders";
 const waitIndexesCommand = "npm run rollout:wait-indexes";
 const processRolloutCommand = "npm run rollout:process-moderation";
 const drainPollVotesCommand = "npm run rollout:migrate-poll-votes";
 const verifyRolloutCommand = "npm run rollout:verify";
+const migrateDirectMessagesCommand = "npm run rollout:migrate-direct-messages";
 const deployRulesCommand = "npx --no-install firebase deploy --project anonchatlogin --only firestore:rules --non-interactive";
 const deployHostingCommand = "npx --no-install firebase deploy --project anonchatlogin --only hosting --non-interactive";
 const rulesPaths = [
@@ -30,7 +33,7 @@ const rulesPaths = [
   "*.webmanifest",
   "scripts/**"
 ];
-const firestoreCiCommand = "npm run test:legal-signup && npm run test:moderation-client && npm run test:content-writer && npm run test:moderation-backfill && npm run test:moderation-indexes && npm run test:profile-render && npm run test:moderation-policy && npm run test:community-lifecycle && npm run test:timeline-query-compatibility && npm run test:poll-vote-migration && npm run test:viewer-block-policy && npm run test:viewer-block-surfaces && npm run test:rules && npm run test:moderation-rules && npm run test:block-rules && npm run test:timeline-query-rules && npm run test:room-expiry-rules && npm run test:moderation-processor && npm run test:moderation-firestore-integration && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm test";
+const firestoreCiCommand = "npm run test:legal-signup && npm run test:moderation-client && npm run test:content-writer && npm run test:moderation-backfill && npm run test:moderation-indexes && npm run test:profile-render && npm run test:moderation-policy && npm run test:community-lifecycle && npm run test:timeline-query-compatibility && npm run test:poll-vote-migration && npm run test:viewer-block-policy && npm run test:viewer-block-surfaces && npm run test:rules && npm run test:moderation-rules && npm run test:block-rules && npm run test:timeline-query-rules && npm run test:room-expiry-rules && npm run test:moderation-processor && npm run test:moderation-firestore-integration && npm run test:activity-rules && npm run test:push-rules && npm run test:admin-deletion && npm run test:admin-deletion-firestore-integration && npm run test:admin-deletion-processor-policy && npm run test:admin-deletion-processor && npm run test:admin-deletion-indexes && npm run test:admin-deletion-cli && npm run test:notification-rules && npm run test:notification-firestore-integration && npm run test:notification && npm run test:push && npm run test:self-delete && npm run test:legacy-migration && npm run test:admin-dashboard && npm run test:auth-activity && npm run test:e2ee && npm run test:spotify-playlist-privacy && npm test";
 const workflowPolicyTestCommand = "node scripts/test-workflow-policy.mjs && node scripts/test-notification-workflow.mjs && node scripts/test-production-rollout.mjs";
 const notificationTestCommand = "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes && node scripts/test-push-service-worker.mjs";
 const moderationProcessorTestCommand = "node scripts/test-moderation-processor-policy.mjs && node scripts/test-moderation-firestore-adapter.mjs && node scripts/test-moderation-processor.mjs";
@@ -170,13 +173,9 @@ export const validateDeployWorkflow = (workflow) => {
   exactlyKeys(errors, workflow, ["name", "on", "permissions", "concurrency", "jobs"], "deploy workflow");
   exactly(errors, workflow.name, "Deploy Firebase", "deploy workflow name");
   const triggers = workflowTriggers(workflow);
-  if (!sameKeys(triggers, ["push", "workflow_dispatch"])) {
-    errors.push("deploy workflow triggers must be push and workflow_dispatch only");
-  }
+  if (!sameKeys(triggers, ["push", "workflow_dispatch"])) errors.push("deploy workflow triggers must be push and workflow_dispatch only");
   exactly(errors, triggers?.workflow_dispatch, null, "deploy workflow dispatch trigger");
-  if (!sameKeys(triggers?.push, ["branches"]) || !sameArray(triggers?.push?.branches, ["main"])) {
-    errors.push("deploy workflow push trigger must target main only");
-  }
+  if (!sameKeys(triggers?.push, ["branches"]) || !sameArray(triggers?.push?.branches, ["main"])) errors.push("deploy workflow push trigger must target main only");
   if (!hasReadOnlyPermissions(workflow.permissions)) errors.push("deploy workflow permissions must be contents: read only");
   exactlyKeys(errors, workflow.concurrency, ["group", "cancel-in-progress"], "deploy workflow concurrency");
   exactly(errors, workflow.concurrency?.group, "firebase-production", "deploy workflow concurrency group");
@@ -196,61 +195,34 @@ export const validateDeployWorkflow = (workflow) => {
     "run:npm ci",
     "uses:google-github-actions/auth@v3",
     "uses:google-github-actions/setup-gcloud@v3",
+    `run:${premiumTestCommand}`,
     `run:${deployIndexesCommand}`,
+    `run:${grantFoundersCommand}`,
     `run:${waitIndexesCommand}`,
     `run:${processRolloutCommand}`,
     `run:${verifyRolloutCommand}`,
+    `run:${migrateDirectMessagesCommand}`,
     `run:${deployRulesCommand}`,
     `run:${drainPollVotesCommand}`,
-    `run:${deployHostingCommand}`
+    `run:${deployHostingCommand}`,
+    `run:${migrateDirectMessagesCommand}`
   ], "deploy workflow steps");
-  validateStep(errors, steps[0], {
-    name: "Check out repository",
-    uses: "actions/checkout@v4"
-  }, "deploy checkout step");
-  validateStep(errors, steps[1], {
-    name: "Set up Node.js",
-    uses: "actions/setup-node@v4",
-    with: { "node-version": "22" }
-  }, "deploy Node step");
-  validateStep(errors, steps[2], {
-    name: "Install trusted dependencies",
-    run: "npm ci"
-  }, "deploy install step");
-  validateStep(errors, steps[3], {
-    name: "Authenticate to Google Cloud",
-    id: "auth",
-    uses: "google-github-actions/auth@v3",
-    with: { credentials_json: secretReference, create_credentials_file: true }
-  }, "deploy authentication step");
-  validateStep(errors, steps[4], {
-    name: "Set up Google Cloud CLI",
-    uses: "google-github-actions/setup-gcloud@v3"
-  }, "deploy Google Cloud CLI step");
-  validateStep(errors, steps[5], { name: "Ensure required Firestore indexes", run: deployIndexesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "deploy index step");
-  validateStep(errors, steps[6], {
-    name: "Wait for required Firestore indexes",
-    run: waitIndexesCommand,
-    "timeout-minutes": 22,
-    env: { GCLOUD_PROJECT: "anonchatlogin", FIRESTORE_INDEX_TIMEOUT_SECONDS: "1200" }
-  }, "index readiness step");
-  validateStep(errors, steps[7], {
-    name: "Run moderation processor and backfills",
-    run: processRolloutCommand,
-    env: { GCLOUD_PROJECT: "anonchatlogin" }
-  }, "production moderation step");
-  validateStep(errors, steps[8], {
-    name: "Verify production rollout gates",
-    run: verifyRolloutCommand,
-    env: { GCLOUD_PROJECT: "anonchatlogin" }
-  }, "production gate verification step");
-  validateStep(errors, steps[9], { name: "Deploy Firestore rules", run: deployRulesCommand }, "deploy rules step");
-  validateStep(errors, steps[10], {
-    name: "Drain poll votes created during rules cutover",
-    run: drainPollVotesCommand,
-    env: { GCLOUD_PROJECT: "anonchatlogin" }
-  }, "post-rules poll-vote drain step");
-  validateStep(errors, steps[11], { name: "Deploy Firebase Hosting", run: deployHostingCommand }, "deploy Hosting step");
+  validateStep(errors, steps[0], { name: "Check out repository", uses: "actions/checkout@v4" }, "deploy checkout step");
+  validateStep(errors, steps[1], { name: "Set up Node.js", uses: "actions/setup-node@v4", with: { "node-version": "22" } }, "deploy Node step");
+  validateStep(errors, steps[2], { name: "Install trusted dependencies", run: "npm ci" }, "deploy install step");
+  validateStep(errors, steps[3], { name: "Authenticate to Google Cloud", id: "auth", uses: "google-github-actions/auth@v3", with: { credentials_json: secretReference, create_credentials_file: true } }, "deploy authentication step");
+  validateStep(errors, steps[4], { name: "Set up Google Cloud CLI", uses: "google-github-actions/setup-gcloud@v3" }, "deploy Google Cloud CLI step");
+  validateStep(errors, steps[5], { name: "Verify Premium access policy", run: premiumTestCommand }, "premium verification step");
+  validateStep(errors, steps[6], { name: "Ensure required Firestore indexes", run: deployIndexesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "deploy index step");
+  validateStep(errors, steps[7], { name: "Grant launch accounts Founding access", run: grantFoundersCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "founder grant step");
+  validateStep(errors, steps[8], { name: "Wait for required Firestore indexes", run: waitIndexesCommand, "timeout-minutes": 22, env: { GCLOUD_PROJECT: "anonchatlogin", FIRESTORE_INDEX_TIMEOUT_SECONDS: "1200" } }, "index readiness step");
+  validateStep(errors, steps[9], { name: "Run moderation processor and backfills", run: processRolloutCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "production moderation step");
+  validateStep(errors, steps[10], { name: "Verify production rollout gates", run: verifyRolloutCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "production gate verification step");
+  validateStep(errors, steps[11], { name: "Migrate accepted private messages", run: migrateDirectMessagesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "pre-rules direct-message migration step");
+  validateStep(errors, steps[12], { name: "Deploy Firestore rules", run: deployRulesCommand }, "deploy rules step");
+  validateStep(errors, steps[13], { name: "Drain poll votes created during rules cutover", run: drainPollVotesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "post-rules poll-vote drain step");
+  validateStep(errors, steps[14], { name: "Deploy Firebase Hosting", run: deployHostingCommand }, "deploy Hosting step");
+  validateStep(errors, steps[15], { name: "Catch private messages created during cutover", run: migrateDirectMessagesCommand, env: { GCLOUD_PROJECT: "anonchatlogin" } }, "post-hosting direct-message migration step");
   return errors;
 };
 
@@ -335,9 +307,7 @@ export const validateHostingConfig = (firebaseJson) => {
   for (const path of requiredHostingIgnores) {
     if (!hosting.ignore.includes(path)) errors.push(`Firebase Hosting must ignore ${path}`);
   }
-  if (hosting.ignore.some((path) => path === "**/.*" || path === ".well-known/**" || path.startsWith(".well-known/"))) {
-    errors.push("Firebase Hosting must allow .well-known Android asset links");
-  }
+  if (hosting.ignore.some((path) => path === "**/.*" || path === ".well-known/**" || path.startsWith(".well-known/"))) errors.push("Firebase Hosting must allow .well-known Android asset links");
   return errors;
 };
 
