@@ -43,7 +43,7 @@
     "test:cost-indexes": "node scripts/test-cost-indexes.mjs",
     "test:cost-runtime": "node scripts/test-runtime-cost-budgets.mjs",
     "test:premium": "node scripts/test-premium-policy.mjs",
-    "test:e2ee": "node scripts/test-e2ee-pin.mjs && node scripts/test-e2ee-device-store.mjs && node scripts/test-e2ee-pin-integration.mjs && node scripts/test-e2ee-pin-session.mjs && node scripts/test-e2ee-crypto.mjs && node scripts/test-e2ee-integration-policy.mjs && firebase emulators:exec --only firestore \"node scripts/test-e2ee-rules.mjs\"",
+    "test:e2ee": "node scripts/test-e2ee-pin.mjs && node scripts/test-e2ee-device-store.mjs && node scripts/test-e2ee-pin-integration.mjs && node scripts/test-e2ee-pin-session.mjs && node scripts/test-e2ee-pin-migration.mjs && node scripts/test-e2ee-crypto.mjs && node scripts/test-e2ee-integration-policy.mjs && firebase emulators:exec --only firestore \"node scripts/test-e2ee-rules.mjs\"",
     "test:spotify-privacy": "node scripts/test-spotify-playlist-privacy.mjs",
     "test:spotify-playlist-privacy": "node scripts/test-spotify-playlist-privacy.mjs",
     "test:notification": "npm run test:notification-policy && npm run test:notification-processor && npm run test:notification-cli && npm run test:notification-ui && npm run test:notification-indexes && node scripts/test-push-service-worker.mjs",
