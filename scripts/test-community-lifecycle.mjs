@@ -64,15 +64,15 @@ assert.match(source, /if \(!state\.viewerBlocks\.ready\)/,
   "Community private and public renderers fail closed while block snapshots load");
 
 assert.match(rules, /function roomIsActive\(room\)\s*\{\s*return room\.expiresAt is timestamp/s);
-assert.match(rules, /\['name', 'topic', 'ownerId', 'createdAt', 'expiresAt', 'moderationState'\]/);
-assert.match(rules, /\['roomId', 'senderId', 'tempName', 'text', 'imageData', 'expiresAt', 'moderationState', 'createdAt'\]/);
+assert.match(rules, /\['name', 'topic', 'ownerId', 'createdAt', 'expiresAt', 'moderationState', 'encrypted', 'cipherVersion'\]/);
+assert.match(rules, /\['roomId', 'senderId', 'tempName', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher', 'expiresAt', 'moderationState', 'createdAt'\]/);
 assert.match(source, /Photo sent in this temporary room[\s\S]{0,100}item\.append\(photo\)/,
   "temporary-room photos remain visible for the room lifetime");
 assert.doesNotMatch(source, /Photo sent in this temporary room[\s\S]{0,160}consumeViewedPhoto/,
   "temporary-room photos are not view-once");
-assert.match(source, /viewPhoto\.textContent = "View photo once"[\s\S]{0,260}revealedPrivatePhotos\.set\(message\.id, data\.imageData\)[\s\S]{0,160}consumeViewedPhoto\(message\)/,
+assert.match(source, /viewPhoto\.textContent = "View photo once"[\s\S]{0,520}revealedPrivatePhotos\.set\(message\.id, image\)[\s\S]{0,160}consumeViewedPhoto\(message\)/,
   "a recipient deliberately opens a private photo before it is consumed");
-assert.match(source, /const imageData = data\.senderId === state\.user\.uid \? data\.imageData : revealedImage/,
+assert.match(source, /const imageData = data\.senderId === state\.user\.uid \? \(decrypted\?\.imageData \|\| data\.imageData\) : revealedImage/,
   "an opened photo remains visible from session memory after its stored copy is consumed");
 assert.doesNotMatch(source, /photo\.addEventListener\("load", \(\) => consumeViewedPhoto/,
   "private photos are never consumed merely because the browser preloaded them");

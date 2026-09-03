@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v112";
+const CACHE_NAME = "anonchat-v113";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -73,6 +73,9 @@ const APP_SHELL = [
   "./admin-deletion-policy.mjs",
   "./content-ordering.mjs",
   "./feed-ranking-policy.mjs",
+  "./e2ee-crypto.mjs",
+  "./e2ee-identity.js",
+  "./e2ee-room-keys.js",
   "./content-writer-policy.mjs",
   "./interaction-parent-policy.mjs",
   "./moderation-policy.mjs",

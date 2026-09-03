@@ -33,7 +33,7 @@
     <section class="hero">
       <p class="eyebrow">Private by design</p>
       <h1>Community without giving up who you are.</h1>
-      <p>Use temporary identities in live rooms, manage private conversations, and control what you reveal.</p>
+      <p>Use temporary identities in end-to-end encrypted rooms, manage encrypted private conversations, and control what you reveal.</p>
       <div id="identity-card" class="identity-card">Loading your private dashboard…</div>
     </section>
 
@@ -52,7 +52,7 @@
           <label>Room name<input id="room-name" maxlength="40" required></label>
           <label>Topic<input id="room-topic" maxlength="100" required></label>
           <button class="primary" type="submit">Start room</button>
-          <p class="muted">Everyone gets a random temporary name. Messages disappear from view after 24 hours.</p>
+          <p class="muted">Everyone gets a random temporary name. New messages are end-to-end encrypted and disappear from view after 24 hours.</p>
         </form>
         <div><h2>Active rooms</h2><div id="room-list" class="stack"></div></div>
       </div>
@@ -87,7 +87,7 @@
           <div id="direct-messages" class="message-stream"></div>
           <form id="direct-message-form" class="direct-message-composer">
             <div class="direct-message-entry-row">
-              <input id="direct-message" maxlength="500" placeholder="Private message">
+              <input id="direct-message" maxlength="500" placeholder="End-to-end encrypted private message">
               <label class="photo-bubble" for="direct-photo-upload" aria-label="Add photo to private message" aria-pressed="false" role="button" tabindex="0" title="Add photo"><span aria-hidden="true">📷＋</span></label>
               <input id="direct-photo-upload" type="file" accept="image/*" hidden>
               <button class="primary">Send</button>

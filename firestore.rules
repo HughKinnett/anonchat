@@ -532,6 +532,14 @@ service cloud.firestore {
       return existsAfter(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + uid));
     }
 
+    function temporaryRoomMember(roomId, uid) {
+      return exists(/databases/$(database)/documents/roomMembers/$(roomId + '_' + uid));
+    }
+
+    function temporaryRoomMemberAfter(roomId, uid) {
+      return existsAfter(/databases/$(database)/documents/roomMembers/$(roomId + '_' + uid));
+    }
+
     function premiumRoomRole(roomId, uid) {
       return get(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + uid)).data.role;
     }
@@ -568,6 +576,18 @@ service cloud.firestore {
 
     function validPushSubscriptionId(subscriptionId) {
       return subscriptionId.matches('^[0-9a-f]{64}$');
+    }
+
+    function validEncryptedEnvelope(envelope, maximumCiphertextSize) {
+      return envelope is map
+        && envelope.keys().hasOnly(['version', 'algorithm', 'iv', 'ciphertext'])
+        && envelope.version == 1
+        && envelope.algorithm == 'A256GCM'
+        && envelope.iv is string
+        && envelope.iv.size() <= 24
+        && envelope.ciphertext is string
+        && envelope.ciphertext.size() > 0
+        && envelope.ciphertext.size() <= maximumCiphertextSize;
     }
 
     function validPushSubscription() {
@@ -811,6 +831,82 @@ service cloud.firestore {
           (getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower()
             != normalizedUsername)
         );
+    }
+
+    match /e2eePublicKeys/{uid} {
+      allow read: if activeUser();
+      allow create: if activeUserAfter()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'version', 'algorithm', 'publicJwk', 'fingerprint', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.version == 1
+        && request.resource.data.algorithm == 'P-256'
+        && request.resource.data.publicJwk is map
+        && request.resource.data.publicJwk.keys().hasOnly(['key_ops', 'ext', 'kty', 'x', 'y', 'crv'])
+        && request.resource.data.publicJwk.kty == 'EC'
+        && request.resource.data.publicJwk.crv == 'P-256'
+        && request.resource.data.publicJwk.x is string
+        && request.resource.data.publicJwk.x.size() <= 64
+        && request.resource.data.publicJwk.y is string
+        && request.resource.data.publicJwk.y.size() <= 64
+        && request.resource.data.fingerprint is string
+        && request.resource.data.fingerprint.size() == 29
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && uid == request.auth.uid;
+    }
+
+    match /e2eePrivateKeys/{uid} {
+      allow read: if activeUser() && uid == request.auth.uid;
+      allow create: if activeUserAfter()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'version', 'privateBundle', 'publicFingerprint', 'createdAt', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.version == 1
+        && request.resource.data.privateBundle is map
+        && request.resource.data.privateBundle.keys().hasOnly(['version', 'algorithm', 'iterations', 'salt', 'iv', 'ciphertext'])
+        && request.resource.data.privateBundle.version == 1
+        && request.resource.data.privateBundle.algorithm == 'P-256+PBKDF2-SHA256+A256GCM'
+        && request.resource.data.privateBundle.iterations >= 600000
+        && request.resource.data.privateBundle.salt is string
+        && request.resource.data.privateBundle.salt.size() <= 32
+        && request.resource.data.privateBundle.iv is string
+        && request.resource.data.privateBundle.iv.size() <= 24
+        && request.resource.data.privateBundle.ciphertext is string
+        && request.resource.data.privateBundle.ciphertext.size() <= 2048
+        && request.resource.data.publicFingerprint is string
+        && request.resource.data.publicFingerprint.size() == 29
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && uid == request.auth.uid;
+    }
+
+    match /e2eeRoomKeyEnvelopes/{envelopeId} {
+      allow read: if activeUser() && (resource.data.recipientUid == request.auth.uid
+        || (resource.data.kind == 'temporary' && temporaryRoomMember(resource.data.roomId, request.auth.uid))
+        || (resource.data.kind == 'premium' && premiumRoomMember(resource.data.roomId, request.auth.uid)));
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['kind', 'roomId', 'recipientUid', 'senderUid', 'envelope', 'version', 'createdAt'])
+        && request.resource.data.kind in ['temporary', 'premium']
+        && request.resource.data.roomId is string
+        && request.resource.data.roomId.size() > 0
+        && request.resource.data.recipientUid is string
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.version == 1
+        && envelopeId == request.resource.data.kind + '_' + request.resource.data.roomId + '_' + request.resource.data.recipientUid
+        && validEncryptedEnvelope(request.resource.data.envelope, 1024)
+        && existsAfter(/databases/$(database)/documents/e2eePublicKeys/$(request.resource.data.recipientUid))
+        && ((request.resource.data.kind == 'temporary'
+            && roomAvailableAfter(request.resource.data.roomId)
+            && temporaryRoomMemberAfter(request.resource.data.roomId, request.auth.uid)
+            && temporaryRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid))
+          || (request.resource.data.kind == 'premium'
+            && premiumRoomMemberAfter(request.resource.data.roomId, request.auth.uid)
+            && premiumRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid)))
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.recipientUid == request.auth.uid;
     }
 
     match /pushSubscriptions/{subscriptionId} {
@@ -1283,12 +1379,14 @@ service cloud.firestore {
     match /premiumRooms/{roomId} {
       allow read: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid));
       allow create: if activeUserAfter() && isPremiumUidAfter(request.auth.uid)
-        && request.resource.data.keys().hasOnly(['name', 'topic', 'roomColor', 'ownerId', 'moderatorIds', 'createdAt', 'updatedAt', 'moderationState'])
+        && request.resource.data.keys().hasOnly(['name', 'topic', 'roomColor', 'ownerId', 'moderatorIds', 'createdAt', 'updatedAt', 'moderationState', 'encrypted', 'cipherVersion'])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string && request.resource.data.name.size() >= 3 && request.resource.data.name.size() <= 40
         && request.resource.data.topic is string && request.resource.data.topic.size() <= 100
         && request.resource.data.roomColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
         && request.resource.data.moderatorIds == []
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
         && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
         && request.resource.data.moderationState == 'visible'
         && premiumRoomMemberAfter(roomId, request.auth.uid)
@@ -1336,12 +1434,21 @@ service cloud.firestore {
       allow read: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid));
       allow create: if activeUserAfter() && isPremiumUidAfter(request.auth.uid)
         && premiumRoomMemberAfter(roomId, request.auth.uid)
-        && request.resource.data.keys().hasOnly(['senderId', 'username', 'text', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['senderId', 'username', 'encrypted', 'cipherVersion', 'bodyCipher', 'createdAt'])
         && request.resource.data.senderId == request.auth.uid
         && request.resource.data.username == currentUsername()
-        && request.resource.data.text is string && request.resource.data.text.size() >= 1
-        && request.resource.data.text.size() <= 500 && request.resource.data.createdAt == request.time;
-      allow update: if false;
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && request.resource.data.createdAt == request.time;
+      allow update: if activeUserAfter() && premiumRoomMember(roomId, request.auth.uid)
+        && resource.data.get('encrypted', false) != true
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && !request.resource.data.keys().hasAny(['text'])
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['text', 'encrypted', 'cipherVersion', 'bodyCipher']);
       allow delete: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid)
         && (resource.data.senderId == request.auth.uid || premiumRoomOwner(roomId) || premiumRoomModerator(roomId)));
     }
@@ -1361,7 +1468,7 @@ service cloud.firestore {
     match /rooms/{roomId} {
       allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'createdAt', 'expiresAt', 'moderationState'])
+        && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'createdAt', 'expiresAt', 'moderationState', 'encrypted', 'cipherVersion'])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 3
@@ -1370,6 +1477,8 @@ service cloud.firestore {
         && request.resource.data.topic.size() <= 100
         && request.resource.data.createdAt == request.time
         && request.resource.data.moderationState == 'visible'
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
         && validRoomExpiry();
       allow update: if validModerationHoldUpdate('room', roomId, resource.data.ownerId)
         || (activeUserAfter()
@@ -1385,7 +1494,8 @@ service cloud.firestore {
     }
 
     match /roomMembers/{memberId} {
-      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow read: if activeUser() && (resource.data.uid == request.auth.uid
+        || temporaryRoomMember(resource.data.roomId, request.auth.uid));
       allow create: if activeUserAfter()
         && memberId == request.resource.data.roomId + '_' + request.auth.uid
         && request.resource.data.keys().hasOnly(['roomId', 'uid', 'joinedAt'])
@@ -1411,22 +1521,33 @@ service cloud.firestore {
         && resource.data.get('moderationState', 'visible') != 'hidden'
         && linkedRoomAvailable(resource.data.roomId));
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'text', 'imageData', 'expiresAt', 'moderationState', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.senderId == request.auth.uid
         && roomAvailableAfter(request.resource.data.roomId)
         && !pairIsBlocked(request.auth.uid,
           getAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.ownerId)
         && request.resource.data.tempName is string
         && request.resource.data.tempName.size() <= 40
-        && request.resource.data.text is string
-        && (request.resource.data.text.size() >= 1
-          || request.resource.data.get('imageData', '').size() > 0)
-        && request.resource.data.text.size() <= 280
-        && request.resource.data.get('imageData', '').size() <= 160000
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && (!request.resource.data.keys().hasAny(['imageCipher'])
+          || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
         && request.resource.data.moderationState == 'visible'
         && validRoomMessageExpiry(request.resource.data.roomId)
         && request.resource.data.createdAt == request.time;
-      allow update: if false;
+      allow update: if activeUserAfter()
+        && temporaryRoomMember(resource.data.roomId, request.auth.uid)
+        && linkedRoomAvailable(resource.data.roomId)
+        && resource.data.get('encrypted', false) != true
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && (!request.resource.data.keys().hasAny(['imageCipher'])
+          || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
+        && !request.resource.data.keys().hasAny(['text', 'imageData'])
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['text', 'imageData', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher']);
       allow delete: if isAdmin() || (signedIn()
         && resource.data.senderId == request.auth.uid
         && linkedRoomAvailable(resource.data.roomId));
@@ -1486,14 +1607,16 @@ service cloud.firestore {
         && acceptedConversation(requestId);
       allow create: if activeUserAfter()
         && request.resource.data.keys().hasOnly([
-          'participants', 'senderId', 'text', 'imageData', 'createdAt', 'expiresAt'
+          'participants', 'senderId', 'text', 'imageData', 'encrypted', 'cipherVersion',
+          'bodyCipher', 'imageCipher', 'createdAt', 'expiresAt'
         ])
         && acceptedConversationMessageAfter(requestId, request.resource.data)
-        && request.resource.data.text is string
-        && (request.resource.data.text.size() >= 1
-          || request.resource.data.get('imageData', '').size() > 0)
-        && request.resource.data.text.size() <= 500
-        && request.resource.data.get('imageData', '').size() <= 160000
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && (!request.resource.data.keys().hasAny(['imageCipher'])
+          || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
+        && !request.resource.data.keys().hasAny(['text', 'imageData'])
         && request.resource.data.createdAt == request.time
         && (!request.resource.data.keys().hasAny(['expiresAt'])
           || (request.resource.data.expiresAt is timestamp
@@ -1504,13 +1627,26 @@ service cloud.firestore {
       allow update: if activeUserAfter()
         && acceptedConversation(requestId)
         && request.auth.uid in resource.data.participants
-        && resource.data.senderId != request.auth.uid
-        && resource.data.get('imageData', '').size() > 0
-        && request.resource.data.get('imageData', '') == ''
-        && request.resource.data.photoViewedBy == request.auth.uid
-        && request.resource.data.photoViewedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['imageData', 'photoViewedBy', 'photoViewedAt']);
+        && (
+          (resource.data.senderId != request.auth.uid
+            && (resource.data.get('imageData', '').size() > 0 || resource.data.keys().hasAny(['imageCipher']))
+            && request.resource.data.get('imageData', '') == ''
+            && !request.resource.data.keys().hasAny(['imageCipher'])
+            && request.resource.data.photoViewedBy == request.auth.uid
+            && request.resource.data.photoViewedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['imageData', 'imageCipher', 'photoViewedBy', 'photoViewedAt']))
+          ||
+          (resource.data.get('encrypted', false) != true
+            && request.resource.data.encrypted == true
+            && request.resource.data.cipherVersion == 1
+            && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+            && (!request.resource.data.keys().hasAny(['imageCipher'])
+              || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
+            && !request.resource.data.keys().hasAny(['text', 'imageData'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['text', 'imageData', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher']))
+        );
       allow delete: if signedIn()
         && request.auth.uid in resource.data.participants;
     }
@@ -1524,27 +1660,7 @@ service cloud.firestore {
         && request.auth.uid in resource.data.participants
         && acceptedChat(resource.data.participants[0] == request.auth.uid
           ? resource.data.participants[1] : resource.data.participants[0]);
-      allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['participants', 'senderId', 'text', 'createdAt', 'expiresAt'])
-        && request.resource.data.participants is list
-        && request.resource.data.participants.size() == 2
-        && accountAvailableAfter(request.resource.data.participants[0])
-        && accountAvailableAfter(request.resource.data.participants[1])
-        && request.auth.uid in request.resource.data.participants
-        && request.resource.data.senderId == request.auth.uid
-        && !pairIsBlocked(request.resource.data.participants[0], request.resource.data.participants[1])
-        && acceptedChat(request.resource.data.participants[0] == request.auth.uid
-          ? request.resource.data.participants[1] : request.resource.data.participants[0])
-        && request.resource.data.text is string
-        && request.resource.data.text.size() >= 1
-        && request.resource.data.text.size() <= 500
-        && request.resource.data.createdAt == request.time
-        && (!request.resource.data.keys().hasAny(['expiresAt'])
-          || (request.resource.data.expiresAt is timestamp
-            && request.resource.data.expiresAt >= request.time + duration.value(23, 'h')
-              + duration.value(55, 'm')
-            && request.resource.data.expiresAt <= request.time + duration.value(24, 'h')
-              + duration.value(5, 'm')));
+      allow create: if false;
       allow update: if false;
       allow delete: if signedIn() && request.auth.uid in resource.data.participants;
     }

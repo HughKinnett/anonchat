@@ -1,6 +1,7 @@
 node_modules/
 .npm-cache/
 .firebase/
+.test-config/
 firebase-debug.log
 gha-creds-*.json
 .worktrees/

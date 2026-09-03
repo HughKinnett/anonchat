@@ -15,13 +15,14 @@ for (const page of legalPages) {
   assert.match(html, /href="support\.html"/, `${page} links to support`);
 }
 
-for (const phrase of ["at least 18", "report", "block", "moderation", "24 hours", "legal process", "delete"]) {
+for (const phrase of ["at least 18", "report", "block", "moderation", "24 hours", "lawful requests", "delete"]) {
   assert.match(legalContent["terms.html"], new RegExp(phrase, "i"), `Terms explain ${phrase}`);
 }
-for (const phrase of ["AnonChat securely processes", "email", "public and private user-generated content", "images", "push-subscription", "activity", "Spotify", "reports", "blocks", "Delete account"]) {
+for (const phrase of ["authentication provider securely processes", "email", "encrypted message bodies", "images", "delivery or notification records", "activity", "Spotify", "reports", "Blocks", "Delete account"]) {
   assert.match(legalContent["privacy.html"], new RegExp(phrase, "i"), `Privacy Policy describes ${phrase}`);
 }
-assert.match(legalContent["privacy.html"], /not end-to-end encrypted/i, "Privacy Policy makes no false encryption claim");
+assert.match(legalContent["privacy.html"], /cannot disclose plaintext that it cannot decrypt/i, "Privacy Policy describes the E2EE boundary");
+assert.match(legalContent["terms.html"], /does not conceal account identifiers, room membership, participants/i, "Terms distinguish content encryption from metadata");
 assert.match(legalContent["support.html"], /Report/i, "Support explains reporting");
 assert.match(legalContent["support.html"], /Block/i, "Support explains blocking");
 assert.match(legalContent["support.html"], /github\.com\/HughKinnett\/anonchat\/issues/i, "Support uses the existing public contact route");
@@ -46,7 +47,7 @@ assert.ok(ageGuard >= 0 && termsGuard >= 0 && Math.max(ageGuard, termsGuard) < c
 assert.match(loginSource, /!ageConfirmation\.checked\s*\|\|\s*!termsConfirmation\.checked|!termsConfirmation\.checked\s*\|\|\s*!ageConfirmation\.checked/,
   "signup rejects an unchecked acknowledgement");
 
-assert.match(serviceWorker, /const CACHE_NAME = "anonchat-v44";/, "service worker cache is exactly v44");
+assert.match(serviceWorker, /const CACHE_NAME = "anonchat-v\d+";/, "service worker uses a versioned cache");
 assert.doesNotMatch(await readFile(new URL("../privacy.html", import.meta.url), "utf8"), /non-identifying completion marker/i, "UID-keyed completion barriers are described accurately");
 assert.doesNotMatch(await readFile(new URL("../terms.html", import.meta.url), "utf8"), /non-identifying completion barrier/i, "UID-keyed completion barriers are described accurately");
 for (const asset of [

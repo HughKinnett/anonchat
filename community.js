@@ -8,6 +8,9 @@ import { recordPageActivity } from "./activity-integration.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { createViewerBlockTracker, isBlockedActor } from "./viewer-block-policy.mjs";
 import { createSessionGeneration } from "./session-generation-policy.mjs";
+import { decryptPayload, derivePairwiseKey, encryptPayload } from "./e2ee-crypto.mjs";
+import { clearE2eeIdentity, ensureE2eeIdentity, getE2eePublicIdentity } from "./e2ee-identity.js";
+import { clearRoomKeyCache, createRoomKeyEnvelope, grantRoomKey, loadRoomKey, roomKeyEnvelopeId } from "./e2ee-room-keys.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   addDoc, collection, deleteDoc, deleteField, doc, documentId, getDoc, limit, onSnapshot, orderBy, query,
@@ -19,7 +22,7 @@ const state = {
   user: null, profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
   roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
   messages: [], reveals: [], preferences: null, activeRoom: "",
-  blockTracker: createViewerBlockTracker(), viewerBlocks: null, moderation: null
+  blockTracker: createViewerBlockTracker(), viewerBlocks: null, moderation: null, e2eeIdentity: null
 };
 state.viewerBlocks = state.blockTracker.current();
 const listeners = [];
@@ -28,8 +31,17 @@ let activeCommunitySession = 0;
 let clearRoomExpiryTimer = () => {};
 let clearDirectMessageExpiryTimer = () => {};
 let stopRoomMessageListener = () => {};
+let stopRoomKeyListeners = () => {};
+let activeTemporaryRoomKey = null;
+const decryptedRoomMessages = new Map();
+const decryptingRoomMessages = new Set();
+const migratingRoomMessages = new Set();
 let pendingRoomImage = "";
 let pendingDirectImage = "";
+const directKeyCache = new Map();
+const decryptedDirectMessages = new Map();
+const decryptingDirectMessages = new Set();
+const migratingDirectMessages = new Set();
 const revealedPrivatePhotos = new Map();
 const directMessageListeners = new Map();
 const directMessageBuckets = new Map();
@@ -104,12 +116,62 @@ const userName = (uid) => !isBlockedUid(uid)
   ? state.users.find((entry) => entry.id === uid)?.data().username || "anonymous"
   : "anonymous";
 const now = () => Date.now();
+const directKeyFor = async otherUid => {
+  if (directKeyCache.has(otherUid)) return directKeyCache.get(otherUid);
+  const identity = state.e2eeIdentity || await ensureE2eeIdentity(db, state.user);
+  state.e2eeIdentity = identity;
+  const other = await getE2eePublicIdentity(db, otherUid);
+  if (!other?.publicJwk) throw new Error("That user has not enabled encrypted chats yet.");
+  const participantIds = [state.user.uid, otherUid].sort();
+  const key = await derivePairwiseKey(identity.privateKey, other.publicJwk, `direct:${participantIds.join(":")}`);
+  directKeyCache.set(otherUid, key);
+  return key;
+};
+
+const directMessageContext = message => `direct-message:${message.ref.parent.parent.id}:${message.id}`;
+const decryptDirectMessage = async (message, otherUid) => {
+  if (!message.data().encrypted || decryptedDirectMessages.has(message.id) || decryptingDirectMessages.has(message.id)) return;
+  decryptingDirectMessages.add(message.id);
+  try {
+    const key = await directKeyFor(otherUid);
+    const body = await decryptPayload(key, message.data().bodyCipher, `${directMessageContext(message)}:body`);
+    const payload = { text: String(body.text || "") };
+    if (message.data().senderId === state.user.uid && message.data().imageCipher) {
+      const image = await decryptPayload(key, message.data().imageCipher, `${directMessageContext(message)}:image`);
+      payload.imageData = image.imageData || "";
+    }
+    decryptedDirectMessages.set(message.id, payload);
+  } catch (error) {
+    decryptedDirectMessages.set(message.id, { error: error?.message || "This encrypted message could not be opened." });
+  } finally {
+    decryptingDirectMessages.delete(message.id);
+    renderDirectMessages();
+  }
+};
+const migrateDirectMessage = async (message, otherUid) => {
+  const data = message.data();
+  if (data.encrypted || migratingDirectMessages.has(message.id)) return;
+  migratingDirectMessages.add(message.id);
+  try {
+    const key = await directKeyFor(otherUid);
+    const context = directMessageContext(message);
+    const bodyCipher = await encryptPayload(key, { text: String(data.text || "") }, `${context}:body`);
+    const imageCipher = data.imageData ? await encryptPayload(key, { imageData: data.imageData }, `${context}:image`) : null;
+    await updateDoc(message.ref, { encrypted: true, cipherVersion: 1, bodyCipher, ...(imageCipher ? { imageCipher } : {}), text: deleteField(), imageData: deleteField() });
+  } catch { /* Retry after both participants have encrypted-chat identities. */ }
+  finally { migratingDirectMessages.delete(message.id); }
+};
 const isBlockedUid = (uid) => isBlockedActor(uid, state.viewerBlocks);
 const activeRoom = (roomId = state.activeRoom) => state.rooms.find((room) => room.id === roomId);
 const roomIsAvailable = (room) => room && isRoomActive(room.data(), now()) && !isBlockedUid(room.data().ownerId);
 const closeActiveRoom = (message) => {
   stopRoomMessageListener();
   stopRoomMessageListener = () => {};
+  stopRoomKeyListeners();
+  stopRoomKeyListeners = () => {};
+  activeTemporaryRoomKey = null;
+  decryptedRoomMessages.clear();
+  decryptingRoomMessages.clear();
   state.roomMessages = [];
   state.activeRoom = "";
   clearRoomExpiryTimer();
@@ -147,12 +209,34 @@ const safeToSend = (text) => !state.preferences?.contextCheck || !aggressive.tes
   window.confirm("This may come across as aggressive. Do you want to send it as written?");
 const consumeViewedPhoto = (message) => {
   const data = message.data();
-  if (!data.imageData || data.senderId === state.user?.uid) return;
+  if ((!data.imageData && !data.imageCipher) || data.senderId === state.user?.uid) return;
   updateDoc(message.ref, {
-    imageData: deleteField(),
+    ...(data.imageCipher ? { imageCipher: deleteField() } : { imageData: deleteField() }),
     photoViewedBy: state.user.uid,
     photoViewedAt: serverTimestamp()
   }).catch(() => setStatus("That view-once photo has already disappeared."));
+};
+const decryptTemporaryRoomMessage = async message => {
+  if (!message.data().encrypted || decryptedRoomMessages.has(message.id) || decryptingRoomMessages.has(message.id) || !activeTemporaryRoomKey) return;
+  decryptingRoomMessages.add(message.id);
+  try {
+    const body = await decryptPayload(activeTemporaryRoomKey, message.data().bodyCipher, `temporary-room-message:${message.data().roomId}:${message.id}:body`);
+    const payload = { text: String(body.text || "") };
+    if (message.data().imageCipher) payload.imageData = (await decryptPayload(activeTemporaryRoomKey, message.data().imageCipher, `temporary-room-message:${message.data().roomId}:${message.id}:image`)).imageData || "";
+    decryptedRoomMessages.set(message.id, payload);
+  } catch { decryptedRoomMessages.set(message.id, { error: "This encrypted message could not be opened." }); }
+  finally { decryptingRoomMessages.delete(message.id); renderRoomMessages(); }
+};
+const migrateTemporaryRoomMessage = async message => {
+  const data = message.data();
+  if (data.encrypted || migratingRoomMessages.has(message.id) || !activeTemporaryRoomKey) return;
+  migratingRoomMessages.add(message.id);
+  try {
+    const bodyCipher = await encryptPayload(activeTemporaryRoomKey, { text: String(data.text || "") }, `temporary-room-message:${data.roomId}:${message.id}:body`);
+    const imageCipher = data.imageData ? await encryptPayload(activeTemporaryRoomKey, { imageData: data.imageData }, `temporary-room-message:${data.roomId}:${message.id}:image`) : null;
+    await updateDoc(message.ref, { encrypted: true, cipherVersion: 1, bodyCipher, ...(imageCipher ? { imageCipher } : {}), text: deleteField(), imageData: deleteField() });
+  } catch { /* Another room participant can retry the one-time migration. */ }
+  finally { migratingRoomMessages.delete(message.id); }
 };
 
 
@@ -408,11 +492,13 @@ const renderRooms = () => {
 };
 
 const openRoom = async (id, name) => {
+  let roomOwnerId = "";
   try {
     const currentRoom = await getDoc(doc(db, "rooms", id));
     if (!currentRoom.exists() || !isRoomActive(currentRoom.data(), now())) throw new Error("room-unavailable");
     if (isBlockedUid(currentRoom.data().ownerId)) throw new Error("room-blocked");
     state.rooms = state.rooms.map((room) => room.id === id ? currentRoom : room);
+    roomOwnerId = currentRoom.data().ownerId;
     await setDoc(doc(db, "roomMembers", `${id}_${state.user.uid}`), {
       roomId: id, uid: state.user.uid, joinedAt: serverTimestamp()
     }, { merge: true });
@@ -422,6 +508,23 @@ const openRoom = async (id, name) => {
   }
   state.activeRoom = id;
   state.roomMessages = [];
+  decryptedRoomMessages.clear();
+  activeTemporaryRoomKey = await loadRoomKey(db, state.e2eeIdentity, "temporary", id);
+  if (!activeTemporaryRoomKey && roomOwnerId === state.user.uid) {
+    const created = await createRoomKeyEnvelope(db, state.e2eeIdentity, "temporary", id);
+    activeTemporaryRoomKey = created.roomKey;
+    await setDoc(doc(db, "e2eeRoomKeyEnvelopes", created.id), created.data);
+  }
+  const keyListeners = [];
+  keyListeners.push(onSnapshot(doc(db, "e2eeRoomKeyEnvelopes", roomKeyEnvelopeId("temporary", id, state.user.uid)), async snapshot => {
+    if (!snapshot.exists() || state.activeRoom !== id || activeTemporaryRoomKey) return;
+    activeTemporaryRoomKey = await loadRoomKey(db, state.e2eeIdentity, "temporary", id);
+    renderRoomMessages();
+  }));
+  if (roomOwnerId === state.user.uid) keyListeners.push(onSnapshot(query(collection(db, "roomMembers"), where("roomId", "==", id), limit(100)), snapshot => {
+    if (state.activeRoom === id && activeTemporaryRoomKey) void Promise.allSettled(snapshot.docs.map(member => grantRoomKey(db, state.e2eeIdentity, "temporary", id, member.data().uid)));
+  }));
+  stopRoomKeyListeners = () => keyListeners.splice(0).forEach(unsubscribe => unsubscribe());
   listenToRoomMessages(id);
   $("room-title").textContent = name;
   $("room-alias").textContent = `You are ${aliasFor(id)}`;
@@ -456,21 +559,24 @@ const renderRoomMessages = () => {
     && message.data().expiresAt?.toMillis?.() > now()
     && !isBlockedUid(message.data().senderId)
   ).sort(compareOldestFirst);
+  messages.forEach(message => message.data().encrypted ? void decryptTemporaryRoomMessage(message) : void migrateTemporaryRoomMessage(message));
   $("room-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
+    const decrypted = data.encrypted ? decryptedRoomMessages.get(message.id) : data;
     const item = document.createElement("div");
     item.className = `message temporary-chat-bubble${data.senderId === state.user.uid ? " mine" : ""}`;
     const sender = document.createElement("small");
     sender.textContent = data.tempName;
     const text = document.createElement("span");
-    text.textContent = data.text;
+    text.textContent = decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : "");
     item.append(sender);
-    if (data.text) item.append(text);
-    if (data.imageData) {
+    if (data.text || data.bodyCipher) item.append(text);
+    const roomImage = decrypted?.imageData || data.imageData;
+    if (roomImage) {
       const photo = document.createElement("img");
       photo.className = "message-photo";
       photo.loading = "lazy"; photo.decoding = "async";
-      photo.src = data.imageData;
+      photo.src = roomImage;
       photo.alt = "Photo sent in this temporary room";
       item.append(photo);
     }
@@ -525,14 +631,19 @@ const reportRoomControl = (room) => {
 $("room-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    const made = await addDoc(collection(db, "rooms"), {
+    const made = doc(collection(db, "rooms"));
+    const key = await createRoomKeyEnvelope(db, state.e2eeIdentity, "temporary", made.id);
+    const batch = writeBatch(db);
+    batch.set(made, {
       name: $("room-name").value.trim(), topic: $("room-topic").value.trim(),
       ownerId: state.user.uid, expiresAt: Timestamp.fromMillis(roomExpiry(now())),
-      moderationState: "visible", createdAt: serverTimestamp()
+      moderationState: "visible", encrypted: true, cipherVersion: 1, createdAt: serverTimestamp()
     });
-    await setDoc(doc(db, "roomMembers", `${made.id}_${state.user.uid}`), {
+    batch.set(doc(db, "roomMembers", `${made.id}_${state.user.uid}`), {
       roomId: made.id, uid: state.user.uid, joinedAt: serverTimestamp()
     });
+    batch.set(doc(db, "e2eeRoomKeyEnvelopes", key.id), key.data);
+    await batch.commit();
     event.target.reset();
     setStatus("Temporary room started.");
   } catch {
@@ -555,9 +666,14 @@ $("room-message-form").addEventListener("submit", async (event) => {
     return;
   }
   try {
-    await addDoc(collection(db, "roomMessages"), {
-      roomId: state.activeRoom, senderId: state.user.uid, tempName: aliasFor(state.activeRoom), text,
-      ...(pendingRoomImage ? { imageData: pendingRoomImage } : {}),
+    if (!activeTemporaryRoomKey) throw new Error("room-key-unavailable");
+    const messageRef = doc(collection(db, "roomMessages"));
+    const bodyCipher = await encryptPayload(activeTemporaryRoomKey, { text }, `temporary-room-message:${state.activeRoom}:${messageRef.id}:body`);
+    const imageCipher = pendingRoomImage ? await encryptPayload(activeTemporaryRoomKey, { imageData: pendingRoomImage }, `temporary-room-message:${state.activeRoom}:${messageRef.id}:image`) : null;
+    await setDoc(messageRef, {
+      roomId: state.activeRoom, senderId: state.user.uid, tempName: aliasFor(state.activeRoom),
+      encrypted: true, cipherVersion: 1, bodyCipher,
+      ...(imageCipher ? { imageCipher } : {}),
       expiresAt: room.data().expiresAt, moderationState: "visible", createdAt: serverTimestamp()
     });
     event.target.reset();
@@ -774,14 +890,16 @@ const renderDirectMessages = () => {
     && !isBlockedUid(message.data().senderId)
     && (!message.data().expiresAt?.toMillis || message.data().expiresAt.toMillis() > currentTime)
   ).sort(compareOldestFirst);
+  messages.forEach(message => message.data().encrypted ? void decryptDirectMessage(message, other) : void migrateDirectMessage(message, other));
   $("direct-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
+    const decrypted = data.encrypted ? decryptedDirectMessages.get(message.id) : data;
     const item = document.createElement("div");
     item.className = `message private-chat-bubble${data.senderId === state.user.uid ? " mine" : ""}`;
     const sender = document.createElement("small");
     sender.textContent = `@${userName(data.senderId)}`;
     const text = document.createElement("span");
-    text.textContent = data.text;
+    text.textContent = decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : "");
     const actions = document.createElement("span");
     actions.className = "private-message-actions";
     if (data.expiresAt?.toDate) {
@@ -806,9 +924,9 @@ const renderDirectMessages = () => {
     });
     actions.append(remove);
     item.append(sender);
-    if (data.text) item.append(text);
+    if (data.text || data.bodyCipher) item.append(text);
     const revealedImage = revealedPrivatePhotos.get(message.id);
-    const imageData = data.senderId === state.user.uid ? data.imageData : revealedImage;
+    const imageData = data.senderId === state.user.uid ? (decrypted?.imageData || data.imageData) : revealedImage;
     if (imageData) {
       const photo = document.createElement("img");
       photo.className = "message-photo";
@@ -816,15 +934,22 @@ const renderDirectMessages = () => {
       photo.src = imageData;
       photo.alt = "Photo sent in this private conversation";
       item.append(photo);
-    } else if (data.imageData && data.senderId !== state.user.uid) {
+    } else if ((data.imageData || data.imageCipher) && data.senderId !== state.user.uid) {
       const viewPhoto = document.createElement("button");
       viewPhoto.type = "button";
       viewPhoto.className = "view-once-photo-button";
       viewPhoto.textContent = "View photo once";
-      viewPhoto.addEventListener("click", () => {
-        revealedPrivatePhotos.set(message.id, data.imageData);
-        renderDirectMessages();
-        void consumeViewedPhoto(message);
+      viewPhoto.addEventListener("click", async () => {
+        try {
+          let image = data.imageData;
+          if (data.imageCipher) {
+            const key = await directKeyFor(other);
+            image = (await decryptPayload(key, data.imageCipher, `${directMessageContext(message)}:image`)).imageData;
+          }
+          revealedPrivatePhotos.set(message.id, image);
+          renderDirectMessages();
+          void consumeViewedPhoto(message);
+        } catch { setStatus("That encrypted photo could not be opened.", true); }
       }, { once: true });
       item.append(viewPhoto);
     } else if (data.photoViewedAt) {
@@ -892,11 +1017,20 @@ $("direct-message-form").addEventListener("submit", async (event) => {
       setStatus("This conversation request is no longer accepted.", true);
       return;
     }
-    await addDoc(collection(db, "messageRequests", acceptedRequest.id, "messages"), {
+    const messageRef = doc(collection(db, "messageRequests", acceptedRequest.id, "messages"));
+    const key = await directKeyFor(other);
+    const context = `direct-message:${acceptedRequest.id}:${messageRef.id}`;
+    const bodyCipher = await encryptPayload(key, { text }, `${context}:body`);
+    const imageCipher = pendingDirectImage
+      ? await encryptPayload(key, { imageData: pendingDirectImage }, `${context}:image`)
+      : null;
+    await setDoc(messageRef, {
       participants: [state.user.uid, other].sort(),
       senderId: state.user.uid,
-      text,
-      ...(pendingDirectImage ? { imageData: pendingDirectImage } : {}),
+      encrypted: true,
+      cipherVersion: 1,
+      bodyCipher,
+      ...(imageCipher ? { imageCipher } : {}),
       createdAt: serverTimestamp(),
       ...(disappear ? { expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) } : {})
     });
@@ -1019,18 +1153,27 @@ $("download-data").addEventListener("click", () => {
 });
 
 const stopCommunityResources = () => {
+  clearE2eeIdentity(state.user?.uid);
+  clearRoomKeyCache();
+  directKeyCache.clear();
+  decryptedDirectMessages.clear();
+  decryptingDirectMessages.clear();
+  migratingDirectMessages.clear();
+  migratingRoomMessages.clear();
   revealedPrivatePhotos.clear();
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
   clearRoomExpiryTimer();
   clearRoomExpiryTimer = () => {};
   stopRoomMessageListener();
   stopRoomMessageListener = () => {};
+  stopRoomKeyListeners();
+  stopRoomKeyListeners = () => {};
   stopDirectMessageListeners();
   state.moderation?.destroy();
   Object.assign(state, {
     profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
     roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
-    messages: [], reveals: [], preferences: null, activeRoom: "", moderation: null
+    messages: [], reveals: [], preferences: null, activeRoom: "", moderation: null, e2eeIdentity: null
   });
   state.blockTracker.reset(state.user?.uid);
   state.viewerBlocks = state.blockTracker.current();
@@ -1129,6 +1272,11 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   state.profile = profile.data();
+  try {
+    state.e2eeIdentity = await ensureE2eeIdentity(db, user);
+  } catch (error) {
+    setStatus(error?.message || "Encrypted chats remain locked.", true);
+  }
   void recordPageActivity({
     surface: "community",
     profile: state.profile,
