@@ -19,9 +19,9 @@ const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
 
 try {
   await seed();
-  const blocker = testEnv.authenticatedContext("blocker").firestore();
-  const blocked = testEnv.authenticatedContext("blocked").firestore();
-  const stranger = testEnv.authenticatedContext("stranger").firestore();
+  const blocker = testEnv.authenticatedContext("blocker", { email_verified: true }).firestore();
+  const blocked = testEnv.authenticatedContext("blocked", { email_verified: true }).firestore();
+  const stranger = testEnv.authenticatedContext("stranger", { email_verified: true }).firestore();
   const unauthenticated = testEnv.unauthenticatedContext().firestore();
   const blockRef = doc(blocker, "blocks", "blocker_blocked");
   await assertSucceeds(setDoc(blockRef, block()));

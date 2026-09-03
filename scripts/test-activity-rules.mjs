@@ -49,16 +49,16 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
 
 try {
   await seed();
-  const userA = testEnv.authenticatedContext("user-a").firestore();
-  const userB = testEnv.authenticatedContext("user-b").firestore();
-  const bannedUser = testEnv.authenticatedContext("banned-user").firestore();
-  const missingActivity = testEnv.authenticatedContext("missing-activity").firestore();
-  const afterThresholdUser = testEnv.authenticatedContext("after-threshold-user").firestore();
-  const futureActivity = testEnv.authenticatedContext("future-activity").firestore();
-  const adminUser = testEnv.authenticatedContext("admin-user").firestore();
-  const bannedAdmin = testEnv.authenticatedContext("banned-admin").firestore();
-  const ordinaryClientDate = testEnv.authenticatedContext("ordinary-client-date").firestore();
-  const adminClientDate = testEnv.authenticatedContext("admin-client-date").firestore();
+  const userA = testEnv.authenticatedContext("user-a", { email_verified: true }).firestore();
+  const userB = testEnv.authenticatedContext("user-b", { email_verified: true }).firestore();
+  const bannedUser = testEnv.authenticatedContext("banned-user", { email_verified: true }).firestore();
+  const missingActivity = testEnv.authenticatedContext("missing-activity", { email_verified: true }).firestore();
+  const afterThresholdUser = testEnv.authenticatedContext("after-threshold-user", { email_verified: true }).firestore();
+  const futureActivity = testEnv.authenticatedContext("future-activity", { email_verified: true }).firestore();
+  const adminUser = testEnv.authenticatedContext("admin-user", { email_verified: true }).firestore();
+  const bannedAdmin = testEnv.authenticatedContext("banned-admin", { email_verified: true }).firestore();
+  const ordinaryClientDate = testEnv.authenticatedContext("ordinary-client-date", { email_verified: true }).firestore();
+  const adminClientDate = testEnv.authenticatedContext("admin-client-date", { email_verified: true }).firestore();
 
   await assertSucceeds(updateDoc(doc(userA, "users", "user-a"), { lastActiveAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(userA, "users", "user-a"), { lastActiveAt: serverTimestamp() }));
@@ -75,7 +75,7 @@ try {
   await assertFails(updateDoc(doc(bannedAdmin, "users", "banned-admin"), { lastActiveAt: serverTimestamp() }));
   await assertSucceeds(updateDoc(doc(adminUser, "users", "user-b"), { banned: true }));
 
-  const newUser = testEnv.authenticatedContext("new-user").firestore();
+  const newUser = testEnv.authenticatedContext("new-user", { email_verified: true }).firestore();
   const createProfile = async (data) => {
     const batch = writeBatch(newUser);
     batch.set(doc(newUser, "usernames", data.username.toLowerCase()), {
@@ -129,7 +129,7 @@ try {
 
   await testEnv.clearFirestore();
   await seed();
-  const malicious = testEnv.authenticatedContext("malicious").firestore();
+  const malicious = testEnv.authenticatedContext("malicious", { email_verified: true }).firestore();
   const protectedProfile = {
     uid: "malicious",
     username: "i_love_you_h",

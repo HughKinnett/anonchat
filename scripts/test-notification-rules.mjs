@@ -21,10 +21,10 @@ await testEnv.withSecurityRulesDisabled(async (context) => {
 
 try {
   const contexts = [
-    testEnv.authenticatedContext("recipient").firestore(),
-    testEnv.authenticatedContext("actor").firestore(),
-    testEnv.authenticatedContext("admin").firestore(),
-    testEnv.authenticatedContext("ordinary").firestore(),
+    testEnv.authenticatedContext("recipient", { email_verified: true }).firestore(),
+    testEnv.authenticatedContext("actor", { email_verified: true }).firestore(),
+    testEnv.authenticatedContext("admin", { email_verified: true }).firestore(),
+    testEnv.authenticatedContext("ordinary", { email_verified: true }).firestore(),
     testEnv.unauthenticatedContext().firestore()
   ];
   for (const db of contexts) {
@@ -37,7 +37,7 @@ try {
     await assertFails(getDocs(collection(db, "notificationEvents")));
     await assertFails(getDocs(collection(db, "notificationDeliveries")));
   }
-  const recipient = testEnv.authenticatedContext("recipient").firestore();
+  const recipient = testEnv.authenticatedContext("recipient", { email_verified: true }).firestore();
   await assertSucceeds(setDoc(doc(recipient, "notificationReads", "recipient_event-1234abcd1234abcd"), {
     uid: "recipient",
     eventId: "event-1234abcd1234abcd",

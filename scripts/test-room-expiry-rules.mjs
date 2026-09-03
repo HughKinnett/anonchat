@@ -22,8 +22,8 @@ const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
 
 try {
   await seed();
-  const owner = testEnv.authenticatedContext("owner").firestore();
-  const member = testEnv.authenticatedContext("member").firestore();
+  const owner = testEnv.authenticatedContext("owner", { email_verified: true }).firestore();
+  const member = testEnv.authenticatedContext("member", { email_verified: true }).firestore();
   await assertSucceeds(setDoc(doc(owner, "rooms", "active-room"), room()));
   const activeRoom = await getDoc(doc(owner, "rooms", "active-room"));
   const activeExpiry = activeRoom.data().expiresAt;

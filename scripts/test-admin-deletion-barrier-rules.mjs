@@ -118,7 +118,7 @@ const barrierStates = (uid) => [
   ["malformed", { status: "malformed" }]
 ];
 try {
-  await seed(); let member = testEnv.authenticatedContext("member").firestore();
+  await seed(); let member = testEnv.authenticatedContext("member", { email_verified: true }).firestore();
   for (const operation of contentWrites(member, false)) await assertSucceeds(operation());
   for (const [, operation] of threePrincipalWrites(member)) await assertSucceeds(operation());
   await assertSucceeds(deleteDoc(doc(member, "messageRequests", "member_other")));
@@ -126,7 +126,7 @@ try {
   await assertSucceeds(rename(member, "member", "member", "member_new"));
   await assertFails(setDoc(doc(member, "usernames", "extra_member"), { uid: "member", username: "extra_member", createdAt: serverTimestamp() }));
 
-  const other = testEnv.authenticatedContext("other").firestore();
+  const other = testEnv.authenticatedContext("other", { email_verified: true }).firestore();
   const postOrphanRace = writeBatch(other);
   postOrphanRace.delete(doc(other, "posts", "other-post"));
   postOrphanRace.set(doc(other, "posts", "other-post", "comments", "orphan"), { uid: "other", username: "other", text: "orphan", createdAt: serverTimestamp() });
@@ -157,7 +157,7 @@ try {
     assert.equal((await getDoc(doc(context.firestore(), "roomMembers", "other-room_other"))).exists(), false);
   });
   await testEnv.clearFirestore(); await seed({ targetJob: queuedJob, targetProfile: queuedProfile });
-  member = testEnv.authenticatedContext("member").firestore(); const target = testEnv.authenticatedContext("target").firestore(); const admin = testEnv.authenticatedContext("admin").firestore();
+  member = testEnv.authenticatedContext("member", { email_verified: true }).firestore(); const target = testEnv.authenticatedContext("target", { email_verified: true }).firestore(); const admin = testEnv.authenticatedContext("admin", { email_verified: true }).firestore();
   for (const operation of contentWrites(member, true)) await assertFails(operation());
   for (const parentPath of [
     ["posts", "other-repost-target"],
@@ -178,7 +178,7 @@ try {
   assert.equal((await assertSucceeds(getDoc(doc(admin, "adminDeletionJobs", "target")))).exists(), true);
   await assertFails(updateDoc(doc(target, "adminDeletionJobs", "target"), { status: "failed" })); await assertFails(deleteDoc(doc(target, "adminDeletionJobs", "target")));
   await assertSucceeds(updateDoc(doc(admin, "users", "target"), { banned: true })); await assertFails(updateDoc(doc(admin, "users", "target"), { banned: false }));
-  await testEnv.clearFirestore(); await seed(); await assertSucceeds(signup(testEnv.authenticatedContext("available_signup").firestore(), "available_signup"));
+  await testEnv.clearFirestore(); await seed(); await assertSucceeds(signup(testEnv.authenticatedContext("available_signup", { email_verified: true }).firestore(), "available_signup"));
   for (const barrier of [
     { value: { ...queuedJob, status: "processing", phase: "profile-barrier" } },
     { value: { ...queuedJob, status: "processing", phase: "auth-deleting" } },
@@ -187,11 +187,11 @@ try {
     { value: { status: "malformed" } }
   ]) {
     await testEnv.clearFirestore(); await seed({ targetJob: barrier.value, targetProfile: null });
-    await assertFails(signup(testEnv.authenticatedContext("target").firestore(), "target"));
+    await assertFails(signup(testEnv.authenticatedContext("target", { email_verified: true }).firestore(), "target"));
   }
   await testEnv.clearFirestore(); await seed({ targetJob: queuedJob, targetProfile: queuedProfile });
   await testEnv.withSecurityRulesDisabled(async (context) => deleteDoc(doc(context.firestore(), "usernames", "target")));
-  await assertFails(setDoc(doc(testEnv.authenticatedContext("target").firestore(), "usernames", "target"), { uid: "target", username: "target", createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(testEnv.authenticatedContext("target", { email_verified: true }).firestore(), "usernames", "target"), { uid: "target", username: "target", createdAt: serverTimestamp() }));
 
   await testEnv.clearFirestore(); await seed();
   await testEnv.withSecurityRulesDisabled(async (context) => Promise.all([
@@ -199,13 +199,13 @@ try {
     deleteDoc(doc(context.firestore(), "users", "circle_owner")),
     deleteDoc(doc(context.firestore(), "users", "room_owner"))
   ]));
-  await assertAllDenied(topLevelOwnerWrites(testEnv.authenticatedContext("member").firestore()));
+  await assertAllDenied(topLevelOwnerWrites(testEnv.authenticatedContext("member", { email_verified: true }).firestore()));
 
   for (const principal of ["post_author", "circle_owner", "message_author", "room_owner"]) {
     for (const [state, barrier] of barrierStates(principal)) {
       await testEnv.clearFirestore();
       await seed({ principalBarriers: [[principal, barrier]] });
-      const actor = testEnv.authenticatedContext("member").firestore();
+      const actor = testEnv.authenticatedContext("member", { email_verified: true }).firestore();
       const relevant = threePrincipalWrites(actor).filter(([name]) => {
         if (principal === "post_author") return name === "original-repost" || name.startsWith("community-");
         if (principal === "circle_owner") return name.startsWith("community-");

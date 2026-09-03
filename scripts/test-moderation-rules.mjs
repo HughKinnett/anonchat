@@ -75,11 +75,11 @@ const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
 
 try {
   await seed();
-  const reporter = testEnv.authenticatedContext("reporter").firestore();
-  const author = testEnv.authenticatedContext("author").firestore();
-  const stranger = testEnv.authenticatedContext("stranger").firestore();
-  const admin = testEnv.authenticatedContext("admin").firestore();
-  const adminTwo = testEnv.authenticatedContext("admin-two").firestore();
+  const reporter = testEnv.authenticatedContext("reporter", { email_verified: true }).firestore();
+  const author = testEnv.authenticatedContext("author", { email_verified: true }).firestore();
+  const stranger = testEnv.authenticatedContext("stranger", { email_verified: true }).firestore();
+  const admin = testEnv.authenticatedContext("admin", { email_verified: true }).firestore();
+  const adminTwo = testEnv.authenticatedContext("admin-two", { email_verified: true }).firestore();
   const unauthenticated = testEnv.unauthenticatedContext().firestore();
   const intakeRef = doc(reporter, "reportIntakes", "reporter_post_post-1");
   const missingReceipt = doc(reporter, "reportReceipts", "reporter", "post", "post-3");
