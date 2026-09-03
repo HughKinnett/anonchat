@@ -73,12 +73,8 @@ const protectPlaylistEmbed = (frame) => {
   const mask = document.createElement("div");
   mask.className = "spotify-playlist-name-mask";
   mask.setAttribute("aria-hidden", "true");
-  const label = document.createElement("span");
-  label.textContent = "Spotify playlist";
-  const note = document.createElement("small");
-  note.textContent = "Playlist name hidden for privacy";
-  mask.append(label, note);
-  host.insertBefore(mask, frame);
+  mask.textContent = "Spotify playlist";
+  host.append(mask);
 };
 
 const decorateAll = () => {
