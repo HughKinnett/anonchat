@@ -4,7 +4,7 @@
 
 **Goal:** Replace routine 12-character E2EE unlock prompts on trusted devices with an exactly four-digit PIN while keeping the actual E2EE private identity protected by strong random cryptographic key material.
 
-**Architecture:** Keep the current Firebase passphrase-protected private identity bundle as the stronger recovery path. Add a device-local trusted-device record that stores the existing private JWK encrypted with a random 256-bit device wrapping key, and store that wrapping key encrypted by a PIN-derived AES-GCM key only in local device storage. Because this PIN-wrapped material never goes to Firebase, a Firebase/database compromise cannot be brute-forced with only 10,000 PIN guesses to recover the E2EE identity; a new or cleared device must recover with the existing stronger passphrase path before creating a fresh local PIN record.
+**Architecture:** Keep existing users' current Firebase passphrase-protected private identity bundle unchanged as their stronger recovery path. Add a device-local trusted-device record: a random 256-bit device wrapping key encrypts the private JWK, while the four-digit PIN derives a local AES-GCM key that wraps only that random device key. New users receive a generated 128-bit recovery code during initial setup; that recovery code, never the four-digit PIN, protects the Firebase recovery bundle and is shown once for the user to save. A new or cleared device must use the stronger recovery credential before creating a fresh local PIN record.
 
 **Tech Stack:** Browser Web Crypto API (ECDH P-256, PBKDF2-SHA256, AES-256-GCM), ES modules, browser localStorage, Firebase Firestore 10.12.5, Node 22 tests, Firebase emulator rules tests.
 
@@ -12,21 +12,22 @@
 
 ## Global Constraints
 
-- The PIN must be exactly four ASCII digits (`0000` through `9999`).
-- The PIN must never be stored in plaintext, logged, sent to Firebase, or included in analytics.
-- The PIN must never directly protect the Firebase-hosted E2EE private identity bundle.
-- The Firebase passphrase-protected bundle remains the stronger recovery path for untrusted/new devices in this first implementation.
-- Existing E2EE public identities, fingerprints, direct-message ciphertext, room-key envelopes, encrypted photos, and temporary-room ciphertext must remain compatible.
-- Successful migration must not rotate the user's P-256 identity.
-- Failed migration must preserve the existing passphrase unlock path.
-- Clearing browser/site storage makes the device untrusted; the app must require recovery and must not silently create a new E2EE identity.
-- Signing out clears decrypted identity key material from memory.
-- Android/PWA behavior must follow the same shared client code path as web.
-- The current `test:e2ee` and Firestore CI suites must continue to pass.
+- The PIN is exactly four ASCII digits (`0000` through `9999`).
+- The PIN is never stored in plaintext, logged, sent to Firebase, or included in analytics.
+- The PIN never directly protects the Firebase-hosted E2EE private identity bundle.
+- Existing users keep their current 12+ character encryption passphrase only as a recovery credential; routine trusted-device unlock uses the PIN.
+- New users get a generated high-entropy recovery code; they are not required to invent a new 12-character password for routine use.
+- Existing E2EE public identities, fingerprints, direct-message ciphertext, room-key envelopes, encrypted photos, and temporary-room ciphertext remain compatible.
+- Successful migration does not rotate the user's P-256 identity.
+- Failed migration preserves the existing recovery unlock path.
+- Clearing browser/site storage makes the device untrusted and requires recovery; the app never silently creates a new E2EE identity.
+- Signing out clears decrypted key material from memory but preserves the encrypted trusted-device record.
+- Android/PWA behavior follows the same shared client code path as web.
+- `npm run test:e2ee`, workflow-policy tests, and the full Firestore CI suite must pass before merge/deploy.
 
 ---
 
-### Task 1: Trusted-device PIN cryptography module
+### Task 1: Trusted-device PIN cryptography
 
 **Files:**
 - Create: `e2ee-pin.mjs`
@@ -35,18 +36,19 @@
 
 **Interfaces:**
 - Produces: `validateChatPin(pin): string`
-- Produces: `createTrustedDeviceRecord(privateJwk, pin, { now? }): Promise<object>`
+- Produces: `createTrustedDeviceRecord(privateJwk, pin, options?): Promise<object>`
 - Produces: `unlockTrustedDeviceRecord(record, pin): Promise<JsonWebKey>`
-- Produces: `trustedDeviceStorageKey(uid): string`
 - Produces: `pinDelayMs(failureCount): number`
 
-- [ ] **Step 1: Write failing PIN validation and crypto tests**
+- [ ] **Step 1: Write failing tests**
 
-Add `scripts/test-e2ee-pin.mjs` with assertions that `validateChatPin("0000")` and `validateChatPin("9876")` pass; values such as `"123"`, `"12345"`, `"12a4"`, `" 1234"`, and `1234` are rejected unless explicitly converted by the caller. Generate a sample extractable P-256 private JWK, call `createTrustedDeviceRecord(privateJwk, "0420")`, verify the serialized record contains neither `"0420"` nor the private JWK `d` value, verify `unlockTrustedDeviceRecord(record, "0420")` returns the same JWK, and verify `"0421"` plus modified ciphertext/IV values fail authentication.
+Test exact four-digit validation, correct-PIN unlock, wrong-PIN failure, tamper failure, and absence of plaintext PIN/private JWK material in serialized records.
 
 ```js
 assert.equal(validateChatPin("0000"), "0000");
-assert.throws(() => validateChatPin("123"), /four digits/i);
+for (const bad of ["123", "12345", "12a4", " 1234", "1234 "]) {
+  assert.throws(() => validateChatPin(bad), /four digits/i);
+}
 const record = await createTrustedDeviceRecord(privateJwk, "0420");
 const serialized = JSON.stringify(record);
 assert.equal(serialized.includes("0420"), false);
@@ -55,51 +57,49 @@ assert.deepEqual(await unlockTrustedDeviceRecord(record, "0420"), privateJwk);
 await assert.rejects(() => unlockTrustedDeviceRecord(record, "0421"), /incorrect/i);
 ```
 
-- [ ] **Step 2: Run the new test and verify it fails**
+- [ ] **Step 2: Run test and confirm RED**
 
 Run: `node scripts/test-e2ee-pin.mjs`
 
-Expected: failure because `e2ee-pin.mjs` does not exist yet.
+Expected: module-not-found failure for `e2ee-pin.mjs`.
 
-- [ ] **Step 3: Implement the local trusted-device cryptography**
+- [ ] **Step 3: Implement PIN record cryptography**
 
-Create `e2ee-pin.mjs`. Generate a random 32-byte device wrapping key, encrypt the private JWK with AES-GCM under that random key, then derive a PIN key with PBKDF2-SHA256 using a fresh 16-byte salt and a high iteration count and AES-GCM-wrap the random device key. Bind both encrypted objects to AnonChat-specific `additionalData` strings and version the record.
+Generate a random 32-byte device wrapping key. Encrypt the private JWK with AES-256-GCM under that random key. Derive a PIN AES-256-GCM key with PBKDF2-SHA256, a fresh 16-byte salt, and 600,000 iterations; use it only to encrypt the random device key. Use fresh 12-byte IVs and distinct `additionalData` strings for the device-key and identity layers.
 
-The record shape must be device-local and contain only base64 ciphertext, salts, IVs, version/algorithm metadata, and timestamps, for example:
+Record shape:
 
 ```js
 {
   version: 1,
   algorithm: "A256GCM+PBKDF2-SHA256",
   pinIterations: 600000,
-  pinSalt: "...",
-  pinIv: "...",
-  wrappedDeviceKey: "...",
-  identityIv: "...",
-  wrappedPrivateJwk: "...",
+  pinSalt: "base64",
+  pinIv: "base64",
+  wrappedDeviceKey: "base64",
+  identityIv: "base64",
+  wrappedPrivateJwk: "base64",
   createdAt: 1710000000000
 }
 ```
 
-Use `validateChatPin` before derivation. Map AES-GCM authentication failures to `new Error("That chat PIN is incorrect.")`. Implement `pinDelayMs` as escalating local delays with a bounded curve such as `0, 1000, 2000, 5000, 10000, 30000` milliseconds for consecutive failures.
+Map authentication failures to `new Error("That chat PIN is incorrect.")`. Implement delays of `0, 1000, 2000, 5000, 10000, 30000` ms for successive failures, capped at 30 seconds.
 
-- [ ] **Step 4: Run the PIN tests and verify they pass**
+- [ ] **Step 4: Run test and confirm GREEN**
 
 Run: `node scripts/test-e2ee-pin.mjs`
 
-Expected: PASS with correct PIN unlock, wrong PIN rejection, tamper rejection, and no plaintext PIN/private-key serialization.
+Expected: PASS.
 
-- [ ] **Step 5: Add the PIN test to the E2EE test script**
+- [ ] **Step 5: Wire into `test:e2ee` and commit**
 
-Update `package.json` so `test:e2ee` begins with `node scripts/test-e2ee-pin.mjs &&` before the existing crypto/integration/rules tests.
+Prepend `node scripts/test-e2ee-pin.mjs &&` to the existing `test:e2ee` script.
 
-- [ ] **Step 6: Commit**
-
-Commit message: `feat: add trusted-device E2EE PIN cryptography`
+Commit: `feat: add trusted-device E2EE PIN cryptography`
 
 ---
 
-### Task 2: Trusted-device storage and in-memory lifecycle
+### Task 2: Trusted-device storage and attempt throttling
 
 **Files:**
 - Create: `e2ee-device-store.mjs`
@@ -107,18 +107,18 @@ Commit message: `feat: add trusted-device E2EE PIN cryptography`
 - Modify: `package.json`
 
 **Interfaces:**
-- Consumes: `trustedDeviceStorageKey(uid)` from `e2ee-pin.mjs`
+- Produces: `trustedDeviceStorageKey(uid): string`
 - Produces: `loadTrustedDeviceRecord(storage, uid): object|null`
 - Produces: `saveTrustedDeviceRecord(storage, uid, record): void`
 - Produces: `removeTrustedDeviceRecord(storage, uid): void`
-- Produces: `createPinAttemptTracker({ now? }): { remainingDelay(uid), recordFailure(uid), recordSuccess(uid), clear(uid) }`
+- Produces: `createPinAttemptTracker(options?): tracker`
+- Produces: `TrustedDeviceStateError`
 
-- [ ] **Step 1: Write failing storage and throttling tests**
+- [ ] **Step 1: Write failing storage tests**
 
-Test that records are scoped by UID, malformed JSON is treated as corrupted/untrusted rather than accepted, removing one user's record does not remove another user's record, and attempt delays increase after failures and reset after success.
+Use an in-memory Storage-compatible fake. Verify UID scoping, malformed JSON rejection, per-user deletion, escalating delays, and reset-after-success.
 
 ```js
-const storage = new MapStorage();
 saveTrustedDeviceRecord(storage, "user-a", { version: 1 });
 assert.deepEqual(loadTrustedDeviceRecord(storage, "user-a"), { version: 1 });
 assert.equal(loadTrustedDeviceRecord(storage, "user-b"), null);
@@ -126,170 +126,189 @@ removeTrustedDeviceRecord(storage, "user-a");
 assert.equal(loadTrustedDeviceRecord(storage, "user-a"), null);
 ```
 
-- [ ] **Step 2: Run the storage test and verify it fails**
+- [ ] **Step 2: Run test and confirm RED**
 
 Run: `node scripts/test-e2ee-device-store.mjs`
 
-Expected: failure because `e2ee-device-store.mjs` does not exist.
+Expected: module-not-found failure.
 
-- [ ] **Step 3: Implement storage helpers and local rate limiting**
+- [ ] **Step 3: Implement storage lifecycle**
 
-Use an injected Storage-compatible object so tests do not require a browser. Parse only object-shaped JSON records. Throw a distinct `TrustedDeviceStateError` for malformed/corrupt records so the identity layer can route to recovery instead of silently creating keys. Keep PIN-attempt counters in memory/session scope rather than Firebase.
+Store one JSON record per AnonChat UID in `localStorage`. Treat malformed or structurally invalid data as `TrustedDeviceStateError`; never reinterpret corruption as “no identity.” Keep PIN failure counters in memory/session scope only.
 
-- [ ] **Step 4: Run storage tests and verify they pass**
+- [ ] **Step 4: Run test and confirm GREEN**
 
 Run: `node scripts/test-e2ee-device-store.mjs`
 
 Expected: PASS.
 
-- [ ] **Step 5: Add the storage test to `test:e2ee`**
+- [ ] **Step 5: Add to `test:e2ee` and commit**
 
-Place `node scripts/test-e2ee-device-store.mjs` immediately after the PIN crypto test.
-
-- [ ] **Step 6: Commit**
-
-Commit message: `feat: add trusted-device E2EE storage lifecycle`
+Commit: `feat: add trusted-device E2EE storage lifecycle`
 
 ---
 
-### Task 3: PIN setup, unlock, migration, and recovery flow
+### Task 3: Recovery credential support without changing existing Firebase bundle compatibility
+
+**Files:**
+- Modify: `e2ee-crypto.mjs`
+- Create: `scripts/test-e2ee-recovery.mjs`
+- Modify: `package.json`
+
+**Interfaces:**
+- Produces: `generateRecoveryCode(): string`
+- Produces: `exportPrivateJwk(privateKey): Promise<JsonWebKey>`
+- Produces: `importPrivateJwk(privateJwk): Promise<CryptoKey>`
+- Keeps: `createIdentityBundle(passphrase)` and `unlockIdentityBundle(privateBundle, passphrase)` backward compatible.
+
+- [ ] **Step 1: Write failing recovery tests**
+
+Assert generated recovery codes have at least 128 bits of random entropy represented as a fixed-format printable code, two generated codes differ, and existing passphrase-protected bundles still unlock unchanged.
+
+```js
+const recovery = generateRecoveryCode();
+assert.match(recovery, /^[A-Z2-7]{4}(?:-[A-Z2-7]{4}){7}$/);
+assert.notEqual(recovery, generateRecoveryCode());
+```
+
+- [ ] **Step 2: Run test and confirm RED**
+
+Run: `node scripts/test-e2ee-recovery.mjs`
+
+Expected: missing exports.
+
+- [ ] **Step 3: Implement recovery helpers**
+
+Generate 20 random bytes and encode as 32 Base32 characters grouped `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`. The generated recovery code may be used as the passphrase input to the existing PBKDF2/AES-GCM private-bundle format, so no Firestore schema/version change is required. Export/import private JWK helpers must preserve P-256 ECDH usage.
+
+- [ ] **Step 4: Run recovery plus existing crypto tests**
+
+Run: `node scripts/test-e2ee-recovery.mjs && node scripts/test-e2ee-crypto.mjs`
+
+Expected: PASS.
+
+- [ ] **Step 5: Add to `test:e2ee` and commit**
+
+Commit: `feat: add E2EE recovery credential helpers`
+
+---
+
+### Task 4: PIN setup, migration, unlock, and recovery UI/state flow
 
 **Files:**
 - Modify: `e2ee-identity.js`
-- Modify: `e2ee-crypto.mjs`
 - Create: `scripts/test-e2ee-pin-integration.mjs`
 - Modify: `package.json`
 
 **Interfaces:**
-- Consumes: PIN crypto/storage interfaces from Tasks 1-2.
-- Produces: trusted-device-first `ensureE2eeIdentity(db, user)` behavior without changing its public return shape.
-- Produces: recovery/migration helper functions that are testable independently from DOM rendering.
+- Consumes Tasks 1-3.
+- Keeps public return shape of `ensureE2eeIdentity(db, user)` unchanged.
+- Produces `clearE2eeSession(uid?)` for in-memory cleanup.
 
-- [ ] **Step 1: Write failing integration-policy tests**
+- [ ] **Step 1: Write failing integration tests**
 
-Cover four paths:
+Cover all state paths:
 
-1. Existing identity + trusted-device record: prompt only for 4-digit PIN and never request the old passphrase.
-2. Existing identity + no local trusted-device record: request the existing encryption passphrase once, unlock the existing Firebase private bundle, create/confirm a new PIN, write only the local trusted-device record, and preserve public JWK/fingerprint.
-3. New identity: create the existing strong Firebase private bundle with a generated high-entropy recovery secret retained only long enough to complete setup, create the local PIN record, verify it, and then expose the identity. If the first-release product decision is to retain the existing user-chosen passphrase as recovery for newly created identities, keep that one-time recovery setup explicit and separate from routine PIN unlock; do not derive the Firebase bundle from four digits.
-4. Corrupted local record: do not create a new identity; route to recovery.
+1. Existing Firebase identity + valid local trusted-device record -> prompt only for PIN.
+2. Existing Firebase identity + no local record -> ask old encryption passphrase once, unlock same identity, create/confirm PIN, verify local record, persist local record; public JWK/fingerprint remain byte-for-byte unchanged.
+3. New identity -> generate recovery code, create Firebase private bundle using that recovery code, show recovery code once with explicit save confirmation, create/confirm PIN, verify local record, then complete setup.
+4. Existing Firebase identity + corrupted local record -> route to recovery; never generate replacement identity.
+5. Failed local-record verification -> old Firebase recovery path remains intact and identity is not rotated.
+6. Correct recovery credential on a new/cleared device -> unlock existing identity and establish a new local PIN record.
 
-The test must explicitly compare the public identity before and after migration and assert equality.
-
-- [ ] **Step 2: Run the new integration test and verify it fails**
+- [ ] **Step 2: Run integration test and confirm RED**
 
 Run: `node scripts/test-e2ee-pin-integration.mjs`
 
-Expected: failure because the current identity flow always prompts for the 12-character passphrase.
+Expected: current implementation always uses the password dialog and lacks trusted-device state.
 
-- [ ] **Step 3: Export private-JWK wrapping helpers from `e2ee-crypto.mjs` without changing existing bundle compatibility**
+- [ ] **Step 3: Replace routine password dialog with explicit PIN and recovery dialogs**
 
-Add a helper to export an unlocked `CryptoKey` private key to JWK for local trusted-device wrapping, and a helper to import that JWK back to an ECDH private `CryptoKey`. Do not alter `createIdentityBundle` or `unlockIdentityBundle` serialization/version semantics used by existing Firebase records.
+Implement:
 
-- [ ] **Step 4: Refactor `e2ee-identity.js` into explicit dialogs and state paths**
+- `chatPinDialog({ setup })`: masked input, `inputMode="numeric"`, `pattern="[0-9]{4}"`, `maxLength=4`; copy is `Create chat PIN`, `Confirm chat PIN`, or `Enter chat PIN`.
+- `recoveryPassphraseDialog()`: only for existing users' old 12+ character recovery password.
+- `recoveryCodeDisplayDialog(code)`: shown once to new users, requiring an explicit `I saved my recovery code` acknowledgement before setup proceeds.
+- `recoveryCodeEntryDialog()`: accepts the fixed Base32 recovery-code format on a new/cleared device.
 
-Replace the single `passwordDialog` with:
+- [ ] **Step 4: Implement trusted-device-first identity state machine**
 
-- `chatPinDialog({ setup })` using `type="password"`, `inputMode="numeric"`, `pattern="[0-9]{4}"`, `maxLength=4`, clear copy (`Create chat PIN`, `Confirm chat PIN`, `Enter chat PIN`).
-- `recoveryPassphraseDialog()` for the old 12-character recovery password only.
+Order inside `ensureE2eeIdentity`:
 
-`ensureE2eeIdentity` must first check the in-memory cache, then Firebase identity consistency, then trusted-device local state. On a valid local record, use only the PIN flow. On an existing Firebase identity with no local record, use recovery passphrase -> existing private key -> PIN setup -> local verification. Only when neither Firebase identity exists should identity creation run.
+1. Return in-memory identity cache if present.
+2. Read public/private Firebase identity documents and reject incomplete pairs.
+3. If Firebase identity exists and a valid local trusted-device record exists, unlock locally with PIN.
+4. If Firebase identity exists but local record is absent/corrupt, require stronger recovery credential, unlock existing Firebase bundle, verify fingerprint, then establish a new PIN record.
+5. Only if no Firebase identity exists, create a new identity with generated recovery code plus local PIN record.
 
-Do not write PIN material to Firestore. Keep the existing Firestore `e2eePublicKeys/{uid}` and `e2eePrivateKeys/{uid}` document shapes unchanged unless a versioned migration is strictly required.
+Never write PIN, local trusted-device fields, or plaintext private JWK to Firestore.
 
-- [ ] **Step 5: Add local wrong-PIN delay behavior**
+- [ ] **Step 5: Implement PIN throttling and neutral errors**
 
-Before accepting another PIN attempt, consult the attempt tracker. After a failed unlock, record the failure and show a neutral message such as `That chat PIN is incorrect. Try again in 5 seconds.` without exposing cryptographic details. On success, reset failures.
+Before retry, consult the attempt tracker. After failure show `That chat PIN is incorrect. Try again in N seconds.`; after success reset failures. Do not reveal partial correctness.
 
-- [ ] **Step 6: Verify migration rollback behavior**
+- [ ] **Step 6: Implement migration rollback rule**
 
-Create the new local record in memory first, verify it can unlock the same private JWK, and only then persist it. If verification fails, do not remove or modify the Firebase passphrase-protected bundle and do not populate the identity cache with a new identity.
+For existing-user migration, build and decrypt-test the new local record before saving it. If verification fails, leave Firebase documents untouched and do not cache a replacement identity.
 
-- [ ] **Step 7: Run integration tests**
+- [ ] **Step 7: Implement session clearing**
+
+`clearE2eeSession(uid?)` clears `identityCache` and in-memory PIN-attempt state only. Ordinary sign-out must not delete the persisted trusted-device record.
+
+- [ ] **Step 8: Run integration and compatibility tests**
 
 Run: `node scripts/test-e2ee-pin-integration.mjs && node scripts/test-e2ee-crypto.mjs && node scripts/test-e2ee-integration-policy.mjs`
 
-Expected: all PASS and existing crypto bundle compatibility remains intact.
+Expected: PASS.
 
-- [ ] **Step 8: Add the integration test to `test:e2ee` and commit**
+- [ ] **Step 9: Add integration test to `test:e2ee` and commit**
 
-Commit message: `feat: add secure four-digit E2EE PIN unlock flow`
+Commit: `feat: add secure four-digit E2EE PIN unlock flow`
 
 ---
 
-### Task 4: Sign-out clearing and no-silent-reset guarantees
+### Task 5: Session, Firebase-boundary, and full release verification
 
 **Files:**
-- Modify: `e2ee-identity.js`
-- Modify: authentication/logout integration files that already call `clearE2eeIdentity`
 - Create: `scripts/test-e2ee-pin-session.mjs`
-- Modify: `package.json`
+- Modify only if a failing regression requires it: `firestore.rules`, `scripts/test-e2ee-rules.mjs`, `scripts/test-e2ee-integration-policy.mjs`, `package.json`, workflow policy files.
 
 **Interfaces:**
-- Consumes: `clearE2eeIdentity(uid)` and device-store interfaces.
-- Produces: explicit `clearE2eeSession(uid)` that clears only decrypted/in-memory key material and PIN attempt state, not the persisted trusted-device record.
+- Consumes Tasks 1-4.
+- Produces release-ready PIN behavior with unchanged server-readable security boundaries.
 
-- [ ] **Step 1: Write failing session tests**
+- [ ] **Step 1: Write session/boundary regression tests**
 
-Verify sign-out removes cached decrypted identities and attempt state but leaves the encrypted trusted-device record intact. Verify simulated local-storage clearing followed by `ensureE2eeIdentity` enters recovery instead of creating a replacement identity.
+Verify sign-out clears decrypted keys but leaves local encrypted trusted-device state. Verify clearing local storage forces recovery. Verify Firestore payload builders contain no `pin`, `wrappedDeviceKey`, `wrappedPrivateJwk`, or plaintext private JWK fields.
 
-- [ ] **Step 2: Run the session test and verify it fails**
+- [ ] **Step 2: Run session regression test**
 
 Run: `node scripts/test-e2ee-pin-session.mjs`
 
-Expected: failure until session clearing is explicit.
+Expected: PASS after Task 4 session wiring.
 
-- [ ] **Step 3: Implement `clearE2eeSession` and wire existing sign-out paths**
-
-Keep `clearE2eeIdentity` backward compatible if existing callers depend on it, or make it delegate to `clearE2eeSession`. Never call `removeTrustedDeviceRecord` during ordinary sign-out.
-
-- [ ] **Step 4: Run session and existing auth tests**
-
-Run: `node scripts/test-e2ee-pin-session.mjs && npm run test:auth-activity && npm run test:login`
-
-Expected: PASS.
-
-- [ ] **Step 5: Add session test to `test:e2ee` and commit**
-
-Commit message: `test: protect E2EE PIN session and recovery behavior`
-
----
-
-### Task 5: Full E2EE, Firebase, and deployment verification
-
-**Files:**
-- Modify if required by failures only: `firestore.rules`, `scripts/test-e2ee-rules.mjs`, `scripts/test-e2ee-integration-policy.mjs`, `package.json`, workflow policy files.
-
-**Interfaces:**
-- Consumes: all previous tasks.
-- Produces: release-ready four-digit PIN feature with no change to server-readable data boundaries.
-
-- [ ] **Step 1: Run the complete E2EE suite**
+- [ ] **Step 3: Run complete E2EE suite**
 
 Run: `npm run test:e2ee`
 
-Expected: PASS for PIN crypto, device storage, PIN integration, session behavior, existing E2EE crypto, integration policy, and Firestore rules.
+Expected: PASS for new PIN/recovery tests plus existing crypto, integration-policy, and Firestore-rule tests.
 
-- [ ] **Step 2: Inspect failures for any Firebase serialization leak**
-
-If a test reveals PIN/private-key material in a Firestore payload, fix the client write boundary and add an exact regression assertion before proceeding. Do not relax the security assertion.
-
-- [ ] **Step 3: Run workflow policy and full Firestore CI**
+- [ ] **Step 4: Run workflow and full Firestore CI gates**
 
 Run: `npm run test:workflow-policy`
 
-Then run: `npm run test:firestore-ci`
+Then: `npm run test:firestore-ci`
 
 Expected: PASS.
 
-- [ ] **Step 4: Verify PR diff preserves existing identity formats**
+- [ ] **Step 5: Review diff for cryptographic compatibility and leakage**
 
-Review the diff and confirm the existing Firebase `privateBundle` algorithm/version remains readable by `unlockIdentityBundle`, and that PIN/local trusted-device fields do not appear in Firestore rules or server migration code.
+Confirm existing Firebase `privateBundle` version/algorithm remains readable by `unlockIdentityBundle`; existing users' public identity/fingerprint does not change during PIN migration; local PIN record fields never enter Firestore/server migration code.
 
-- [ ] **Step 5: Commit any verification-only fixes**
+- [ ] **Step 6: Request code review and address findings**
 
-Commit message: `test: verify secure E2EE PIN rollout`
+Use the repository's normal review flow; rerun the affected focused test after each fix, then rerun `npm run test:e2ee`.
 
-- [ ] **Step 6: Request code review, merge only after green CI, and deploy through the existing main-branch Firebase workflow**
+- [ ] **Step 7: Merge only with green CI and deploy**
 
-After CI passes, merge the PR into `main`. Confirm the Firebase production deployment completes successfully before calling the feature deployed.
+Merge into `main` only after CI passes. Confirm the existing Firebase production workflow completes successfully before calling the PIN feature deployed.
