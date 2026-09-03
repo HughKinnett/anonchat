@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d12">
   <meta name="description" content="View an AnonChat user's pseudonymous profile and posts.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="AnonChat">
+  <meta property="og:title" content="AnonChat — Pseudonymous posts and profiles">
+  <meta property="og:description" content="See pseudonymous posts and conversations on AnonChat.">
+  <meta property="og:image" content="https://anonchatlogin.web.app/anonchat-anonymous.png">
+  <meta property="og:image:alt" content="AnonChat anonymous social sharing artwork">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://anonchatlogin.web.app/anonchat-anonymous.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="AnonChat">
   <meta name="format-detection" content="telephone=no">
@@ -49,7 +57,7 @@
       <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="profile-spotify-title">Playing on Spotify</h2></div></div>
       <div id="profile-spotify-player"></div>
     </section>
-    <section id="profile-playlist-card" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-playlist-title" hidden><div class="spotify-card-heading"><div><p class="eyebrow">Premium playlist</p><h2 id="profile-playlist-title">Playing on Spotify</h2></div></div><div id="profile-playlist-player"></div></section>
+    <section id="profile-playlist-card" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-playlist-title" hidden><div class="spotify-card-heading"><div><p class="eyebrow">Premium playlist</p><h2 id="profile-playlist-title">Spotify playlist</h2></div></div><div id="profile-playlist-player"></div></section>
 
     <section class="profile-posts-section" aria-labelledby="profile-posts-title">
       <div class="feed-header">
@@ -63,6 +71,7 @@
   </main>
 
   <script type="module" src="profile.js"></script>
+  <script type="module" src="post-sharing.js"></script>
   <script src="nav-menu.js" defer></script>
   <script type="module" src="premium-menu.js"></script>
   <script type="module" src="online-followers.js"></script>
