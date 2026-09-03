@@ -1,6 +1,16 @@
 import { buildPostShareUrl, parseSharedPostKey, stablePostKey } from "./social-sharing-policy.mjs";
 
 const SHARE_SELECTOR = ".feed-item";
+const ensureStyles = () => {
+  if (document.getElementById("sharing-privacy-styles")) return;
+  const link = document.createElement("link");
+  link.id = "sharing-privacy-styles";
+  link.rel = "stylesheet";
+  link.href = "sharing-privacy.css";
+  document.head.append(link);
+};
+ensureStyles();
+
 const shareTextFor = (item) => {
   const copy = [...item.querySelectorAll("p")]
     .map((node) => node.textContent?.trim())
@@ -54,7 +64,27 @@ const decoratePost = (item) => {
   actions.append(button);
 };
 
-const decorateAll = () => document.querySelectorAll(SHARE_SELECTOR).forEach(decoratePost);
+const protectPlaylistEmbed = (frame) => {
+  if (frame.dataset.playlistPrivacyReady === "true") return;
+  frame.dataset.playlistPrivacyReady = "true";
+  const host = frame.parentElement;
+  if (!host) return;
+  host.classList.add("spotify-playlist-private");
+  const mask = document.createElement("div");
+  mask.className = "spotify-playlist-name-mask";
+  mask.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.textContent = "Spotify playlist";
+  const note = document.createElement("small");
+  note.textContent = "Playlist name hidden for privacy";
+  mask.append(label, note);
+  host.insertBefore(mask, frame);
+};
+
+const decorateAll = () => {
+  document.querySelectorAll(SHARE_SELECTOR).forEach(decoratePost);
+  document.querySelectorAll('iframe[src*="open.spotify.com/embed/playlist/"]').forEach(protectPlaylistEmbed);
+};
 const observer = new MutationObserver(decorateAll);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 decorateAll();
