@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const profileHtml = await readFile(new URL("../profile.html", import.meta.url), "utf8");
-let privacyModule = "";
-try {
-  privacyModule = await readFile(new URL("../spotify-playlist-privacy.js", import.meta.url), "utf8");
-} catch {}
+const sharing = await readFile(new URL("../post-sharing.js", import.meta.url), "utf8");
+const css = await readFile(new URL("../sharing-privacy.css", import.meta.url), "utf8");
 
-assert.match(profileHtml, /spotify-playlist-privacy\.js/, "profile page must load the Spotify playlist privacy layer");
-assert.match(privacyModule, /spotify-playlist-embed-wrap/, "privacy layer must wrap the Spotify playlist embed");
-assert.match(privacyModule, /spotify-playlist-title-mask/, "privacy layer must mask Spotify's playlist-title strip");
-assert.match(privacyModule, /pointerEvents\s*=\s*["']none["']/, "privacy mask must not trap clicks intended for Spotify controls");
+assert.match(sharing, /host\.append\(mask\)/, "privacy mask must overlay the iframe instead of creating a banner above it");
+assert.doesNotMatch(sharing, /insertBefore\(mask,\s*frame\)/, "privacy mask must not displace the Spotify iframe");
+assert.match(css, /\.spotify-playlist-name-mask\{[^}]*top:2[024]px[^}]*left:1(?:3[468]|4[0-9])px[^}]*right:/, "privacy mask must cover Spotify's internal playlist-title region, not the whole embed header");
+assert.match(css, /pointer-events:none/, "privacy mask must not trap clicks intended for Spotify controls");
 
-console.log("Spotify playlist privacy masking policy passed.");
+console.log("Spotify playlist title masking policy passed.");
