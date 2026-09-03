@@ -20,7 +20,13 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const status = document.getElementById("auth-status");
+const signInForm = document.getElementById("sign-in-form");
 let authInProgress = false;
+
+// Signup is paused, but returning-user controls must always remain interactive.
+signInForm.querySelectorAll("input, button").forEach((control) => {
+  control.disabled = false;
+});
 
 try {
   for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
@@ -86,7 +92,7 @@ onAuthStateChanged(auth, async (user) => {
   window.location.replace("timeline.html");
 });
 
-document.getElementById("sign-in-form").addEventListener("submit", async (event) => {
+signInForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   authInProgress = true;
   setStatus("Signing in…");

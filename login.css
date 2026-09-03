@@ -1,3 +1,5 @@
+@import url("controls.css");
+
 :root {
   color-scheme: dark;
   --bg: #0b0d12;
@@ -131,6 +133,8 @@ label {
 }
 
 input {
+  position: relative;
+  z-index: 2;
   width: 100%;
   min-height: 48px;
   padding: 0 14px;
@@ -139,6 +143,9 @@ input {
   outline: none;
   background: rgba(255, 255, 255, 0.07);
   color: white;
+  pointer-events: auto;
+  touch-action: manipulation;
+  user-select: text;
 }
 
 input:focus {
@@ -251,8 +258,6 @@ input:focus {
   font-weight: 750;
   line-height: 1.45;
 }
-@import url("controls.css");
-
 @media (min-width: 900px) {
   .auth-panels { max-width: 980px; grid-template-columns: minmax(420px, 1.2fr) minmax(360px, .8fr); }
   .auth-card { padding: 34px 38px; }
@@ -265,3 +270,14 @@ input:focus {
   color: #c4c7d1;
 }
 .signup-locked-form button:disabled { cursor: not-allowed; opacity: .72; }
+
+#sign-in-form {
+  position: relative;
+  z-index: 3;
+  isolation: isolate;
+}
+
+#sign-in-form button,
+#sign-in-form input {
+  pointer-events: auto !important;
+}

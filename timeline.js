@@ -1557,11 +1557,6 @@ const pauseInteractionChildren = (entry) => {
   entry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
   entry.childUnsubscribes = [];
   entry.childrenStarted = false;
-  entry.reactions = [];
-  entry.comments = [];
-  entry.viewerReaction = undefined;
-  entry.truncated = { reactions: false, comments: false };
-  entry.ready = { reactions: false, comments: false, viewerReaction: false };
 };
 
 const startInteractionChildren = (entry) => {
@@ -1712,7 +1707,6 @@ const syncInteractionListeners = () => {
       }
     );
   });
-  queueInteractionRender();
 };
 
 const refreshViewerBlocks = () => {
