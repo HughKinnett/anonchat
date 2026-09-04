@@ -1,56 +1,37 @@
-name: Repair comments surface
+name: Post-deploy regression smoke tests
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/post-deploy-regressions
+      - main
     paths:
+      - timeline.js
+      - profile.js
+      - spotify-playlist-privacy.js
+      - post-sharing.js
+      - sharing-privacy.css
+      - scripts/test-comment-surface-regression.mjs
+      - scripts/test-interaction-details.mjs
+      - scripts/test-follow-privacy-surface.mjs
+      - scripts/test-spotify-playlist-privacy.mjs
+      - scripts/test-timeline-moderation-ui.mjs
       - .github/workflows/repair-comments-surface.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  repair:
+  smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: fix/post-deploy-regressions
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Update combined interaction contract
-        shell: bash
+      - name: Run post-deploy regression checks
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('scripts/test-timeline-moderation-ui.mjs')
-          text = path.read_text()
-          old = '''assert.match(timeline, /boundedInteractionCount\\(count, reactionsTruncated\\)/,
-            "reaction totals explicitly mark a bounded result as truncated");'''
-          new = '''assert.match(timeline, /const interactionTruncated = reactionsTruncated \\|\\| interactionIsTruncated\\(parent\\.path, "comments"\\);[\\s\\S]{0,200}boundedInteractionCount\\(interactionCount, interactionTruncated\\)/,
-            "combined reaction and comment totals explicitly mark bounded results as truncated");'''
-          if old not in text:
-              raise SystemExit('expected reaction-only truncation assertion not found')
-          path.write_text(text.replace(old, new, 1))
-          PY
-      - name: Run affected tests
-        run: |
-          node scripts/test-timeline-moderation-ui.mjs
+          node scripts/test-comment-surface-regression.mjs
           node scripts/test-interaction-details.mjs
+          node scripts/test-follow-privacy-surface.mjs
           node scripts/test-spotify-playlist-privacy.mjs
-      - name: Commit contract repair
-        shell: bash
-        run: |
-          if git diff --quiet -- scripts/test-timeline-moderation-ui.mjs; then
-            echo "No repair needed"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scripts/test-timeline-moderation-ui.mjs
-          git commit -m "test: expect combined interaction totals"
-          git push origin HEAD:fix/post-deploy-regressions
+          node scripts/test-timeline-moderation-ui.mjs
