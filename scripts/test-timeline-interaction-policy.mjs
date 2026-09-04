@@ -1,38 +1,32 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   boundedInteractionCount,
   interactionParentLoadState,
   interactionParentStateMessage,
-  MAX_INTERACTION_DOCUMENTS,
   MAX_INTERACTION_ITEMS_PER_PARENT,
-  MAX_INTERACTION_LISTENERS,
-  MAX_INTERACTION_PARENTS,
   timelineInteractionPlan
 } from "../timeline-interaction-policy.mjs";
 
 const post = (id, data = {}) => ({ id, ref: { path: `posts/${id}`, parent: { id: "posts" } }, data: () => ({ authorId: id, ...data }) });
-const records = Array.from({ length: MAX_INTERACTION_PARENTS + 20 }, (_, index) => post(`p-${index}`));
+const records = Array.from({ length: 60 }, (_, index) => post(`p-${index}`));
 const oldRepost = post("new-repost", {
   type: "repost", sourceCollection: "posts", originalPostId: "old-original",
   originalAuthorId: "old-author", authorId: "sharer"
 });
 const plan = timelineInteractionPlan([oldRepost, ...records]);
-assert.equal(plan.length, MAX_INTERACTION_PARENTS, "active canonical parents are operationally capped");
-assert.equal(plan[0].path, "posts/old-original", "a visible repost resolves its old canonical parent outside feed windows");
+assert.equal(plan.length, 61, "every canonical post thread is planned so any visible card can load its interactions");
+assert.equal(plan[0].path, "posts/old-original", "a repost resolves to its original canonical interaction thread");
 assert.equal(new Set(plan.map((entry) => entry.path)).size, plan.length, "canonical parents are deduplicated");
-const plannedEntries = new Map(plan.map((entry) => [entry.path, { childrenStarted: false, unavailable: false }]));
-assert.equal(plannedEntries.has(records[39].ref.path), false, "the 41st canonical parent remains permanently outside the capped plan");
-assert.equal(MAX_INTERACTION_ITEMS_PER_PARENT, 50, "each child query has a small hard document cap");
-assert.equal(MAX_INTERACTION_LISTENERS, 160,
-  "the worst case includes bounded parent, child, and viewer-reaction listeners");
-assert.equal(MAX_INTERACTION_DOCUMENTS, 4080,
-  "the total reaction/comment snapshot materialization is bounded");
+assert.equal(plan.some((entry) => entry.path === records[59].ref.path), true,
+  "posts beyond the old 40-thread window remain eligible for lazy interaction loading");
+assert.equal(MAX_INTERACTION_ITEMS_PER_PARENT, 50, "each active child query remains bounded");
 assert.equal(boundedInteractionCount(99, false), "99");
 assert.equal(boundedInteractionCount(50, true), "50 shown",
   "a full bounded window is identified as displayed activity, never an exact total");
-assert.equal(interactionParentLoadState(plannedEntries.get(records[39].ref.path)), "unavailable",
-  "the permanent 41st parent cannot masquerade as an exact zero");
-assert.equal(interactionParentStateMessage("unavailable"), "Interactions not loaded in this view.");
+assert.equal(interactionParentLoadState(undefined), "planned",
+  "a thread that has not started yet is loading, never a permanent unavailable error");
+assert.equal(interactionParentStateMessage("unavailable"), "Interactions could not load. Retry.");
 assert.equal(interactionParentLoadState({ childrenStarted: false, unavailable: false }), "planned");
 assert.equal(interactionParentLoadState({
   childrenStarted: true, unavailable: false,
@@ -44,4 +38,16 @@ assert.equal(interactionParentLoadState({
 }), "bounded");
 assert.equal(interactionParentLoadState({ childrenStarted: true, unavailable: true }), "unavailable");
 
-console.log("Timeline bounded interaction policy passed");
+const timeline = await readFile(new URL("../timeline.js", import.meta.url), "utf8");
+assert.match(
+  timeline,
+  /if \(!document\.hidden[\s\S]*?visibleInteractionPaths\.has\(path\)[\s\S]*?startInteractionChildren\(entry\)/,
+  "Firestore child listeners remain visibility-gated even though every canonical thread is planned"
+);
+assert.match(
+  timeline,
+  /const interactionCount = reactionDocs\.length \+ commentDocs\.length/,
+  "the interaction total combines canonical reactions and comments"
+);
+
+console.log("Timeline canonical interaction loading policy passed");
