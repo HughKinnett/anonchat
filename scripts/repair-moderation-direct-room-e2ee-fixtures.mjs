@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 
+// One-shot repair for stale moderation room-message fixtures.
 const path = new URL("./test-moderation-rules.mjs", import.meta.url);
 const source = await readFile(path, "utf8");
 
