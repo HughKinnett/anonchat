@@ -8,7 +8,7 @@ const testEnv = await initializeTestEnvironment({
 });
 const profile = (uid) => ({ uid, username: uid, banned: false, createdAt: new Date(0), lastActiveAt: new Date(0) });
 const expiresSoon = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
-const room = (overrides = {}) => ({ name: "Expiry room", topic: "topic", ownerId: "owner", createdAt: serverTimestamp(), expiresAt: expiresSoon(), moderationState: "visible", ...overrides });
+const room = (overrides = {}) => ({ name: "Expiry room", topic: "topic", ownerId: "owner", createdAt: serverTimestamp(), expiresAt: expiresSoon(), moderationState: "visible", encrypted: true, cipherVersion: 1, ...overrides });
 const cipher = value => ({ version: 1, algorithm: "A256GCM", iv: "a".repeat(16), ciphertext: Buffer.from(value).toString("base64") });
 const encryptedMessage = (roomId, text, expiresAt) => ({
   roomId,
