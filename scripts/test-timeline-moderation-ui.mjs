@@ -80,8 +80,6 @@ assert.match(timeline, /entry\.generation !== interactionGeneration/,
   "stale interaction callbacks are discarded after a visible-set or auth change");
 assert.match(timeline, /clearInteractionListeners/,
   "interaction listeners have an explicit lifecycle cleanup");
-assert.match(timeline, /MAX_INTERACTION_PARENTS/,
-  "Timeline caps active canonical interaction parents");
 assert.match(timeline, /limit\(MAX_INTERACTION_ITEMS_PER_PARENT\)/,
   "every parent-scoped interaction query has a hard result limit");
 assert.match(timeline, /orderBy\("createdAt", "desc"\),\s*orderBy\(documentId\(\), "desc"\),\s*limit\(MAX_INTERACTION_ITEMS_PER_PARENT\)/,
@@ -94,22 +92,22 @@ assert.match(timeline, /boundedInteractionCount\(\s*commentDocs\.length, interac
   "comment totals explicitly mark a bounded result as truncated");
 assert.match(timeline, /const interactionTruncated = reactionsTruncated \|\| interactionIsTruncated\(parent\.path, "comments"\);[\s\S]{0,200}boundedInteractionCount\(interactionCount, interactionTruncated\)/,
   "combined reaction and comment totals explicitly mark bounded results as truncated");
-assert.match(timeline, /const interactionState = interactionParentLoadState\(interactionSubscriptions\.get\(parent\.path\)\)/,
-  "every rendered parent has an explicit interaction availability state");
+assert.match(timeline, /interactionSummaryLabel\.textContent = `💬 [\s\S]*?\$\{interactionTotal\} interaction/,
+  "every rendered post shows an emoji and numeric interaction count immediately");
 assert.match(timeline, /reactionsBar\.append\([\s\S]{0,500}reactionButton/,
   "reaction controls remain available while their bounded counter is loading");
 assert.match(timeline, /manuallyLoadedInteractionPaths\.add\(parent\.path\);\s*syncInteractionListeners\(\)/,
-  "using a reaction forces its bounded interaction stream to attach");
-assert.match(timeline, /if \(commentsReady\) \{[\s\S]{0,5000}commentForm\.addEventListener\("submit"/,
-  "comment counts and write controls render only after their bounded records load");
-assert.match(timeline, /interactionParentStateMessage\(interactionState\)/,
-  "unplanned, planned, and loading parents render truthful non-count status text");
+  "using a reaction keeps its interaction stream attached");
+assert.match(timeline, /commentsSection = document\.createElement\("details"\);[\s\S]{0,5000}commentForm\.addEventListener\("submit"/,
+  "comments and write controls remain openable even when the current count is zero");
+assert.doesNotMatch(timeline, /Comments · Retry/,
+  "the normal comment surface never collapses into a retry-only state");
 assert.match(timeline, /interactionParentLoadState\(interactionSubscriptions\.get\(record\.ref\.parent\.parent\?\.path\)\) === "bounded"/,
-  "partially loaded and unplanned parent records cannot feed notification state");
+  "partially loaded parent records cannot feed notification state");
 assert.match(timeline, /const loadedReactions = fullyLoadedInteractionRecords\(reactions\);[\s\S]{0,200}const loadedComments = fullyLoadedInteractionRecords\(comments\);/,
   "notification rendering rechecks current per-parent load state and cannot use stale removed entries");
 assert.match(timeline, /onSnapshot\(\s*doc\(db, parent\.collection, parent\.id\)/,
-  "visible reposts resolve canonical parents outside the feed query windows");
+  "reposts resolve original parents outside the feed query windows");
 assert.doesNotMatch(timeline, /const syncInteractionListeners = \(\) => \{\s*clearInteractionListeners\(\)/,
   "unchanged parents are retained rather than torn down on every snapshot");
 assert.match(timeline, /where\("blockedUid", "==", user\.uid\)/,

@@ -24,8 +24,13 @@ for (const [name, source] of [["timeline", timeline], ["profile", profile]]) {
 
 assert.match(
   timeline,
-  /const interactionsReady = reactionsReady && commentsReady;[\s\S]*?if \(interactionsReady\)/,
-  "timeline does not publish a combined interaction total until both reactions and comments are ready"
+  /interactionSummaryLabel\.textContent = `💬 [\s\S]*?\$\{interactionTotal\} interaction/,
+  "timeline publishes an emoji and numeric interaction total immediately, including zero"
+);
+assert.doesNotMatch(
+  timeline,
+  /if \(interactionsReady\)[\s\S]{0,260}?interactionSummaryLabel\.textContent/,
+  "timeline interaction total is not hidden behind a loading gate"
 );
 
 console.log("Cross-surface interaction details passed");

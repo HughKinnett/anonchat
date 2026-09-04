@@ -15,11 +15,11 @@ const oldRepost = post("new-repost", {
   originalAuthorId: "old-author", authorId: "sharer"
 });
 const plan = timelineInteractionPlan([oldRepost, ...records]);
-assert.equal(plan.length, 61, "every canonical post thread is planned so any visible card can load its interactions");
+assert.equal(plan.length, 61, "every canonical post thread is planned so every feed copy can load the same interactions");
 assert.equal(plan[0].path, "posts/old-original", "a repost resolves to its original canonical interaction thread");
 assert.equal(new Set(plan.map((entry) => entry.path)).size, plan.length, "canonical parents are deduplicated");
 assert.equal(plan.some((entry) => entry.path === records[59].ref.path), true,
-  "posts beyond the old 40-thread window remain eligible for lazy interaction loading");
+  "posts beyond the old 40-thread window remain eligible for interaction loading");
 assert.equal(MAX_INTERACTION_ITEMS_PER_PARENT, 50, "each active child query remains bounded");
 assert.equal(boundedInteractionCount(99, false), "99");
 assert.equal(boundedInteractionCount(50, true), "50 shown",
@@ -41,8 +41,33 @@ assert.equal(interactionParentLoadState({ childrenStarted: true, unavailable: tr
 const timeline = await readFile(new URL("../timeline.js", import.meta.url), "utf8");
 assert.match(
   timeline,
-  /if \(!document\.hidden[\s\S]*?visibleInteractionPaths\.has\(path\)[\s\S]*?startInteractionChildren\(entry\)/,
-  "Firestore child listeners remain visibility-gated even though every canonical thread is planned"
+  /desired\.forEach\([\s\S]*?if \(existing\)[\s\S]*?startInteractionChildren\(existing\)[\s\S]*?if \(visibleParent\)[\s\S]*?startInteractionChildren\(entry\)/,
+  "every planned canonical thread starts its interaction listeners instead of depending on viewport observation"
+);
+assert.doesNotMatch(
+  timeline,
+  /visibleInteractionPaths\.has\(path\)[\s\S]{0,220}?startInteractionChildren/,
+  "interaction loading is not blocked by the IntersectionObserver"
+);
+assert.match(
+  timeline,
+  /if \(!snapshot\.exists\(\) \|\| !isBlockedPost\(snapshot, viewerBlocks\)\)/,
+  "a resolved original post is rejected only when it is missing or blocked"
+);
+assert.match(
+  timeline,
+  /interactionSummaryLabel\.textContent = `💬 \$\{activeReactionIcons \? `\$\{activeReactionIcons\} · ` : ""\}\$\{interactionTotal\} interaction/,
+  "interaction summary always shows an emoji and numeric count"
+);
+assert.match(
+  timeline,
+  /commentsSummary\.textContent = `Comments · \$\{boundedInteractionCount\(/,
+  "comments always expose their numeric summary once rendered"
+);
+assert.doesNotMatch(
+  timeline,
+  /Comments · Retry/,
+  "comments stay openable even when there are no comments yet"
 );
 assert.match(
   timeline,
