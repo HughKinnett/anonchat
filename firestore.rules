@@ -657,6 +657,11 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time;
     }
 
+    match /siteSettings/{settingId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
     match /admins/{adminId} {
       allow read: if isAdmin();
       allow write: if false;

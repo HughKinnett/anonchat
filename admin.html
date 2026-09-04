@@ -19,6 +19,24 @@
     <article><strong id="metric-content">0</strong><span>Total Content</span></article>
   </section>
 
+  <section class="command-center" aria-labelledby="attention-heading">
+    <div class="admin-section-heading"><div><p class="admin-kicker">Start here</p><h2 id="attention-heading">Things needing attention</h2><p class="admin-note">The most important items are kept together so you know what needs action first.</p></div></div>
+    <div class="attention-grid" aria-label="Items needing attention">
+      <article class="attention-card"><span>Reports waiting</span><strong id="attention-open-reports">0</strong><small>Open reports that need an admin decision</small></article>
+      <article class="attention-card"><span>Deletion problems</span><strong id="attention-failed-jobs">0</strong><small>Account deletions that need attention</small></article>
+      <article class="attention-card"><span>Service health</span><strong id="attention-service-health">Checking…</strong><small>Moderation and deletion services</small></article>
+    </div>
+    <div class="command-center-grid">
+      <section class="admin-panel command-panel" aria-labelledby="site-health-heading"><div class="admin-panel-heading"><div><h2 id="site-health-heading">Site health</h2><p class="admin-note">Plain-English status for the features people use most.</p></div></div><div id="site-health-list" class="health-list"></div></section>
+      <section class="admin-panel command-panel" aria-labelledby="notification-health-heading"><div class="admin-panel-heading"><div><h2 id="notification-health-heading">Notification health</h2><p class="admin-note">Shows the latest notification-service status when AnonChat has one available.</p></div></div><p id="notification-health" class="status-message">Not checked here</p></section>
+      <section class="admin-panel command-panel" aria-labelledby="feature-switches-heading"><div class="admin-panel-heading"><div><h2 id="feature-switches-heading">Feature switches</h2><p class="admin-note">Turn major parts of AnonChat on or pause them. Everything starts on unless you deliberately change it.</p></div></div><div id="feature-switches" class="feature-switches"></div></section>
+      <section class="admin-panel command-panel" aria-labelledby="announcement-heading"><div class="admin-panel-heading"><div><h2 id="announcement-heading">Site announcement</h2><p class="admin-note">Create or remove the current AnonChat announcement.</p></div></div><label for="announcement-text">Announcement text</label><textarea id="announcement-text" maxlength="500" rows="5" placeholder="Example: Scheduled maintenance tonight at 11 PM."></textarea><label class="announcement-toggle"><input id="announcement-active" type="checkbox"> Announcement is active</label><div class="admin-actions"><button id="clear-announcement" class="admin-action" type="button">Clear announcement</button><button id="save-announcement" class="admin-action" type="button">Save announcement</button></div></section>
+      <section class="admin-panel command-panel" aria-labelledby="emergency-heading"><div class="admin-panel-heading"><div><h2 id="emergency-heading">Emergency controls</h2><p class="admin-note">Quickly pause registrations, posting, or private messaging. Turning one off requires confirmation.</p></div></div><div id="emergency-controls" class="emergency-controls"></div></section>
+      <section class="admin-panel command-panel" aria-labelledby="firebase-usage-heading"><div class="admin-panel-heading"><div><h2 id="firebase-usage-heading">Firebase usage</h2><p class="admin-note">A simple view for keeping AnonChat on the free Firebase plan.</p></div></div><p id="firebase-usage-note" class="usage-note">Loading usage summary…</p></section>
+      <section class="admin-panel command-panel command-panel-wide" aria-labelledby="moderation-history-heading"><div class="admin-panel-heading"><div><h2 id="moderation-history-heading">Moderation history</h2><p class="admin-note">Recent admin moderation actions, who requested them, and whether they completed.</p></div></div><div id="moderation-history" class="admin-list compact-list"></div></section>
+    </div>
+  </section>
+
   <section class="admin-panel" aria-labelledby="manage-users-heading">
     <div class="admin-panel-heading"><div><h2 id="manage-users-heading">Manage Users</h2><p class="admin-note">Search, review, or take action on an account. Passwords, emails, and private messages are not available here.</p></div><label class="sr-only" for="admin-user-search">Search by username</label><input id="admin-user-search" type="search" placeholder="Search by username"></div>
     <div class="admin-filters" aria-label="User status filters"><button data-user-filter="all" aria-pressed="true" type="button">All</button><button data-user-filter="active" aria-pressed="false" type="button">Active</button><button data-user-filter="inactive" aria-pressed="false" type="button">Inactive</button><button data-user-filter="banned" aria-pressed="false" type="button">Banned</button><button data-user-filter="deletion-pending" aria-pressed="false" type="button">Deletion Pending</button><button data-user-filter="activity-not-recorded" aria-pressed="false" type="button">Activity Not Recorded</button></div>
@@ -32,7 +50,7 @@
 
   <section class="admin-panel" aria-labelledby="reported-material-heading">
     <div class="admin-panel-heading">
-      <div><h2 id="reported-material-heading">Reported material</h2><p class="admin-note">Review reports and choose what happens next. Protected evidence, including evidence for restored or expired sources, is retained until an administrator chooses permanent deletion.</p></div>
+      <div><h2 id="reported-material-heading">Reports inbox</h2><p class="admin-note">Review reports and choose what happens next. Protected evidence, including evidence for restored or expired sources, is retained until an administrator chooses permanent deletion.</p></div>
       <select id="admin-report-status" aria-label="Reported material status">
         <option value="open">Needs review</option>
         <option value="restored">Restored history</option>

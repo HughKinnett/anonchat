@@ -7,7 +7,7 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/f
 import { addDoc, collection, collectionGroup, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = id => document.getElementById(id);
-const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], votes: [], jobs: new Map(), moderationCases: [], moderationActions: new Map(), legacyRooms: [], processor: null, moderationProcessor: null, moderationProcessorListenerHealthy: false };
+const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], votes: [], jobs: new Map(), moderationCases: [], moderationActions: new Map(), moderationHistory: [], legacyRooms: [], processor: null, moderationProcessor: null, moderationProcessorListenerHealthy: false, notificationProcessor: null, openReportCount: 0, features: { registrationsEnabled: true, postingEnabled: true, commentsEnabled: true, privateMessagingEnabled: true, temporaryChatsEnabled: true, uploadsEnabled: true, spotifyEmbedsEnabled: true }, announcement: { text: "", active: false } };
 const unsubs = [];
 let adminUid = "", adminUser = null, userFilter = "all", reportFilter = "open", pageActive = true, listenersStarted = false, heartbeatTimer = null;
 let dialogState = { open: false, targetUid: "", submitting: false }, dialogTarget = null, dialogTrigger = null;
@@ -46,6 +46,54 @@ const evictRoomTranscript = (id) => {
   loadedRoomTranscripts.delete(id);
 };
 
+const DEFAULT_FEATURES = Object.freeze({ registrationsEnabled: true, postingEnabled: true, commentsEnabled: true, privateMessagingEnabled: true, temporaryChatsEnabled: true, uploadsEnabled: true, spotifyEmbedsEnabled: true });
+const FEATURE_INFO = [["registrationsEnabled","New registrations","Allow new people to create AnonChat accounts."],["postingEnabled","Posting","Allow users to create new timeline and community posts."],["commentsEnabled","Comments","Allow users to add new comments."],["privateMessagingEnabled","Private messaging","Allow private message requests and messages."],["temporaryChatsEnabled","Temporary chats","Allow temporary rooms and room messages."],["uploadsEnabled","Photo uploads","Allow users to attach new photos."],["spotifyEmbedsEnabled","Spotify embeds","Allow new Spotify playlist embeds."]];
+const EMERGENCY_FEATURES = new Set(["registrationsEnabled", "postingEnabled", "privateMessagingEnabled"]);
+const normalizeFeatures = value => Object.fromEntries(Object.entries(DEFAULT_FEATURES).map(([key, fallback]) => [key, typeof value?.[key] === "boolean" ? value[key] : fallback]));
+const featureInfo = key => FEATURE_INFO.find(([candidate]) => candidate === key) || [key, key, ""];
+const commandStatusChip = (label, tone) => create("span", label, "status-chip " + tone);
+
+async function saveFeatureSetting(key, enabled) {
+  const [, label] = featureInfo(key);
+  if (!enabled && EMERGENCY_FEATURES.has(key) && !window.confirm("This emergency control can stop registration, posting, or messaging for users. Continue?")) { renderCommandCenter(); return; }
+  try {
+    await setDoc(doc(db, "siteSettings", "features"), { ...state.features, [key]: enabled, updatedAt: serverTimestamp(), updatedBy: adminUid }, { merge: true });
+    setStatus(label + (enabled ? " turned on." : " paused."));
+  } catch { setStatus("Could not change " + label.toLowerCase() + ".", true); renderCommandCenter(); }
+}
+
+function renderFeatureSwitches() {
+  const host = $("feature-switches"); if (!host) return;
+  host.replaceChildren(...FEATURE_INFO.map(([key,label,description]) => {
+    const row=create("label",undefined,"feature-switch-row"), text=create("span"), toggle=create("span",undefined,"feature-toggle"), input=document.createElement("input");
+    text.append(create("strong",label),create("small",description)); input.type="checkbox"; input.checked=state.features[key]!==false; input.setAttribute("aria-label",label+(input.checked?" on":" off")); input.onchange=()=>saveFeatureSetting(key,input.checked); toggle.append(commandStatusChip(input.checked?"On":"Paused",input.checked?"good":"bad"),input); row.append(text,toggle); return row;
+  }));
+}
+
+function renderEmergencyControls() {
+  const host=$("emergency-controls"); if(!host) return;
+  host.replaceChildren(...["registrationsEnabled","postingEnabled","privateMessagingEnabled"].map(key=>{ const [,label,description]=featureInfo(key), enabled=state.features[key]!==false, row=create("div",undefined,"emergency-row"), text=create("span"), button=create("button",enabled?"Pause "+label:"Turn "+label+" back on","admin-action "+(enabled?"danger":"restore")); text.append(create("strong",label),create("small",description)); button.type="button"; button.onclick=()=>saveFeatureSetting(key,!enabled); row.append(text,button); return row; }));
+}
+
+function renderModerationHistory() {
+  const host=$("moderation-history"); if(!host) return;
+  const rows=[...state.moderationHistory].sort((a,b)=>(timestampMillis(b.updatedAt??b.requestedAt)??0)-(timestampMillis(a.updatedAt??a.requestedAt)??0)).slice(0,30).map(item=>{ const row=create("article",undefined,"admin-row"), info=create("div"), raw=String(item.action||"moderation action").replaceAll(/([A-Z])/g," $1").replaceAll("_"," ").trim(), action=raw.charAt(0).toUpperCase()+raw.slice(1); info.append(create("strong",action),create("small","Status: "+(item.status||"unknown")),create("small","Requested by: "+(item.requestedBy||"administrator")),create("small",formatDate(item.updatedAt??item.requestedAt))); row.append(info); return row; });
+  host.replaceChildren(...(rows.length?rows:[empty("No recent moderation actions are available.")]));
+}
+
+function renderCommandCenter() {
+  if(!$("site-health-list")) return;
+  const failedJobs=[...state.jobs.values()].filter(job=>job.data?.status==="failed").length, deletionHealth=processorHealth(state.processor), moderationHealth=state.moderationProcessorListenerHealthy?processorHealth(state.moderationProcessor):{kind:"not-running"}, servicesHealthy=deletionHealth.kind==="working"&&moderationHealth.kind==="working";
+  $("attention-open-reports").textContent=String(state.openReportCount||0); $("attention-failed-jobs").textContent=String(failedJobs); $("attention-service-health").textContent=servicesHealthy?"Working":"Needs attention";
+  const healthItems=[["Admin access",true,"Working"],["New registrations",state.features.registrationsEnabled,state.features.registrationsEnabled?"Available":"Paused"],["Posting",state.features.postingEnabled,state.features.postingEnabled?"Available":"Paused"],["Comments",state.features.commentsEnabled,state.features.commentsEnabled?"Available":"Paused"],["Private messaging",state.features.privateMessagingEnabled,state.features.privateMessagingEnabled?"Available":"Paused"],["Temporary chats",state.features.temporaryChatsEnabled,state.features.temporaryChatsEnabled?"Available":"Paused"],["Photo uploads",state.features.uploadsEnabled,state.features.uploadsEnabled?"Available":"Paused"],["Spotify embeds",state.features.spotifyEmbedsEnabled,state.features.spotifyEmbedsEnabled?"Available":"Paused"],["Moderation service",moderationHealth.kind==="working",moderationHealth.kind==="working"?"Working":"Needs attention"],["Account deletion service",deletionHealth.kind==="working",deletionHealth.kind==="working"?"Working":"Needs attention"]];
+  $("site-health-list").replaceChildren(...healthItems.map(([label,good,value])=>healthRow(label,value,good?"good":"bad")));
+  const notificationHealth=state.notificationProcessor?processorHealth(state.notificationProcessor):null; $("notification-health").textContent=!notificationHealth?"Not checked here — no notification-service heartbeat is available to this dashboard.":notificationHealth.kind==="working"?"Working normally. The notification service has checked in recently.":"Needs attention. The notification service is not reporting a healthy status.";
+  $("firebase-usage-note").textContent="AnonChat is staying on the Firebase Spark plan / free plan. This browser dashboard cannot read exact Firebase billing quotas, so it will not guess. Current loaded snapshot: "+state.users.length+" users, "+(state.posts.length+state.communityPosts.length)+" public posts, "+state.comments.length+" comments, and "+state.reactions.length+" reactions.";
+  renderFeatureSwitches(); renderEmergencyControls(); renderModerationHistory(); const text=$("announcement-text"), active=$("announcement-active"); if(document.activeElement!==text) text.value=state.announcement.text||""; active.checked=state.announcement.active===true;
+}
+
+async function saveAnnouncement() { const text=$("announcement-text").value.trim().slice(0,500), active=$("announcement-active").checked; try { await setDoc(doc(db,"siteSettings","announcement"),{text,active:Boolean(active&&text),updatedAt:serverTimestamp(),updatedBy:adminUid},{merge:true}); setStatus(text?"Site announcement saved.":"Announcement cleared."); } catch { setStatus("Could not save the site announcement.",true); } }
+async function clearAnnouncement() { $("announcement-text").value=""; $("announcement-active").checked=false; try { await setDoc(doc(db,"siteSettings","announcement"),{text:"",active:false,updatedAt:serverTimestamp(),updatedBy:adminUid},{merge:true}); setStatus("Site announcement cleared."); } catch { setStatus("Could not clear the site announcement.",true); } }
 function activityByUser() {
   const points = new Map(), add = (uid, amount = 1) => { if (uid) points.set(uid, (points.get(uid) || 0) + amount); };
   state.posts.forEach(entry => add(entry.authorId, 3)); state.communityPosts.forEach(entry => add(entry.authorId, 3));
@@ -75,6 +123,7 @@ function renderMetrics() {
   $("metric-ban-rate").textContent = `${pct(banned, state.users.length)}% of users`;
   $("metric-window-views").textContent = `${state.views.filter(entry => new Date(`${entry.id}T23:59:59`).getTime() >= cutoff).reduce((sum, entry) => sum + (entry.views || 0), 0)} in window`;
   $("last-updated").textContent = `Live data updated ${new Date().toLocaleTimeString()}`;
+  renderCommandCenter();
 }
 
 function renderUserRow(user, scope) {
@@ -389,7 +438,7 @@ function startReportQueue() {
     for (const id of loadedModerationEvidence.keys()) if (!visibleIds.has(id)) evictModerationEvidence(id);
     for (const id of loadedRoomTranscripts.keys()) if (!visibleIds.has(id)) evictRoomTranscript(id);
     reportPageLast = snapshot.docs.at(-1) ?? null;
-    syncReportActionListeners(); renderReports();
+    syncReportActionListeners(); renderReports(); renderCommandCenter();
     $("admin-reports-load-more").hidden = snapshot.size < reportPageSize;
     $("admin-reports-previous").hidden = reportPageCursors.length === 0;
   }, () => setStatus("Could not load the reported-material queue.", true));
@@ -502,7 +551,7 @@ function renderProcessorHealth() {
   $("moderation-processor-health").className = `status-${moderationHealth.kind}`;
 }
 
-function renderAll() { renderMetrics(); renderUsers(); renderReports(); renderContent(); renderAnalytics(); }
+function renderAll() { renderMetrics(); renderUsers(); renderReports(); renderContent(); renderAnalytics(); renderCommandCenter(); }
 function updateDialogConfirmation() { $("delete-account-confirm").disabled = !canConfirmDeletion({ typedUsername: $("delete-account-confirmation").value, targetUsername: dialogTarget?.username, blocked: !dialogState.open || dialogState.submitting || state.jobs.has(dialogTarget?.id) }); }
 function openDeletionDialog(user, trigger) {
   if (state.jobs.has(user.id)) { setStatus("That account is already locked for permanent deletion.", true); return; }
@@ -559,17 +608,22 @@ function startLiveData() {
   observe(query(collection(db, "rooms"), limit(100)), "rooms", renderAnalytics); observe(query(collection(db, "communityVotes"), limit(100)), "votes", () => { renderMetrics(); renderAnalytics(); });
   startReportQueue();
   startLegacyRoomQueue();
+  unsubs.push(onSnapshot(query(collection(db, "moderationCases"), where("status", "in", ["open", "deleteQueued"]), limit(100)), snapshot => { state.openReportCount = snapshot.size; renderCommandCenter(); }, () => { state.openReportCount = 0; renderCommandCenter(); }));
+  unsubs.push(onSnapshot(query(collection(db, "moderationActions"), limit(50)), snapshot => { state.moderationHistory = records(snapshot); renderModerationHistory(); }, () => { state.moderationHistory = []; renderModerationHistory(); }));
+  unsubs.push(onSnapshot(doc(db, "siteSettings", "features"), snapshot => { state.features = normalizeFeatures(snapshot.exists() ? snapshot.data() : {}); renderCommandCenter(); }, () => { state.features = normalizeFeatures({}); setStatus("Could not load feature switches.", true); renderCommandCenter(); }));
+  unsubs.push(onSnapshot(doc(db, "siteSettings", "announcement"), snapshot => { state.announcement = snapshot.exists() ? { text: String(snapshot.data().text || "").slice(0, 500), active: snapshot.data().active === true } : { text: "", active: false }; renderCommandCenter(); }, () => { state.announcement = { text: "", active: false }; setStatus("Could not load the site announcement.", true); renderCommandCenter(); }));
+  unsubs.push(onSnapshot(doc(db, "system", "notificationProcessor"), snapshot => { state.notificationProcessor = snapshot.exists() ? snapshot.data() : null; renderCommandCenter(); }, () => { state.notificationProcessor = null; renderCommandCenter(); }));
   unsubs.push(onSnapshot(query(collection(db, "adminDeletionJobs"), limit(100)), handleJobSnapshot, () => setStatus("Could not load live deletion status.", true)));
   unsubs.push(onSnapshot(doc(db, "system", "deletionProcessor"), snapshot => { state.processor = snapshot.exists() ? snapshot.data() : null; renderProcessorHealth(); }, () => { state.processor = null; renderProcessorHealth(); }));
   unsubs.push(onSnapshot(doc(db, "system", "moderationProcessor"), { includeMetadataChanges: true }, snapshot => {
     state.moderationProcessorListenerHealthy = snapshot.metadata.fromCache !== true;
     state.moderationProcessor = snapshot.exists() ? snapshot.data() : null;
-    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms();
+    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); renderCommandCenter();
   }, () => {
     state.moderationProcessorListenerHealthy = false; state.moderationProcessor = null;
-    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms();
+    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); renderCommandCenter();
   }));
-  heartbeatTimer = window.setInterval(() => { renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); }, 60 * 1000);
+  heartbeatTimer = window.setInterval(() => { renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); renderCommandCenter(); }, 60 * 1000);
 }
 function stopLiveData() { while (unsubs.length) unsubs.pop()(); reportCasesUnsub?.(); reportCasesUnsub = null; legacyRoomsUnsub?.(); legacyRoomsUnsub = null; for (const unsubscribe of reportActionUnsubs.values()) unsubscribe(); reportActionUnsubs.clear(); for (const id of loadedModerationEvidence.keys()) evictModerationEvidence(id); for (const id of loadedRoomTranscripts.keys()) evictRoomTranscript(id); if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer); heartbeatTimer = null; state.moderationProcessorListenerHealthy = false; listenersStarted = false; }
 
@@ -584,6 +638,7 @@ $("refresh-admin").onclick = () => { renderAll(); setStatus("Dashboard recalcula
     redirect: () => location.replace("index.html")
   });
 };
+$("save-announcement").onclick = saveAnnouncement; $("clear-announcement").onclick = clearAnnouncement;
 $("delete-account-confirmation").oninput = updateDialogConfirmation; $("delete-account-confirm").onclick = queueDeletion;
 $("delete-account-dialog").addEventListener("close", () => { const fallback = dialogTrigger?.focusKey?.startsWith("report-") ? $("admin-report-status") : $("admin-user-search"), trigger = dialogTrigger?.node?.isConnected ? dialogTrigger.node : controlByFocusKey(dialogTrigger?.focusKey); (trigger || fallback).focus(); dialogTrigger = null; });
 window.addEventListener("pagehide", () => { pageActive = false; stopLiveData(); }); window.addEventListener("pageshow", () => { pageActive = true; startLiveData(); });
