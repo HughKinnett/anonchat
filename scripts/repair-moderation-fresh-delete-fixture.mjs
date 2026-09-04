@@ -1,0 +1,15 @@
+import { readFile, writeFile } from "node:fs/promises";
+
+const path = new URL("./test-moderation-rules.mjs", import.meta.url);
+const source = await readFile(path, "utf8");
+const seedAnchor = '    setDoc(doc(db, "posts", "post-3"), { type: "original", authorId: "author", username: "author", content: "reportable", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),\n';
+const seedAddition = `${seedAnchor}    setDoc(doc(db, "posts", "admin-delete-post"), { type: "original", authorId: "author", username: "author", content: "admin delete target", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),\n`;
+const blockBefore = `  const deletionTime = serverTimestamp(), deletionBatch = writeBatch(admin);\n  deletionBatch.set(doc(admin, "moderationCases", "post_post-2"), {\n    targetKind: "post", targetCollection: "posts", targetId: "post-2", targetPath: "posts/post-2", reportedUserId: "author",\n    snapshot: { kind: "queuedAdminDeletion" }, status: "deleteQueued", reportCount: 0, reasonTotals: {}, createdAt: deletionTime, updatedAt: deletionTime\n  });\n  deletionBatch.set(doc(admin, "moderationActions", "post_post-2"), { action: "deleteMaterial", requestedAt: deletionTime, requestedBy: "admin", status: "queued" });\n  await assertSucceeds(deletionBatch.commit());\n  assert.equal((await getDoc(doc(admin, "moderationCases", "post_post-2"))).data().status, "deleteQueued");\n  await assertSucceeds(deleteDoc(doc(admin, "posts", "post-2")), "authorized admins retain direct post deletion controls");\n`;
+const blockAfter = `  const deletionTime = serverTimestamp(), deletionBatch = writeBatch(admin);\n  deletionBatch.set(doc(admin, "moderationCases", "post_admin-delete-post"), {\n    targetKind: "post", targetCollection: "posts", targetId: "admin-delete-post", targetPath: "posts/admin-delete-post", reportedUserId: "author",\n    snapshot: { kind: "queuedAdminDeletion" }, status: "deleteQueued", reportCount: 0, reasonTotals: {}, createdAt: deletionTime, updatedAt: deletionTime\n  });\n  deletionBatch.set(doc(admin, "moderationActions", "post_admin-delete-post"), { action: "deleteMaterial", requestedAt: deletionTime, requestedBy: "admin", status: "queued" });\n  await assertSucceeds(deletionBatch.commit());\n  assert.equal((await getDoc(doc(admin, "moderationCases", "post_admin-delete-post"))).data().status, "deleteQueued");\n  await assertSucceeds(deleteDoc(doc(admin, "posts", "post-2")), "authorized admins retain direct post deletion controls");\n`;
+
+if (!source.includes(seedAnchor)) throw new Error("Post seed anchor not found.");
+if (!source.includes(blockBefore)) throw new Error("Admin deletion regression block not found.");
+let updated = source.replace(seedAnchor, seedAddition).replace(blockBefore, blockAfter);
+if (updated === source) throw new Error("No fixture repair was made.");
+await writeFile(path, updated);
+console.log("Added fresh admin deletion target and preserved existing reported-post coverage.");
