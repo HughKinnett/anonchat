@@ -1,0 +1,37 @@
+name: Repair push auth-loss coverage
+
+on:
+  push:
+    branches:
+      - fix/e2ee-spotify-privacy
+    paths:
+      - scripts/repair-push-auth-loss.mjs
+      - .github/workflows/repair-push-auth-loss.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/e2ee-spotify-privacy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/repair-push-auth-loss.mjs
+      - run: git diff --check
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add customize.js experience.js premium-playlist.js premium-rooms.js premium.js profile-style.js scripts/test-push-auth-integration.mjs
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "fix: clean push state on auth loss"
+          git push origin HEAD:fix/e2ee-spotify-privacy
