@@ -9,6 +9,12 @@ import { VAPID_PUBLIC_KEY } from "../push-config.mjs";
 
 const VAPID_SUBJECT = "https://anonchatlogin.web.app";
 const WEB_PUSH_TIMEOUT_MS = 30_000;
+const SAFE_FATAL_CODES = new Set([
+  "INVALID_ARGUMENT",
+  "INVALID_PROJECT",
+  "MISSING_VAPID_PRIVATE_KEY",
+  "INVALID_VAPID_CONFIGURATION"
+]);
 
 export const processorConfiguration = (environment = process.env) => {
   const projectId = String(environment.GCLOUD_PROJECT ?? environment.GOOGLE_CLOUD_PROJECT ?? "").trim();
@@ -54,6 +60,15 @@ export const fixedResultSummary = (result) => [
   `bootstrapped=${result.bootstrapped ? 1 : 0}`
 ].join(" ");
 
+export const fatalErrorSummary = (error) => {
+  const message = typeof error?.message === "string" ? error.message : "";
+  if (SAFE_FATAL_CODES.has(message)) return `NOTIFICATION_PROCESSOR_FATAL code=${message}`;
+  const runtimeCode = typeof error?.code === "number" || typeof error?.code === "string"
+    ? String(error.code).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40)
+    : "";
+  return `NOTIFICATION_PROCESSOR_FATAL code=${runtimeCode ? `RUNTIME_${runtimeCode}` : "RUNTIME_ERROR"}`;
+};
+
 const createProductionRuntime = async (projectId) => {
   const app = initializeApp({ credential: applicationDefault(), projectId });
   return {
@@ -88,4 +103,4 @@ export const main = async (argumentsList = process.argv.slice(2), dependencies =
 const directlyExecuted = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (directlyExecuted) main()
   .then((result) => { console.log(fixedResultSummary(result)); })
-  .catch(() => { console.error("NOTIFICATION_PROCESSOR_FATAL"); process.exitCode = 1; });
+  .catch((error) => { console.error(fatalErrorSummary(error)); process.exitCode = 1; });

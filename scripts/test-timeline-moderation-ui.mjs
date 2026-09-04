@@ -92,8 +92,8 @@ assert.match(timeline, /doc\(db, entry\.parent\.collection, entry\.parent\.id, "
   "each bounded parent separately retains the viewer's reaction document");
 assert.match(timeline, /boundedInteractionCount\(\s*commentDocs\.length, interactionIsTruncated\(parent\.path, "comments"\)\s*\)/,
   "comment totals explicitly mark a bounded result as truncated");
-assert.match(timeline, /boundedInteractionCount\(count, reactionsTruncated\)/,
-  "reaction totals explicitly mark a bounded result as truncated");
+assert.match(timeline, /const interactionTruncated = reactionsTruncated \|\| interactionIsTruncated\(parent\.path, "comments"\);[\s\S]{0,200}boundedInteractionCount\(interactionCount, interactionTruncated\)/,
+  "combined reaction and comment totals explicitly mark bounded results as truncated");
 assert.match(timeline, /const interactionState = interactionParentLoadState\(interactionSubscriptions\.get\(parent\.path\)\)/,
   "every rendered parent has an explicit interaction availability state");
 assert.match(timeline, /reactionsBar\.append\([\s\S]{0,500}reactionButton/,

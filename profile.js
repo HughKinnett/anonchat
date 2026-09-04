@@ -320,11 +320,21 @@ const renderFollowControl = () => {
   const count = followerCount();
   const following = followingCount();
   const followersLink = document.getElementById("profile-followers");
-  const followingLink = document.getElementById("profile-following");
-  followersLink.textContent = `${count} ${count === 1 ? "follower" : "followers"}`;
-  followingLink.textContent = `${following} following`;
+const followingLink = document.getElementById("profile-following");
+const ownConnectionsVisible = targetUserId === currentUser.uid;
+followersLink.textContent = ownConnectionsVisible
+  ? `${count} ${count === 1 ? "follower" : "followers"}`
+  : "Followers private";
+followingLink.textContent = ownConnectionsVisible
+  ? `${following} following`
+  : "Following private";
+if (ownConnectionsVisible) {
   followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
   followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
+} else {
+  followersLink.removeAttribute("href");
+  followingLink.removeAttribute("href");
+}
 
   if (currentUser.uid === targetUserId) {
     socialActions.hidden = true;
@@ -491,6 +501,7 @@ const renderPosts = () => {
     const parent = interactionParentForPost(postDoc);
     const sourceCollection = postDoc.ref.parent.id;
     const reactionDocs = postReactions(postDoc);
+    const commentDocs = postComments(postDoc);
     const reactionEmoji = { wow: "😮", middle_finger: "🖕", laugh: "😂", smile: "😊", fire: "🔥", heart: "❤️", sad: "😢" };
     const reactionsBar = document.createElement("div");
     reactionsBar.className = "reactions";
@@ -530,10 +541,11 @@ const renderPosts = () => {
     reactionDetails.className = "post-interaction-summary";
     const reactionSummary = document.createElement("summary");
     const icons = [...new Set(reactionDocs.map((reaction) => reactionEmoji[reaction.data().type]).filter(Boolean))].join(" ");
-    reactionSummary.textContent = `${icons ? `${icons} · ` : ""}${reactionDocs.length} interaction${reactionDocs.length === 1 ? "" : "s"}`;
+    const interactionCount = reactionDocs.length + commentDocs.length;
+    reactionSummary.textContent = `${icons ? `${icons} · ` : ""}${interactionCount} interaction${interactionCount === 1 ? "" : "s"}`;
     reactionSummary.title = "Show who interacted";
     const reactionList = document.createElement("ul");
-    if (!reactionDocs.length) {
+    if (!interactionCount) {
       const empty = document.createElement("li");
       empty.textContent = "No reactions yet.";
       reactionList.append(empty);
@@ -546,8 +558,16 @@ const renderPosts = () => {
       row.append(link, document.createTextNode(` reacted ${reactionEmoji[reaction.data().type] || "•"}`));
       reactionList.append(row);
     });
+    commentDocs.forEach((commentDoc) => {
+      const comment = commentDoc.data();
+      const row = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
+      link.textContent = `@${comment.username || "anonymous"}`;
+      row.append(link, document.createTextNode(" commented"));
+      reactionList.append(row);
+    });
     reactionDetails.append(reactionSummary, reactionList);
-    const commentDocs = postComments(postDoc);
     const commentsSection = document.createElement("details");
     commentsSection.className = "comments-section";
     const summary = document.createElement("summary");

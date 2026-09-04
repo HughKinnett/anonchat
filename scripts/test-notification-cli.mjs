@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createECDH } from "node:crypto";
-import { configureWebPush, fixedResultSummary, main, processorConfiguration } from "./notification-processor.mjs";
+import { configureWebPush, fatalErrorSummary, fixedResultSummary, main, processorConfiguration } from "./notification-processor.mjs";
 
 assert.throws(() => processorConfiguration({ GCLOUD_PROJECT: "anonchatlogin" }), /MISSING_VAPID_PRIVATE_KEY/);
 assert.throws(() => processorConfiguration({ GCLOUD_PROJECT: "wrong", ANONCHAT_VAPID_PRIVATE_KEY: "synthetic" }), /INVALID_PROJECT/);
@@ -46,6 +46,10 @@ assert.throws(() => configureWebPush({
 
 const result = { bootstrapped: false, scanned: 5, materialized: 5, inspected: 5, delivered: 4, retried: 1, expired: 1, skipped: 0, purged: 2 };
 assert.equal(fixedResultSummary(result), "NOTIFICATION_RESULT scanned=5 materialized=5 inspected=5 delivered=4 retried=1 expired=1 skipped=0 purged=2 bootstrapped=0");
+assert.equal(fatalErrorSummary(new Error("MISSING_VAPID_PRIVATE_KEY")), "NOTIFICATION_PROCESSOR_FATAL code=MISSING_VAPID_PRIVATE_KEY");
+assert.equal(fatalErrorSummary(new Error("INVALID_VAPID_CONFIGURATION")), "NOTIFICATION_PROCESSOR_FATAL code=INVALID_VAPID_CONFIGURATION");
+assert.equal(fatalErrorSummary(Object.assign(new Error("database details must stay private"), { code: 7 })), "NOTIFICATION_PROCESSOR_FATAL code=RUNTIME_7");
+assert.equal(fatalErrorSummary(new Error("synthetic-private-value-that-must-not-be-logged")), "NOTIFICATION_PROCESSOR_FATAL code=RUNTIME_ERROR");
 
 let configured;
 let invocation;
@@ -81,5 +85,6 @@ await assert.rejects(() => main([], {
   logger: { info: (value) => logged.push(value), error: (value) => logged.push(value) }
 }));
 assert.equal(logged.join(" ").includes(secret), false);
+assert.equal(fatalErrorSummary(new Error(secret)).includes(secret), false);
 
 console.log("Notification direct CLI contract passed");

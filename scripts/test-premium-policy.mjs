@@ -24,8 +24,6 @@ assert.match(rules, /request\.resource\.data\.moderatorIds\.size\(\) <= 2/);
 assert.match(rules, /premiumRoomModerator\(roomId\)/);
 assert.match(rules, /isPremiumUidAfter\(request\.resource\.data\.uid\)/);
 assert.match(rules, /match \/premiumRooms\/\{roomId\}\/messages\/\{messageId\}/);
-assert.match(rules, /match \/customers\/\{userId\}[\s\S]*?match \/checkout_sessions\/\{sessionId\}/);
-assert.match(rules, /premiumCheckout\/public/);
 assert.match(rules, /request\.resource\.data\.roomColor in \['black','white','gray'/);
 assert.match(rules, /request\.resource\.data\.temporaryChatBubbleColor in \['black','white','gray'/);
 assert.match(rules, /request\.resource\.data\.avatarId in \['none', 'avatar-1'/);
@@ -41,4 +39,24 @@ assert.equal(fs.existsSync(new URL("../premium-playlist.js", import.meta.url)), 
 const rooms = fs.readFileSync(new URL("../premium-rooms.js", import.meta.url), "utf8");
 assert.doesNotMatch(rooms, /premium-room-color|roomColorSelect|new Option\(color[.]label/);
 assert.match(rooms, /roomColor:"purple"/);
+
+const stripeConfigPath = new URL("../stripe-client-config.mjs", import.meta.url);
+assert.equal(fs.existsSync(stripeConfigPath), true, "Stripe client config exists without requiring Firestore");
+if (fs.existsSync(stripeConfigPath)) {
+  const stripeConfig = fs.readFileSync(stripeConfigPath, "utf8");
+  assert.match(stripeConfig, /publishableKey:\s*["']pk_live_/, "Stripe client config contains a live publishable key");
+  assert.match(stripeConfig, /productId:\s*["']["']/, "Stripe product ID placeholder exists");
+  assert.match(stripeConfig, /priceId:\s*["']["']/, "Stripe price ID placeholder exists");
+  assert.match(stripeConfig, /customerId:\s*["']["']/, "Stripe customer ID placeholder exists");
+  assert.match(stripeConfig, /subscriptionId:\s*["']["']/, "Stripe subscription ID placeholder exists");
+  assert.match(stripeConfig, /subscriptionStatus:\s*["']["']/, "Stripe subscription status placeholder exists");
+  assert.doesNotMatch(stripeConfig, /sk_(live|test)_/, "Stripe secret keys must never be stored in client config");
+}
+
+const premiumClient = fs.readFileSync(new URL("../premium.js", import.meta.url), "utf8");
+assert.doesNotMatch(premiumClient, /collection\(db,\s*["']customers["']/, "Premium client must not create Stripe checkout sessions in Firestore");
+assert.doesNotMatch(premiumClient, /checkout_sessions/, "Premium client must remain disconnected from Firestore-backed Stripe checkout");
+assert.doesNotMatch(premiumClient, /addDoc\(/, "Premium client must not write billing data to Firestore");
+assert.match(premiumClient, /stripe-client-config[.]mjs/, "Premium client consumes the Stripe-ready client config");
+
 console.log("Premium policy tests passed.");

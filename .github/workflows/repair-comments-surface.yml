@@ -1,0 +1,37 @@
+name: Post-deploy regression smoke tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - timeline.js
+      - profile.js
+      - spotify-playlist-privacy.js
+      - post-sharing.js
+      - sharing-privacy.css
+      - scripts/test-comment-surface-regression.mjs
+      - scripts/test-interaction-details.mjs
+      - scripts/test-follow-privacy-surface.mjs
+      - scripts/test-spotify-playlist-privacy.mjs
+      - scripts/test-timeline-moderation-ui.mjs
+      - .github/workflows/repair-comments-surface.yml
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run post-deploy regression checks
+        run: |
+          node scripts/test-comment-surface-regression.mjs
+          node scripts/test-interaction-details.mjs
+          node scripts/test-follow-privacy-surface.mjs
+          node scripts/test-spotify-playlist-privacy.mjs
+          node scripts/test-timeline-moderation-ui.mjs

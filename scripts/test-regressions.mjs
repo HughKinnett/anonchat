@@ -56,8 +56,8 @@ assert.equal(
 
 assert.deepEqual(
   resolveConnectionsTarget("?uid=profile-owner", "signed-in-user"),
-  { targetUserId: "profile-owner", canonicalSearch: "?uid=profile-owner" },
-  "an explicit profile target is preserved"
+  { targetUserId: "signed-in-user", canonicalSearch: "?uid=signed-in-user" },
+  "another profile cannot expose its private follower/following graph"
 );
 assert.deepEqual(
   resolveConnectionsTarget("", "signed-in-user"),
@@ -68,3 +68,7 @@ assert.deepEqual(
 console.log("message request and connections regressions passed");
 
 await import("./test-timeline-moderation-ui.mjs");
+await import("./test-premium-policy.mjs");
+await import("./test-comment-surface-regression.mjs");
+await import("./test-interaction-details.mjs");
+await import("./test-follow-privacy-surface.mjs");
