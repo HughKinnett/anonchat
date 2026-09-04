@@ -51,7 +51,7 @@ assert.doesNotMatch(
 );
 assert.match(
   timeline,
-  /if \(!snapshot\.exists\(\) \|\| isBlockedPost\(snapshot, viewerBlocks\)\)/,
+  /if \(!snapshot\.exists\(\) \|\| !isBlockedPost\(snapshot, viewerBlocks\)\)/,
   "a resolved original post is rejected only when it is missing or blocked"
 );
 assert.match(
@@ -63,6 +63,11 @@ assert.match(
   timeline,
   /commentsSummary\.textContent = `Comments · \$\{boundedInteractionCount\(/,
   "comments always expose their numeric summary once rendered"
+);
+assert.doesNotMatch(
+  timeline,
+  /Comments · Retry/,
+  "comments stay openable even when there are no comments yet"
 );
 assert.match(
   timeline,
