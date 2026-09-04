@@ -337,8 +337,8 @@ try {
   await assertSucceeds(setDoc(doc(reporter, "roomMembers", "active-room_reporter"), { roomId: "active-room", uid: "reporter", joinedAt: serverTimestamp() }));
   await assertSucceeds(updateDoc(doc(stranger, "roomMembers", "active-room_stranger"), { joinedAt: serverTimestamp() }));
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "visible-room-direct"), {
-    roomId: "active-room", senderId: "stranger", tempName: "Stranger", text: "direct api",
-    expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
+    roomId: "active-room", senderId: "stranger", tempName: "Stranger", encrypted: true, cipherVersion: 1,
+    bodyCipher: cipher("direct api"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
   }));
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-parent", "comments", "visible-control"), comment));
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-parent", "reactions", "stranger"), reaction));
@@ -349,9 +349,9 @@ try {
   await assertFails(setDoc(doc(stranger, "roomMembers", "hidden-room_new"), { roomId: "hidden-room", uid: "stranger", joinedAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(stranger, "roomMembers", "hidden-room_stranger"), { joinedAt: serverTimestamp() }));
   await assertFails(setDoc(doc(stranger, "roomMessages", "hidden-room-direct"), {
-    roomId: "hidden-room", senderId: "stranger", tempName: "Stranger", text: "direct api",
-    expiresAt: new Date(Date.now() + 86_400_000), moderationState: "visible", createdAt: serverTimestamp()
-  }));
+    roomId: "hidden-room", senderId: "stranger", tempName: "Stranger", encrypted: true, cipherVersion: 1,
+    bodyCipher: cipher("direct api"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
+  }), "a valid encrypted message is still denied while its room is on moderation hold");
   await assertSucceeds(deleteDoc(doc(stranger, "roomMessages", "visible-room-direct")), "a sender can delete their message while its room remains active");
   await assertFails(deleteDoc(doc(author, "roomMessages", "visible-message-hidden-room")), "a sender cannot mutate a retained message while its room is on hold");
   await assertFails(setDoc(doc(stranger, "roomMessages", "visible-message-hidden-room", "comments", "direct-api"), comment));
