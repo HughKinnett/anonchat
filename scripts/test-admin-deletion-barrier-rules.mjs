@@ -11,6 +11,7 @@ const queuedProfile = { ...profile("target"), banned: true, adminDeletionRequest
 const queuedJob = { targetUid: "target", requesterUid: "admin", requestedAt: new Date(1), status: "queued" };
 const completedMarker = { status: "completed", completedAt: new Date(1_000), purgeAfter: new Date(7_201_000) };
 const roomExpiry = new Date(Date.now() + 86_400_000);
+const cipher = value => ({ version: 1, algorithm: "A256GCM", iv: "a".repeat(16), ciphertext: Buffer.from(value).toString("base64") });
 const seed = async ({ targetJob = null, targetProfile = profile("target"), principalBarriers = [] } = {}) => testEnv.withSecurityRulesDisabled(async (context) => {
   const firestore = context.firestore();
   const writes = [
@@ -50,7 +51,7 @@ const contentWrites = (firestore, target) => {
   const suffix = target ? "blocked" : "allowed"; const circle = target ? "target-circle" : "other-circle"; const room = target ? "target-room" : "other-room";
   return [
     () => setDoc(doc(firestore, "follows", `member_${uid}`), { followerId: "member", followingId: uid, createdAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "directMessages", `message_${suffix}`), { participants: ["member", uid], senderId: "member", text: "hello", createdAt: serverTimestamp() }),
+    () => setDoc(doc(firestore, "messageRequests", `member_${uid}`, "messages", `message_${suffix}`), { participants: ["member", uid], senderId: "member", encrypted: true, cipherVersion: 1, bodyCipher: cipher("hello"), createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "reveals", `member_${uid}`), { fromId: "member", toId: uid, fields: { interests: true }, status: "pending", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "posts", `repost_member_${post}`), { type: "repost", authorId: "member", username: "member", sourceCollection: "posts", originalPostId: post, originalAuthorId: uid, originalUsername: uid, content: `${uid} post`, imageData: "", moderationState: "visible", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "posts", post, "comments", `comment_${suffix}`), { uid: "member", username: "member", text: "comment", createdAt: serverTimestamp() }),
@@ -59,7 +60,7 @@ const contentWrites = (firestore, target) => {
     () => setDoc(doc(firestore, "circleMembers", `${circle}_member`), { circleId: circle, uid: "member", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "communityPosts", `community_${suffix}`), { authorId: "member", username: "member", content: "community", category: "Question", circleId: circle, options: [], moderationState: "visible", createdAt: serverTimestamp() }),
     () => setDoc(doc(firestore, "roomMembers", `${room}_member`), { roomId: room, uid: "member", joinedAt: serverTimestamp() }),
-    () => setDoc(doc(firestore, "roomMessages", `room_${suffix}`), { roomId: room, senderId: "member", tempName: "Member", text: "hello", expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() })
+    () => setDoc(doc(firestore, "roomMessages", `room_${suffix}`), { roomId: room, senderId: "member", tempName: "Member", encrypted: true, cipherVersion: 1, bodyCipher: cipher("hello"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() })
   ];
 };
 const signup = (firestore, uid) => {
@@ -87,7 +88,7 @@ const topLevelOwnerWrites = (firestore) => [
   ["circle-membership", () => setDoc(doc(firestore, "circleMembers", "three-circle_member"), { circleId: "three-circle", uid: "member", createdAt: serverTimestamp() })],
   ["community-post", () => setDoc(doc(firestore, "communityPosts", "missing-circle-owner"), { authorId: "member", username: "member", content: "missing owner", category: "Question", circleId: "three-circle", options: [], moderationState: "visible", createdAt: serverTimestamp() })],
   ["room-membership", () => setDoc(doc(firestore, "roomMembers", "three-room_member"), { roomId: "three-room", uid: "member", joinedAt: serverTimestamp() })],
-  ["room-message", () => setDoc(doc(firestore, "roomMessages", "missing-room-owner"), { roomId: "three-room", senderId: "member", tempName: "Member", text: "missing owner", expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() })]
+  ["room-message", () => setDoc(doc(firestore, "roomMessages", "missing-room-owner"), { roomId: "three-room", senderId: "member", tempName: "Member", encrypted: true, cipherVersion: 1, bodyCipher: cipher("missing owner"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() })]
 ];
 const assertBarrierDenial = async (operation, label) => {
   try {
@@ -146,7 +147,7 @@ try {
   assert.equal((await getDoc(doc(other, "circleMembers", "other-circle_other"))).exists(), false);
   const roomOrphanRace = writeBatch(other);
   roomOrphanRace.delete(doc(other, "rooms", "other-room"));
-  roomOrphanRace.set(doc(other, "roomMessages", "orphan-room-message"), { roomId: "other-room", senderId: "other", tempName: "Other", text: "orphan", expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() });
+  roomOrphanRace.set(doc(other, "roomMessages", "orphan-room-message"), { roomId: "other-room", senderId: "other", tempName: "Other", encrypted: true, cipherVersion: 1, bodyCipher: cipher("orphan"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp() });
   await assertFails(roomOrphanRace.commit());
   const roomMemberOrphanRace = writeBatch(other);
   roomMemberOrphanRace.delete(doc(other, "rooms", "other-room"));
