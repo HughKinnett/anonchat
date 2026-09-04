@@ -26,32 +26,36 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          from textwrap import dedent
+
           path = Path('profile.js')
           text = path.read_text()
-          old = '''  const followersLink = document.getElementById("profile-followers");
-  const followingLink = document.getElementById("profile-following");
-  followersLink.textContent = `${count} ${count === 1 ? "follower" : "followers"}`;
-  followingLink.textContent = `${following} following`;
-  followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
-  followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
-'''
-          new = '''  const followersLink = document.getElementById("profile-followers");
-  const followingLink = document.getElementById("profile-following");
-  const ownConnectionsVisible = targetUserId === currentUser.uid;
-  followersLink.textContent = ownConnectionsVisible
-    ? `${count} ${count === 1 ? "follower" : "followers"}`
-    : "Followers private";
-  followingLink.textContent = ownConnectionsVisible
-    ? `${following} following`
-    : "Following private";
-  if (ownConnectionsVisible) {
-    followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
-    followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
-  } else {
-    followersLink.removeAttribute("href");
-    followingLink.removeAttribute("href");
-  }
-'''
+          old = dedent('''
+            const followersLink = document.getElementById("profile-followers");
+            const followingLink = document.getElementById("profile-following");
+            followersLink.textContent = `${count} ${count === 1 ? "follower" : "followers"}`;
+            followingLink.textContent = `${following} following`;
+            followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
+            followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
+          ''').lstrip()
+          new = dedent('''
+            const followersLink = document.getElementById("profile-followers");
+            const followingLink = document.getElementById("profile-following");
+            const ownConnectionsVisible = targetUserId === currentUser.uid;
+            followersLink.textContent = ownConnectionsVisible
+              ? `${count} ${count === 1 ? "follower" : "followers"}`
+              : "Followers private";
+            followingLink.textContent = ownConnectionsVisible
+              ? `${following} following`
+              : "Following private";
+            if (ownConnectionsVisible) {
+              followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
+              followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
+            } else {
+              followersLink.removeAttribute("href");
+              followingLink.removeAttribute("href");
+            }
+          ''').lstrip()
           if old not in text:
               raise SystemExit('expected profile follower/following block not found')
           path.write_text(text.replace(old, new, 1))
