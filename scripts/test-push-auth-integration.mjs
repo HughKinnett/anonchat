@@ -17,7 +17,7 @@ const exitPolicy = {
   "premium-rooms.js": { authenticated: 0, authLoss: 1 },
   "premium.js": { authenticated: 0, authLoss: 1 },
   "profile-style.js": { authenticated: 0, authLoss: 1 },
-  "profile.js": { authenticated: 1, authLoss: 1 },
+  "profile.js": { authenticated: 2, authLoss: 1 },
   "timeline.js": { authenticated: 2, authLoss: 1 },
   "upload.js": { authenticated: 0, authLoss: 1 }
 };
