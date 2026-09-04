@@ -1,0 +1,85 @@
+name: Repair comments surface
+
+on:
+  push:
+    branches:
+      - fix/post-deploy-regressions
+    paths:
+      - .github/workflows/repair-comments-surface.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/post-deploy-regressions
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch comments recovery
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('timeline.js')
+          text = path.read_text()
+          old = '''  } else if (interactionState === "unavailable") {
+            commentsSection = document.createElement("div");
+            commentsSection.hidden = true;
+          } else {
+            commentsSection = document.createElement("p");
+            commentsSection.className = "interaction-load-state muted";
+            commentsSection.textContent = interactionParentStateMessage(interactionState);
+          }
+          '''
+          new = '''  } else {
+            commentsSection = document.createElement("details");
+            commentsSection.className = "comments-section";
+            const commentsSummary = document.createElement("summary");
+            commentsSummary.textContent = interactionState === "unavailable"
+              ? "Comments · Retry"
+              : "Comments · Loading…";
+            const commentsStatus = document.createElement("p");
+            commentsStatus.className = "interaction-load-state muted";
+            commentsStatus.textContent = interactionState === "unavailable"
+              ? "Comments could not load. Open this section to retry the original post thread."
+              : interactionParentStateMessage(interactionState);
+            commentsSection.append(commentsSummary, commentsStatus);
+            commentsSection.addEventListener("toggle", () => {
+              if (!commentsSection.open) return;
+              manuallyLoadedInteractionPaths.add(parent.path);
+              if (interactionState === "unavailable") {
+                const staleEntry = interactionSubscriptions.get(parent.path);
+                if (staleEntry) {
+                  staleEntry.sourceUnsubscribe?.();
+                  staleEntry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
+                  interactionSubscriptions.delete(parent.path);
+                }
+              }
+              syncInteractionListeners();
+            }, { once: true });
+          }
+          '''
+          if old not in text:
+              raise SystemExit('expected comments fallback block not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Run comments regression
+        run: node scripts/test-comment-surface-regression.mjs
+      - name: Commit repair
+        shell: bash
+        run: |
+          if git diff --quiet -- timeline.js; then
+            echo "No repair needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timeline.js
+          git commit -m "fix: restore comments across timeline views"
+          git push origin HEAD:fix/post-deploy-regressions
