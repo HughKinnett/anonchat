@@ -21,68 +21,54 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Patch comments recovery
+      - name: Patch profile connection privacy
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
-          path = Path('timeline.js')
+          path = Path('profile.js')
           text = path.read_text()
-          pattern = re.compile(
-              r'  \} else if \(interactionState === "unavailable"\) \{\n'
-              r'    commentsSection = document\.createElement\("div"\);\n'
-              r'    commentsSection\.hidden = true;\n'
-              r'  \} else \{\n'
-              r'    commentsSection = document\.createElement\("p"\);\n'
-              r'    commentsSection\.className = "interaction-load-state muted";\n'
-              r'    commentsSection\.textContent = interactionParentStateMessage\(interactionState\);\n'
-              r'  \}\n'
-          )
-          replacement = '''  } else {
-            commentsSection = document.createElement("details");
-            commentsSection.className = "comments-section";
-            const commentsSummary = document.createElement("summary");
-            commentsSummary.textContent = interactionState === "unavailable"
-              ? "Comments · Retry"
-              : "Comments · Loading…";
-            const commentsStatus = document.createElement("p");
-            commentsStatus.className = "interaction-load-state muted";
-            commentsStatus.textContent = interactionState === "unavailable"
-              ? "Comments could not load. Open this section to retry the original post thread."
-              : interactionParentStateMessage(interactionState);
-            commentsSection.append(commentsSummary, commentsStatus);
-            commentsSection.addEventListener("toggle", () => {
-              if (!commentsSection.open) return;
-              manuallyLoadedInteractionPaths.add(parent.path);
-              if (interactionState === "unavailable") {
-                const staleEntry = interactionSubscriptions.get(parent.path);
-                if (staleEntry) {
-                  staleEntry.sourceUnsubscribe?.();
-                  staleEntry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
-                  interactionSubscriptions.delete(parent.path);
-                }
-              }
-              syncInteractionListeners();
-            }, { once: true });
-          }
-          '''
-          updated, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f'expected one comments fallback block, found {count}')
-          path.write_text(updated)
+          old = '''  const followersLink = document.getElementById("profile-followers");
+  const followingLink = document.getElementById("profile-following");
+  followersLink.textContent = `${count} ${count === 1 ? "follower" : "followers"}`;
+  followingLink.textContent = `${following} following`;
+  followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
+  followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
+'''
+          new = '''  const followersLink = document.getElementById("profile-followers");
+  const followingLink = document.getElementById("profile-following");
+  const ownConnectionsVisible = targetUserId === currentUser.uid;
+  followersLink.textContent = ownConnectionsVisible
+    ? `${count} ${count === 1 ? "follower" : "followers"}`
+    : "Followers private";
+  followingLink.textContent = ownConnectionsVisible
+    ? `${following} following`
+    : "Following private";
+  if (ownConnectionsVisible) {
+    followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
+    followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
+  } else {
+    followersLink.removeAttribute("href");
+    followingLink.removeAttribute("href");
+  }
+'''
+          if old not in text:
+              raise SystemExit('expected profile follower/following block not found')
+          path.write_text(text.replace(old, new, 1))
           PY
-      - name: Run comments regression
-        run: node scripts/test-comment-surface-regression.mjs
+      - name: Run targeted regressions
+        run: |
+          node scripts/test-follow-privacy-surface.mjs
+          node scripts/test-comment-surface-regression.mjs
       - name: Commit repair
         shell: bash
         run: |
-          if git diff --quiet -- timeline.js; then
+          if git diff --quiet -- profile.js; then
             echo "No repair needed"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add timeline.js
-          git commit -m "fix: restore comments across timeline views"
+          git add profile.js
+          git commit -m "fix: keep connection details private"
           git push origin HEAD:fix/post-deploy-regressions
