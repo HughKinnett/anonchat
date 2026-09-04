@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: '20'
       - name: Apply patches
-        run: node scripts/apply-admin-command-center.mjs
+        run: node scripts/apply-admin-command-center-v2.mjs
       - name: Commit implementation
         run: |
           if git diff --quiet; then
