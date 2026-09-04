@@ -10,6 +10,7 @@ on:
       - 'admin.js'
       - 'firestore.rules'
       - 'scripts/test-admin-command-center.mjs'
+      - 'scripts/test-admin-expanded-controls.mjs'
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -19,4 +20,6 @@ jobs:
         with:
           node-version: '20'
       - name: Run admin command center tests
-        run: node scripts/test-admin-command-center.mjs
+        run: |
+          node scripts/test-admin-command-center.mjs
+          node scripts/test-admin-expanded-controls.mjs
