@@ -1,41 +1,27 @@
-name: Repair moderation direct-room E2EE fixtures
+name: Cleanup moderation direct-room repair
 
 on:
   push:
     branches:
       - fix/e2ee-spotify-privacy
     paths:
-      - scripts/repair-moderation-direct-room-e2ee-fixtures.mjs
       - .github/workflows/repair-moderation-direct-room-e2ee-fixtures.yml
 
 permissions:
   contents: write
 
 jobs:
-  repair:
+  cleanup:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/e2ee-spotify-privacy
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Repair stale room-message fixtures
-        run: node scripts/repair-moderation-direct-room-e2ee-fixtures.mjs
-      - name: Validate patch
+      - name: Remove temporary repair scaffolding
         run: |
-          git diff --check
-          git diff -- scripts/test-moderation-rules.mjs
-      - name: Commit repaired test
-        run: |
-          if git diff --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scripts/test-moderation-rules.mjs
-          git commit -m "test: align direct room moderation fixtures with E2EE"
+          git rm .github/workflows/repair-moderation-direct-room-e2ee-fixtures.yml scripts/repair-moderation-direct-room-e2ee-fixtures.mjs
+          git commit -m "chore: remove moderation E2EE repair scaffolding"
           git push origin HEAD:fix/e2ee-spotify-privacy
