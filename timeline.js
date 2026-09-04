@@ -1169,6 +1169,7 @@ const renderPost = (postDoc) => {
 
   const interactionEntry = interactionSubscriptions.get(parent.path);
   const reactionDocs = postReactions(postDoc);
+  const commentDocs = postComments(postDoc);
   const interactionState = interactionParentLoadState(interactionSubscriptions.get(parent.path));
   const reactionsReady = Boolean(interactionEntry?.ready?.reactions && interactionEntry?.ready?.viewerReaction);
   const commentsReady = Boolean(interactionEntry?.ready?.comments);
@@ -1189,19 +1190,20 @@ const renderPost = (postDoc) => {
   const activeReactionTypes = [...new Set(reactionDocs.map((reaction) => reaction.data().type))];
   const reactionEmoji = { wow: "😮", middle_finger: "🖕", laugh: "😂", smile: "😊", fire: "🔥", heart: "❤️", sad: "😢" };
   const activeReactionIcons = activeReactionTypes.map((type) => reactionEmoji[type]).filter(Boolean).join(" ");
-  const count = reactionDocs.length;
-  const reactionTotal = boundedInteractionCount(count, reactionsTruncated);
+  const interactionCount = reactionDocs.length + commentDocs.length;
+  const interactionTruncated = reactionsTruncated || interactionIsTruncated(parent.path, "comments");
+  const interactionTotal = boundedInteractionCount(interactionCount, interactionTruncated);
   if (reactionsReady) {
-    interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${reactionTotal}`;
+    interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;
     interactionSummaryLabel.setAttribute("aria-label",
-      `${reactionTotal} interaction${count === 1 ? "" : "s"}. Show who interacted.`);
+      `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);
   } else {
     interactionSummaryLabel.textContent = interactionParentStateMessage(interactionState);
     interactionSummaryLabel.setAttribute("aria-label", interactionParentStateMessage(interactionState));
   }
   interactionSummaryLabel.title = "Show who interacted with this post";
   const interactionPeople = document.createElement("ul");
-  if (!reactionDocs.length) {
+  if (!interactionCount) {
     const emptyInteraction = document.createElement("li");
     emptyInteraction.textContent = "No interactions yet.";
     interactionPeople.append(emptyInteraction);
@@ -1213,6 +1215,15 @@ const renderPost = (postDoc) => {
       link.href = `profile.html?uid=${encodeURIComponent(reaction.data().uid)}`;
       link.textContent = `@${profile?.username || "anonymous"}`;
       row.append(link, document.createTextNode(` reacted ${reactionEmoji[reaction.data().type] || "•"}`));
+      interactionPeople.append(row);
+    });
+    commentDocs.forEach((commentDoc) => {
+      const comment = commentDoc.data();
+      const row = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
+      link.textContent = `@${comment.username || "anonymous"}`;
+      row.append(link, document.createTextNode(" commented"));
       interactionPeople.append(row);
     });
   }
@@ -1259,7 +1270,6 @@ const renderPost = (postDoc) => {
 
   let commentsSection;
   if (commentsReady) {
-    const commentDocs = postComments(postDoc);
     commentsSection = document.createElement("details");
   commentsSection.className = "comments-section";
   const commentsSummary = document.createElement("summary");
