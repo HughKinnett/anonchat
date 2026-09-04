@@ -1,0 +1,112 @@
+name: Apply interaction fix
+
+on:
+  push:
+    branches:
+      - fix/reliable-interactions-and-spotify-mask
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/reliable-interactions-and-spotify-mask
+      - name: Apply focused production fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('timeline.js')
+          text = path.read_text()
+
+          old = '''  if (interactionsReady) {
+            interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;
+            interactionSummaryLabel.setAttribute("aria-label",
+              `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);
+          } else {
+            interactionSummaryLabel.textContent = interactionParentStateMessage(interactionState);
+            interactionSummaryLabel.setAttribute("aria-label", interactionParentStateMessage(interactionState));
+          }'''
+          new = '''  interactionSummaryLabel.textContent = `💬 ${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;
+          interactionSummaryLabel.setAttribute("aria-label",
+            `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);'''
+          if old not in text:
+              raise SystemExit('interaction summary block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''  let commentsSection;
+          if (commentsReady) {
+            commentsSection = document.createElement("details");'''
+          new = '''  let commentsSection;
+          commentsSection = document.createElement("details");'''
+          if old not in text:
+              raise SystemExit('comments ready opening block not found')
+          text = text.replace(old, new, 1)
+
+          pattern = re.compile(r'''\n  \} else \{\n  commentsSection = document\.createElement\("details"\);\n  commentsSection\.className = "comments-section";\n  const commentsSummary = document\.createElement\("summary"\);\n  commentsSummary\.textContent = interactionState === "unavailable"[\s\S]*?\n\}\n\n  const actions = document\.createElement\("div"\);''')
+          text, count = pattern.subn('\n\n  const actions = document.createElement("div");', text, count=1)
+          if count != 1:
+              raise SystemExit(f'comments fallback block replacement count={count}')
+
+          old = '''    if (existing) {
+              const shouldListen = !document.hidden
+                && (!interactionVisibilityObserver || visibleInteractionPaths.has(path) || manuallyLoadedInteractionPaths.has(path));
+              if (!shouldListen && existing.childrenStarted) pauseInteractionChildren(existing);
+              if (visibleParent && !existing.childrenStarted
+                && shouldListen) {
+                existing.sourceUnsubscribe?.();
+                existing.sourceUnsubscribe = undefined;
+                existing.parentDoc = visibleParent;
+                startInteractionChildren(existing);
+              }
+              return;
+            }'''
+          new = '''    if (existing) {
+              if (visibleParent && !existing.childrenStarted) {
+                existing.sourceUnsubscribe?.();
+                existing.sourceUnsubscribe = undefined;
+                existing.parentDoc = visibleParent;
+                startInteractionChildren(existing);
+              }
+              return;
+            }'''
+          if old not in text:
+              raise SystemExit('existing listener block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    if (visibleParent) {
+              if (!document.hidden
+                && (!interactionVisibilityObserver || visibleInteractionPaths.has(path) || manuallyLoadedInteractionPaths.has(path))) startInteractionChildren(entry);
+              return;
+            }'''
+          new = '''    if (visibleParent) {
+              startInteractionChildren(entry);
+              return;
+            }'''
+          if old not in text:
+              raise SystemExit('new listener block not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text)
+
+          css_path = Path('sharing-privacy.css')
+          css = css_path.read_text()
+          if 'top:64px' not in css or 'top:62px' not in css:
+              raise SystemExit('Spotify mask positions not found')
+          css = css.replace('top:64px', 'top:72px', 1).replace('top:62px', 'top:70px', 1)
+          css_path.write_text(css)
+          PY
+      - name: Commit focused production fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timeline.js sharing-privacy.css
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: make interactions reliable across feeds"
+          git push origin HEAD:fix/reliable-interactions-and-spotify-mask
