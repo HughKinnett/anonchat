@@ -25,73 +25,50 @@ jobs:
           path = Path('timeline.js')
           text = path.read_text()
 
-          old = '''  if (interactionsReady) {
-            interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;
-            interactionSummaryLabel.setAttribute("aria-label",
-              `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);
-          } else {
-            interactionSummaryLabel.textContent = interactionParentStateMessage(interactionState);
-            interactionSummaryLabel.setAttribute("aria-label", interactionParentStateMessage(interactionState));
-          }'''
-          new = '''  interactionSummaryLabel.textContent = `💬 ${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;
-          interactionSummaryLabel.setAttribute("aria-label",
-            `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);'''
-          if old not in text:
-              raise SystemExit('interaction summary block not found')
-          text = text.replace(old, new, 1)
-
-          old = '''  let commentsSection;
-          if (commentsReady) {
-            commentsSection = document.createElement("details");'''
-          new = '''  let commentsSection;
-          commentsSection = document.createElement("details");'''
-          if old not in text:
-              raise SystemExit('comments ready opening block not found')
-          text = text.replace(old, new, 1)
-
-          pattern = re.compile(r'''\n  \} else \{\n  commentsSection = document\.createElement\("details"\);\n  commentsSection\.className = "comments-section";\n  const commentsSummary = document\.createElement\("summary"\);\n  commentsSummary\.textContent = interactionState === "unavailable"[\s\S]*?\n\}\n\n  const actions = document\.createElement\("div"\);''')
-          text, count = pattern.subn('\n\n  const actions = document.createElement("div");', text, count=1)
+          text, count = re.subn(
+              r'  if \(interactionsReady\) \{[\s\S]*?  \}\n  interactionSummaryLabel\.title',
+              '  interactionSummaryLabel.textContent = `💬 ${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;\n  interactionSummaryLabel.setAttribute("aria-label", `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);\n  interactionSummaryLabel.title',
+              text,
+              count=1
+          )
           if count != 1:
-              raise SystemExit(f'comments fallback block replacement count={count}')
+              raise SystemExit(f'interaction summary replacement count={count}')
 
-          old = '''    if (existing) {
-              const shouldListen = !document.hidden
-                && (!interactionVisibilityObserver || visibleInteractionPaths.has(path) || manuallyLoadedInteractionPaths.has(path));
-              if (!shouldListen && existing.childrenStarted) pauseInteractionChildren(existing);
-              if (visibleParent && !existing.childrenStarted
-                && shouldListen) {
-                existing.sourceUnsubscribe?.();
-                existing.sourceUnsubscribe = undefined;
-                existing.parentDoc = visibleParent;
-                startInteractionChildren(existing);
-              }
-              return;
-            }'''
-          new = '''    if (existing) {
-              if (visibleParent && !existing.childrenStarted) {
-                existing.sourceUnsubscribe?.();
-                existing.sourceUnsubscribe = undefined;
-                existing.parentDoc = visibleParent;
-                startInteractionChildren(existing);
-              }
-              return;
-            }'''
-          if old not in text:
-              raise SystemExit('existing listener block not found')
-          text = text.replace(old, new, 1)
+          text, count = re.subn(
+              r'  let commentsSection;\n  if \(commentsReady\) \{\n    commentsSection = document\.createElement\("details"\);',
+              '  let commentsSection;\n  commentsSection = document.createElement("details");',
+              text,
+              count=1
+          )
+          if count != 1:
+              raise SystemExit(f'comments opening replacement count={count}')
 
-          old = '''    if (visibleParent) {
-              if (!document.hidden
-                && (!interactionVisibilityObserver || visibleInteractionPaths.has(path) || manuallyLoadedInteractionPaths.has(path))) startInteractionChildren(entry);
-              return;
-            }'''
-          new = '''    if (visibleParent) {
-              startInteractionChildren(entry);
-              return;
-            }'''
-          if old not in text:
-              raise SystemExit('new listener block not found')
-          text = text.replace(old, new, 1)
+          text, count = re.subn(
+              r'\n  \} else \{\n  commentsSection = document\.createElement\("details"\);[\s\S]*?\n\}\n\n  const actions = document\.createElement\("div"\);',
+              '\n\n  const actions = document.createElement("div");',
+              text,
+              count=1
+          )
+          if count != 1:
+              raise SystemExit(f'comments fallback replacement count={count}')
+
+          text, count = re.subn(
+              r'    if \(existing\) \{\n      const shouldListen = !document\.hidden[\s\S]*?      return;\n    \}',
+              '    if (existing) {\n      if (visibleParent && !existing.childrenStarted) {\n        existing.sourceUnsubscribe?.();\n        existing.sourceUnsubscribe = undefined;\n        existing.parentDoc = visibleParent;\n        startInteractionChildren(existing);\n      }\n      return;\n    }',
+              text,
+              count=1
+          )
+          if count != 1:
+              raise SystemExit(f'existing listener replacement count={count}')
+
+          text, count = re.subn(
+              r'    if \(visibleParent\) \{\n      if \(!document\.hidden[\s\S]*?startInteractionChildren\(entry\);\n      return;\n    \}',
+              '    if (visibleParent) {\n      startInteractionChildren(entry);\n      return;\n    }',
+              text,
+              count=1
+          )
+          if count != 1:
+              raise SystemExit(f'new listener replacement count={count}')
 
           path.write_text(text)
 
