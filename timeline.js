@@ -1173,6 +1173,7 @@ const renderPost = (postDoc) => {
   const interactionState = interactionParentLoadState(interactionSubscriptions.get(parent.path));
   const reactionsReady = Boolean(interactionEntry?.ready?.reactions && interactionEntry?.ready?.viewerReaction);
   const commentsReady = Boolean(interactionEntry?.ready?.comments);
+  const interactionsReady = reactionsReady && commentsReady;
   const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");
   const reactionsBar = document.createElement("div");
   reactionsBar.className = "reactions";
@@ -1193,7 +1194,7 @@ const renderPost = (postDoc) => {
   const interactionCount = reactionDocs.length + commentDocs.length;
   const interactionTruncated = reactionsTruncated || interactionIsTruncated(parent.path, "comments");
   const interactionTotal = boundedInteractionCount(interactionCount, interactionTruncated);
-  if (reactionsReady) {
+  if (interactionsReady) {
     interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;
     interactionSummaryLabel.setAttribute("aria-label",
       `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);
