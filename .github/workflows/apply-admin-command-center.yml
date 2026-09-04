@@ -1,0 +1,31 @@
+name: Apply admin command center
+on:
+  push:
+    branches:
+      - feature/simplified-admin-command-center
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, 'feat: implement simplified admin command center') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/simplified-admin-command-center
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply patches
+        run: node scripts/apply-admin-command-center.mjs
+      - name: Commit implementation
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add admin.html admin.css admin.js firestore.rules
+          git commit -m "feat: implement simplified admin command center"
+          git push origin HEAD:feature/simplified-admin-command-center
