@@ -69,3 +69,4 @@ console.log("message request and connections regressions passed");
 
 await import("./test-timeline-moderation-ui.mjs");
 await import("./test-premium-policy.mjs");
+await import("./test-comment-surface-regression.mjs");
