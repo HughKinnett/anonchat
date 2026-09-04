@@ -9,6 +9,18 @@ const testEnv = await initializeTestEnvironment({
 const profile = (uid) => ({ uid, username: uid, banned: false, createdAt: new Date(0), lastActiveAt: new Date(0) });
 const expiresSoon = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
 const room = (overrides = {}) => ({ name: "Expiry room", topic: "topic", ownerId: "owner", createdAt: serverTimestamp(), expiresAt: expiresSoon(), moderationState: "visible", ...overrides });
+const cipher = value => ({ version: 1, algorithm: "A256GCM", iv: "a".repeat(16), ciphertext: Buffer.from(value).toString("base64") });
+const encryptedMessage = (roomId, text, expiresAt) => ({
+  roomId,
+  senderId: "member",
+  tempName: "Member",
+  encrypted: true,
+  cipherVersion: 1,
+  bodyCipher: cipher(text),
+  expiresAt,
+  moderationState: "visible",
+  createdAt: serverTimestamp()
+});
 const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
   const db = context.firestore();
   await Promise.all([
@@ -28,18 +40,20 @@ try {
   const activeRoom = await getDoc(doc(owner, "rooms", "active-room"));
   const activeExpiry = activeRoom.data().expiresAt;
   await assertSucceeds(setDoc(doc(member, "roomMembers", "active-room_member"), { roomId: "active-room", uid: "member", joinedAt: serverTimestamp() }));
-  await assertSucceeds(setDoc(doc(member, "roomMessages", "active-message"), { roomId: "active-room", senderId: "member", tempName: "Member", text: "active", expiresAt: activeExpiry, moderationState: "visible", createdAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(member, "roomMessages", "active-message"), encryptedMessage("active-room", "active", activeExpiry)));
   await assertFails(setDoc(doc(owner, "rooms", "client-created"), room({ createdAt: new Date() })));
   await assertFails(setDoc(doc(owner, "rooms", "too-short"), room({ expiresAt: new Date(Date.now() + 60 * 60 * 1000) })));
   await assertFails(setDoc(doc(owner, "rooms", "too-long"), room({ expiresAt: new Date(Date.now() + 30 * 60 * 60 * 1000) })));
   await assertFails(setDoc(doc(owner, "rooms", "missing-expiry"), { name: "Missing", topic: "topic", ownerId: "owner", createdAt: serverTimestamp() }));
   await assertFails(deleteDoc(doc(owner, "rooms", "active-room")), "room owners cannot strand children during trusted cleanup");
   await assertFails(deleteDoc(doc(owner, "rooms", "leased-room")), "room owners cannot remove a leased parent before trusted child cleanup");
-  await assertFails(setDoc(doc(member, "roomMessages", "wrong-expiry"), { roomId: "active-room", senderId: "member", tempName: "Member", text: "wrong", expiresAt: expiresSoon(), moderationState: "visible", createdAt: serverTimestamp() }));
-  await assertFails(setDoc(doc(member, "roomMessages", "missing-message-expiry"), { roomId: "active-room", senderId: "member", tempName: "Member", text: "wrong", moderationState: "visible", createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(member, "roomMessages", "wrong-expiry"), encryptedMessage("active-room", "wrong", expiresSoon())));
+  const missingExpiryMessage = encryptedMessage("active-room", "wrong", activeExpiry);
+  delete missingExpiryMessage.expiresAt;
+  await assertFails(setDoc(doc(member, "roomMessages", "missing-message-expiry"), missingExpiryMessage));
   for (const roomId of ["expired-room", "malformed-room"]) {
     await assertFails(setDoc(doc(member, "roomMembers", `${roomId}_member`), { roomId, uid: "member", joinedAt: serverTimestamp() }));
-    await assertFails(setDoc(doc(member, "roomMessages", `${roomId}-message`), { roomId, senderId: "member", tempName: "Member", text: "expired", expiresAt: new Date(0), moderationState: "visible", createdAt: serverTimestamp() }));
+    await assertFails(setDoc(doc(member, "roomMessages", `${roomId}-message`), encryptedMessage(roomId, "expired", new Date(0))));
   }
   await assertFails(updateDoc(doc(member, "rooms", "active-room"), {
     cleanupState: "closing", closedAt: serverTimestamp(), expiresAt: serverTimestamp()
