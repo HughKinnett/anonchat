@@ -1,0 +1,22 @@
+name: Admin command center CI
+on:
+  push:
+    branches:
+      - feature/simplified-admin-command-center
+  pull_request:
+    paths:
+      - 'admin.html'
+      - 'admin.css'
+      - 'admin.js'
+      - 'firestore.rules'
+      - 'scripts/test-admin-command-center.mjs'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run admin command center tests
+        run: node scripts/test-admin-command-center.mjs
