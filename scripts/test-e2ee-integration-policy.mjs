@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = name => readFile(new URL(`../${name}`, import.meta.url), "utf8");
-const [community, premium, rules, terms, privacy, shell, identity, communityCss] = await Promise.all([
+const [community, premium, rules, terms, privacy, shell, identity] = await Promise.all([
   "community.js", "premium-rooms.js", "firestore.rules", "terms.html", "privacy.html", "sw.js",
-  "e2ee-identity.js", "community.css"
+  "e2ee-identity.js"
 ].map(read));
 
 for (const surface of [community, premium]) {
@@ -36,7 +36,11 @@ assert.match(identity, /I understand that AnonChat cannot recover my encryption 
   "setup requires an explicit unrecoverable-credential acknowledgment");
 assert.match(identity, /acknowledgment\.required = setup/,
   "credential acknowledgment is required during password and PIN creation");
-assert.match(communityCss, /\.e2ee-recovery-warning\s*\{[^}]*color:\s*#(?:fca5a5|ff[0-9a-f]{4})/i,
-  "the unrecoverable-credential warning is styled in a prominent red tone");
+assert.match(identity, /recoveryWarning\.style\.color = "#fca5a5"/,
+  "the unrecoverable-credential warning uses prominent red text");
+assert.match(identity, /recoveryWarning\.style\.border = "1px solid #ef4444"/,
+  "the unrecoverable-credential warning has a red border");
+assert.match(identity, /acknowledgmentLabel\.style\.color = "#fca5a5"/,
+  "the acknowledgment remains visually tied to the red warning");
 
 console.log("E2EE integration policy passed.");
