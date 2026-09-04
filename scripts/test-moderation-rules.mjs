@@ -39,6 +39,7 @@ const repost = (originalPostId = "post-1", overrides = {}) => ({
 });
 const withoutModerationState = ({ moderationState, ...record }) => record;
 const roomExpiry = new Date(Date.now() + 86_400_000);
+const cipher = value => ({ version: 1, algorithm: "A256GCM", iv: "a".repeat(16), ciphertext: Buffer.from(value).toString("base64") });
 const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
   const db = context.firestore();
   await Promise.all([
@@ -53,6 +54,7 @@ const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
     setDoc(doc(db, "posts", "post-1"), { type: "original", authorId: "author", username: "author", content: "reportable", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
     setDoc(doc(db, "posts", "post-2"), { type: "original", authorId: "author", username: "author", content: "reportable", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
     setDoc(doc(db, "posts", "post-3"), { type: "original", authorId: "author", username: "author", content: "reportable", imageData: "", category: "Post", options: [], createdAt: new Date(0) }),
+    setDoc(doc(db, "posts", "admin-delete-post"), { type: "original", authorId: "author", username: "author", content: "admin delete target", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(db, "posts", "active-post"), { type: "original", authorId: "author", username: "author", content: "active", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(db, "communityPosts", "community-1"), { authorId: "author", username: "author", content: "reportable", category: "Question", circleId: "circle-1", options: [], createdAt: new Date(0) }),
     setDoc(doc(db, "communityPosts", "active-community"), { authorId: "author", username: "author", content: "active", category: "Question", circleId: "circle-1", options: [], moderationState: "visible", createdAt: new Date(0) }),
@@ -75,11 +77,11 @@ const seed = () => testEnv.withSecurityRulesDisabled(async (context) => {
 
 try {
   await seed();
-  const reporter = testEnv.authenticatedContext("reporter").firestore();
-  const author = testEnv.authenticatedContext("author").firestore();
-  const stranger = testEnv.authenticatedContext("stranger").firestore();
-  const admin = testEnv.authenticatedContext("admin").firestore();
-  const adminTwo = testEnv.authenticatedContext("admin-two").firestore();
+  const reporter = testEnv.authenticatedContext("reporter", { email_verified: true }).firestore();
+  const author = testEnv.authenticatedContext("author", { email_verified: true }).firestore();
+  const stranger = testEnv.authenticatedContext("stranger", { email_verified: true }).firestore();
+  const admin = testEnv.authenticatedContext("admin", { email_verified: true }).firestore();
+  const adminTwo = testEnv.authenticatedContext("admin-two", { email_verified: true }).firestore();
   const unauthenticated = testEnv.unauthenticatedContext().firestore();
   const intakeRef = doc(reporter, "reportIntakes", "reporter_post_post-1");
   const missingReceipt = doc(reporter, "reportReceipts", "reporter", "post", "post-3");
@@ -139,8 +141,8 @@ try {
     postCollection: "communityPosts", postId: "community-1", uid: "reporter", option: 0, createdAt: serverTimestamp()
   }), "active Community posts retain voting controls");
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-message"), {
-    roomId: "room-1", senderId: "stranger", tempName: "Stranger", text: "active room", expiresAt: roomExpiry,
-    moderationState: "visible", createdAt: serverTimestamp()
+    roomId: "room-1", senderId: "stranger", tempName: "Stranger", encrypted: true, cipherVersion: 1,
+    bodyCipher: cipher("active room"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
   }), "active rooms retain messaging controls");
 
   await assertSucceeds(writeReport(reporter, intake()));
@@ -172,8 +174,8 @@ try {
   await assertFails(getDoc(doc(stranger, "roomMessages", "active-room-message")), "retained room messages inherit the hidden parent protection");
   await assertSucceeds(getDoc(doc(admin, "roomMessages", "active-room-message")), "admins retain transcript access while the room is hidden");
   await assertFails(setDoc(doc(stranger, "roomMessages", "after-room-report"), {
-    roomId: "room-1", senderId: "stranger", tempName: "Stranger", text: "hidden room", expiresAt: roomExpiry,
-    moderationState: "visible", createdAt: serverTimestamp()
+    roomId: "room-1", senderId: "stranger", tempName: "Stranger", encrypted: true, cipherVersion: 1,
+    bodyCipher: cipher("hidden room"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
   }), "reported rooms deny messaging immediately");
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await updateDoc(doc(context.firestore(), "rooms", "room-1"), { cleanupState: "closing" });
@@ -270,15 +272,15 @@ try {
   }));
   await assertFails(setDoc(doc(admin, "moderationCases", "forged"), { status: "open" }));
   await assertFails(setDoc(doc(stranger, "moderationCases", "case-post-1", "reports", "forged"), { reporterUid: "stranger" }));
-  await assertFails(deleteDoc(doc(admin, "posts", "post-2")));
   const deletionTime = serverTimestamp(), deletionBatch = writeBatch(admin);
-  deletionBatch.set(doc(admin, "moderationCases", "post_post-2"), {
-    targetKind: "post", targetCollection: "posts", targetId: "post-2", targetPath: "posts/post-2", reportedUserId: "author",
+  deletionBatch.set(doc(admin, "moderationCases", "post_admin-delete-post"), {
+    targetKind: "post", targetCollection: "posts", targetId: "admin-delete-post", targetPath: "posts/admin-delete-post", reportedUserId: "author",
     snapshot: { kind: "queuedAdminDeletion" }, status: "deleteQueued", reportCount: 0, reasonTotals: {}, createdAt: deletionTime, updatedAt: deletionTime
   });
-  deletionBatch.set(doc(admin, "moderationActions", "post_post-2"), { action: "deleteMaterial", requestedAt: deletionTime, requestedBy: "admin", status: "queued" });
+  deletionBatch.set(doc(admin, "moderationActions", "post_admin-delete-post"), { action: "deleteMaterial", requestedAt: deletionTime, requestedBy: "admin", status: "queued" });
   await assertSucceeds(deletionBatch.commit());
-  assert.equal((await getDoc(doc(admin, "moderationCases", "post_post-2"))).data().status, "deleteQueued");
+  assert.equal((await getDoc(doc(admin, "moderationCases", "post_admin-delete-post"))).data().status, "deleteQueued");
+  await assertSucceeds(deleteDoc(doc(admin, "posts", "post-2")), "authorized admins retain direct post deletion controls");
   await testEnv.withSecurityRulesDisabled(async (context) => setDoc(doc(context.firestore(), "moderationCases", "post_post-3"), {
     targetKind: "post", targetCollection: "posts", targetId: "post-3", targetPath: "posts/post-3", reportedUserId: "author",
     snapshot: { kind: "post" }, status: "restored", reportCount: 1, reasonTotals: { other: 1 }, createdAt: new Date(0), updatedAt: new Date(0)
@@ -335,8 +337,8 @@ try {
   await assertSucceeds(setDoc(doc(reporter, "roomMembers", "active-room_reporter"), { roomId: "active-room", uid: "reporter", joinedAt: serverTimestamp() }));
   await assertSucceeds(updateDoc(doc(stranger, "roomMembers", "active-room_stranger"), { joinedAt: serverTimestamp() }));
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "visible-room-direct"), {
-    roomId: "active-room", senderId: "stranger", tempName: "Stranger", text: "direct api",
-    expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
+    roomId: "active-room", senderId: "stranger", tempName: "Stranger", encrypted: true, cipherVersion: 1,
+    bodyCipher: cipher("direct api"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
   }));
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-parent", "comments", "visible-control"), comment));
   await assertSucceeds(setDoc(doc(stranger, "roomMessages", "active-room-parent", "reactions", "stranger"), reaction));
@@ -347,9 +349,9 @@ try {
   await assertFails(setDoc(doc(stranger, "roomMembers", "hidden-room_new"), { roomId: "hidden-room", uid: "stranger", joinedAt: serverTimestamp() }));
   await assertFails(updateDoc(doc(stranger, "roomMembers", "hidden-room_stranger"), { joinedAt: serverTimestamp() }));
   await assertFails(setDoc(doc(stranger, "roomMessages", "hidden-room-direct"), {
-    roomId: "hidden-room", senderId: "stranger", tempName: "Stranger", text: "direct api",
-    expiresAt: new Date(Date.now() + 86_400_000), moderationState: "visible", createdAt: serverTimestamp()
-  }));
+    roomId: "hidden-room", senderId: "stranger", tempName: "Stranger", encrypted: true, cipherVersion: 1,
+    bodyCipher: cipher("direct api"), expiresAt: roomExpiry, moderationState: "visible", createdAt: serverTimestamp()
+  }), "a valid encrypted message is still denied while its room is on moderation hold");
   await assertSucceeds(deleteDoc(doc(stranger, "roomMessages", "visible-room-direct")), "a sender can delete their message while its room remains active");
   await assertFails(deleteDoc(doc(author, "roomMessages", "visible-message-hidden-room")), "a sender cannot mutate a retained message while its room is on hold");
   await assertFails(setDoc(doc(stranger, "roomMessages", "visible-message-hidden-room", "comments", "direct-api"), comment));

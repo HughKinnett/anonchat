@@ -26,6 +26,7 @@ import { createSessionGeneration } from "./session-generation-policy.mjs";
 import {
   boundedInteractionCount,
   interactionParentLoadState,
+  interactionParentStateMessage,
   MAX_INTERACTION_ITEMS_PER_PARENT,
   MAX_INTERACTION_PARENTS,
   timelineInteractionPlan
@@ -1166,7 +1167,11 @@ const renderPost = (postDoc) => {
     item.append(category);
   }
 
+  const interactionEntry = interactionSubscriptions.get(parent.path);
   const reactionDocs = postReactions(postDoc);
+  const interactionState = interactionParentLoadState(interactionSubscriptions.get(parent.path));
+  const reactionsReady = Boolean(interactionEntry?.ready?.reactions && interactionEntry?.ready?.viewerReaction);
+  const commentsReady = Boolean(interactionEntry?.ready?.comments);
   const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");
   const reactionsBar = document.createElement("div");
   reactionsBar.className = "reactions";
@@ -1186,9 +1191,14 @@ const renderPost = (postDoc) => {
   const activeReactionIcons = activeReactionTypes.map((type) => reactionEmoji[type]).filter(Boolean).join(" ");
   const count = reactionDocs.length;
   const reactionTotal = boundedInteractionCount(count, reactionsTruncated);
-  interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${reactionTotal}`;
-  interactionSummaryLabel.setAttribute("aria-label",
-    `${reactionTotal} interaction${count === 1 ? "" : "s"}. Show who interacted.`);
+  if (reactionsReady) {
+    interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${reactionTotal}`;
+    interactionSummaryLabel.setAttribute("aria-label",
+      `${reactionTotal} interaction${count === 1 ? "" : "s"}. Show who interacted.`);
+  } else {
+    interactionSummaryLabel.textContent = interactionParentStateMessage(interactionState);
+    interactionSummaryLabel.setAttribute("aria-label", interactionParentStateMessage(interactionState));
+  }
   interactionSummaryLabel.title = "Show who interacted with this post";
   const interactionPeople = document.createElement("ul");
   if (!reactionDocs.length) {
@@ -1248,7 +1258,7 @@ const renderPost = (postDoc) => {
   }
 
   let commentsSection;
-  {
+  if (commentsReady) {
     const commentDocs = postComments(postDoc);
     commentsSection = document.createElement("details");
   commentsSection.className = "comments-section";
@@ -1347,6 +1357,13 @@ const renderPost = (postDoc) => {
   });
 
   commentsSection.append(commentsSummary, commentsList, commentForm);
+  } else if (interactionState === "unavailable") {
+    commentsSection = document.createElement("div");
+    commentsSection.hidden = true;
+  } else {
+    commentsSection = document.createElement("p");
+    commentsSection.className = "interaction-load-state muted";
+    commentsSection.textContent = interactionParentStateMessage(interactionState);
   }
 
   const actions = document.createElement("div");

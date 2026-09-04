@@ -398,6 +398,7 @@ for (const stats of [
       if (descriptor.collection === "comments") path = `posts/group-parent/comments/group-${entryNumber}`;
       if (descriptor.collection === "replies") path = `posts/group-parent/comments/group-parent/replies/group-${entryNumber}`;
       if (descriptor.collection === "reactions") path = `posts/group-parent/reactions/group-${entryNumber}`;
+      if (descriptor.collection === "messages") path = `premiumRooms/group-parent/messages/group-${entryNumber}`;
       if (descriptor.collection === "reports") path = `moderationCases/group-parent/reports/group-${entryNumber}`;
     } else {
       path = `${descriptor.collection}/cleanup-${String(entryNumber).padStart(3, "0")}`;

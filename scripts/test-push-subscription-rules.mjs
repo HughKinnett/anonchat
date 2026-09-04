@@ -53,13 +53,13 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
 
 try {
   await seed();
-  const userA = testEnv.authenticatedContext("user-a").firestore();
-  const userB = testEnv.authenticatedContext("user-b").firestore();
-  const banned = testEnv.authenticatedContext("banned-user").firestore();
-  const deleting = testEnv.authenticatedContext("deleting-user").firestore();
-  const selfDeleting = testEnv.authenticatedContext("self-deleting-user").firestore();
-  const selfDeleteFlow = testEnv.authenticatedContext("self-delete-flow").firestore();
-  const admin = testEnv.authenticatedContext("admin-user").firestore();
+  const userA = testEnv.authenticatedContext("user-a", { email_verified: true }).firestore();
+  const userB = testEnv.authenticatedContext("user-b", { email_verified: true }).firestore();
+  const banned = testEnv.authenticatedContext("banned-user", { email_verified: true }).firestore();
+  const deleting = testEnv.authenticatedContext("deleting-user", { email_verified: true }).firestore();
+  const selfDeleting = testEnv.authenticatedContext("self-deleting-user", { email_verified: true }).firestore();
+  const selfDeleteFlow = testEnv.authenticatedContext("self-delete-flow", { email_verified: true }).firestore();
+  const admin = testEnv.authenticatedContext("admin-user", { email_verified: true }).firestore();
   const unauthenticated = testEnv.unauthenticatedContext().firestore();
 
   await assertSucceeds(setDoc(doc(userA, "pushSubscriptions", IDS.own), data("user-a", "own")));
@@ -77,7 +77,7 @@ try {
   await assertFails(setDoc(doc(banned, "pushSubscriptions", IDS.denied), data("banned-user", "banned")));
   await assertFails(setDoc(doc(deleting, "pushSubscriptions", IDS.denied), data("deleting-user", "deleting")));
   await assertFails(setDoc(doc(selfDeleting, "pushSubscriptions", IDS.denied), data("self-deleting-user", "self-deleting")));
-  await assertFails(setDoc(doc(testEnv.authenticatedContext("missing-profile").firestore(), "pushSubscriptions", IDS.denied), data("missing-profile")));
+  await assertFails(setDoc(doc(testEnv.authenticatedContext("missing-profile", { email_verified: true }).firestore(), "pushSubscriptions", IDS.denied), data("missing-profile")));
   await assertFails(getDoc(doc(banned, "pushSubscriptions", IDS.banned)));
   await assertFails(deleteDoc(doc(banned, "pushSubscriptions", IDS.banned)));
   await assertFails(getDoc(doc(deleting, "pushSubscriptions", IDS.deleting)));
@@ -105,7 +105,7 @@ try {
     targetUid: "self-delete-flow", requesterUid: "self-delete-flow", requestedAt: deletionTime, requestType: "self", status: "queued"
   });
   await assertSucceeds(deletionBatch.commit());
-  const sameUserOtherDevice = testEnv.authenticatedContext("self-delete-flow").firestore();
+  const sameUserOtherDevice = testEnv.authenticatedContext("self-delete-flow", { email_verified: true }).firestore();
   await assertFails(setDoc(doc(sameUserOtherDevice, "pushSubscriptions", IDS.selfDeleteRace), data("self-delete-flow", "race-create")));
   await assertFails(updateDoc(doc(sameUserOtherDevice, "pushSubscriptions", IDS.selfDeleteFlow), {
     auth: "race_update_auth",

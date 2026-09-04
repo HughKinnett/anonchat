@@ -42,7 +42,7 @@ try {
       ...overflowInteractions
     ]);
   });
-  const db = testEnv.authenticatedContext("viewer").firestore();
+  const db = testEnv.authenticatedContext("viewer", { email_verified: true }).firestore();
   await assertSucceeds(getDoc(doc(db, "posts", "visible")),
     "a canonical visible parent can be resolved by exact document path");
   await assertFails(getDoc(doc(db, "posts", "hidden")),

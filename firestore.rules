@@ -1261,6 +1261,8 @@ service cloud.firestore {
           || requestId == conversation.data.toId + '_' + conversation.data.fromId)
         && (conversation.data.fromId == request.auth.uid
           || conversation.data.toId == request.auth.uid)
+        && accountAvailableAfter(conversation.data.fromId)
+        && accountAvailableAfter(conversation.data.toId)
         && !pairIsBlocked(conversation.data.fromId, conversation.data.toId)
         && message.participants is list
         && message.participants.size() == 2

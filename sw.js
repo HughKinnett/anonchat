@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v116";
+const CACHE_NAME = "anonchat-v117";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -31,6 +31,7 @@ const APP_SHELL = [
   "./delete-account.css",
   "./admin.css",
   "./legal.css",
+  "./sharing-privacy.css",
   "./firebase-config.js",
   "./legacy-profile.js",
   "./default-follows.js",
@@ -42,6 +43,8 @@ const APP_SHELL = [
   "./activity-integration.mjs",
   "./loginfirebase.js",
   "./timeline.js",
+  "./post-sharing.js",
+  "./social-sharing-policy.mjs",
   "./emoji-picker.js",
   "./push-config.mjs",
   "./push-policy.mjs",
@@ -80,6 +83,8 @@ const APP_SHELL = [
   "./content-ordering.mjs",
   "./feed-ranking-policy.mjs",
   "./e2ee-crypto.mjs",
+  "./e2ee-pin.mjs",
+  "./e2ee-device-store.mjs",
   "./e2ee-identity.js",
   "./e2ee-room-keys.js",
   "./content-writer-policy.mjs",

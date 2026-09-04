@@ -1,11 +1,12 @@
 import { auth, db } from "./firebase-config.js";
+import { exitAfterAuthLoss } from "./push-exit.js";
 import { hasPremiumAccess, premiumLabel } from "./premium-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { addDoc, collection, doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const status = document.getElementById("premium-status"), checkout = document.getElementById("premium-checkout");
 onAuthStateChanged(auth, async user => {
-  if (!user) { location.replace("index.html"); return; }
+  if (!user) { await exitAfterAuthLoss(); location.replace("index.html"); return; }
   const snapshot = await getDoc(doc(db, "premiumAccess", user.uid));
   const access = snapshot.exists() ? snapshot.data() : null;
   const active = hasPremiumAccess(access);

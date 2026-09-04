@@ -57,11 +57,11 @@ const selfQueue = (firestore, uid = "member", username = "member", overrides = {
 
 try {
   await seed();
-  const admin = testEnv.authenticatedContext("admin").firestore();
-  const adminTwo = testEnv.authenticatedContext("admin-two").firestore();
-  const formerHandle = testEnv.authenticatedContext("former-handle").firestore();
-  const member = testEnv.authenticatedContext("member").firestore();
-  const target = testEnv.authenticatedContext("target").firestore();
+  const admin = testEnv.authenticatedContext("admin", { email_verified: true }).firestore();
+  const adminTwo = testEnv.authenticatedContext("admin-two", { email_verified: true }).firestore();
+  const formerHandle = testEnv.authenticatedContext("former-handle", { email_verified: true }).firestore();
+  const member = testEnv.authenticatedContext("member", { email_verified: true }).firestore();
+  const target = testEnv.authenticatedContext("target", { email_verified: true }).firestore();
 
   await assertSucceeds(selfQueue(member));
   await assertSucceeds(getDoc(doc(member, "accountDeletionRequests", "member")));
@@ -72,17 +72,17 @@ try {
   await assertFails(deleteDoc(doc(member, "adminDeletionJobs", "member")));
 
   await testEnv.clearFirestore(); await seed();
-  const memberAgain = testEnv.authenticatedContext("member").firestore();
+  const memberAgain = testEnv.authenticatedContext("member", { email_verified: true }).firestore();
   await assertFails(selfQueue(memberAgain, "target", "target"));
   await assertFails(selfQueue(memberAgain, "member", "member", { job: { targetUid: "member", requesterUid: "member", requestedAt: serverTimestamp(), requestType: "admin", status: "queued" } }));
-  await assertFails(selfQueue(testEnv.authenticatedContext("protected-one").firestore(), "protected-one", "  I_LOVE_YOU_H  "));
+  await assertFails(selfQueue(testEnv.authenticatedContext("protected-one", { email_verified: true }).firestore(), "protected-one", "  I_LOVE_YOU_H  "));
 
   await testEnv.clearFirestore(); await seed();
   const legacyCreatedAt = new Date(1234);
   await testEnv.withSecurityRulesDisabled(async (context) => setDoc(doc(context.firestore(), "accountDeletionRequests", "member"), {
     uid: "member", username: "member", createdAt: legacyCreatedAt
   }));
-  const legacyMember = testEnv.authenticatedContext("member").firestore();
+  const legacyMember = testEnv.authenticatedContext("member", { email_verified: true }).firestore();
   await assertSucceeds(setDoc(doc(legacyMember, "adminDeletionJobs", "member"), {
     targetUid: "member", requesterUid: "member", requestedAt: legacyCreatedAt, requestType: "self", status: "queued"
   }));
@@ -160,7 +160,7 @@ try {
       setDoc(doc(firestore, "users", "target"), profile("target", "target"))
     ]);
   });
-  const forgedAdmin = testEnv.authenticatedContext("forged-admin").firestore();
+  const forgedAdmin = testEnv.authenticatedContext("forged-admin", { email_verified: true }).firestore();
   await assertFails(updateDoc(doc(forgedAdmin, "users", "target"), { banned: true }));
 
   await testEnv.clearFirestore();
@@ -172,7 +172,7 @@ try {
       setDoc(doc(firestore, "users", "target"), profile("target", "target"))
     ]);
   });
-  const mismatchedAdmin = testEnv.authenticatedContext("mismatched-admin").firestore();
+  const mismatchedAdmin = testEnv.authenticatedContext("mismatched-admin", { email_verified: true }).firestore();
   await assertFails(updateDoc(doc(mismatchedAdmin, "users", "target"), { banned: true }));
 
   await testEnv.clearFirestore(); await seed();
@@ -190,8 +190,8 @@ try {
     ]);
   });
   const unauthenticated = testEnv.unauthenticatedContext().firestore();
-  const forgedHealthAdmin = testEnv.authenticatedContext("forged-health-admin").firestore();
-  const mismatchedHealthAdmin = testEnv.authenticatedContext("mismatched-health-admin").firestore();
+  const forgedHealthAdmin = testEnv.authenticatedContext("forged-health-admin", { email_verified: true }).firestore();
+  const mismatchedHealthAdmin = testEnv.authenticatedContext("mismatched-health-admin", { email_verified: true }).firestore();
   await assertSucceeds(getDoc(doc(admin, "system", "deletionProcessor")));
   await assertFails(getDoc(doc(member, "system", "deletionProcessor")));
   await assertFails(getDoc(doc(forgedHealthAdmin, "system", "deletionProcessor")));
@@ -210,7 +210,7 @@ try {
       setDoc(doc(firestore, "usernames", "cybercapone"), { uid: "banned-health-admin", username: "CyberCapone", createdAt: new Date(0) })
     ]);
   });
-  const bannedHealthAdmin = testEnv.authenticatedContext("banned-health-admin").firestore();
+  const bannedHealthAdmin = testEnv.authenticatedContext("banned-health-admin", { email_verified: true }).firestore();
   await assertFails(getDoc(doc(bannedHealthAdmin, "system", "deletionProcessor")));
 
   console.log("Firestore administrator deletion queue authorization passed");

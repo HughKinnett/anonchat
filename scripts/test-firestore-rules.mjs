@@ -12,6 +12,7 @@ const users = ["user-a", "user-b", "user-c"];
 const requestPath = "messageRequests/user-a_user-b";
 const profile = (uid) => ({ uid, username: uid.replace("-", "_"), banned: false });
 const declinedRequest = { fromId: "user-a", toId: "user-b", status: "declined", createdAt: new Date(0), respondedAt: new Date(1) };
+const verifiedContext = (uid) => testEnv.authenticatedContext(uid, { email_verified: true }).firestore();
 
 const seed = async (request = declinedRequest) => testEnv.withSecurityRulesDisabled(async (context) => {
   await Promise.all(users.map((uid) => setDoc(doc(context.firestore(), "users", uid), profile(uid))));
@@ -20,7 +21,7 @@ const seed = async (request = declinedRequest) => testEnv.withSecurityRulesDisab
 
 try {
   await seed();
-  const userB = testEnv.authenticatedContext("user-b").firestore();
+  const userB = verifiedContext("user-b");
   await assertSucceeds(updateDoc(doc(userB, requestPath), {
     fromId: "user-b", toId: "user-a", status: "pending", createdAt: serverTimestamp()
   }));
@@ -28,7 +29,7 @@ try {
 
   await testEnv.clearFirestore();
   await seed();
-  const userA = testEnv.authenticatedContext("user-a").firestore();
+  const userA = verifiedContext("user-a");
   await assertSucceeds(updateDoc(doc(userA, requestPath), {
     fromId: "user-a", toId: "user-b", status: "pending", createdAt: serverTimestamp()
   }));
@@ -41,7 +42,7 @@ try {
 
   await testEnv.clearFirestore();
   await seed();
-  const userC = testEnv.authenticatedContext("user-c").firestore();
+  const userC = verifiedContext("user-c");
   await assertFails(updateDoc(doc(userC, requestPath), {
     fromId: "user-c", toId: "user-a", status: "pending", createdAt: serverTimestamp()
   }));

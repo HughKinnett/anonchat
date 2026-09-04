@@ -15,6 +15,9 @@ const randomBytes = size => crypto.getRandomValues(new Uint8Array(size));
 const importPublicKey = jwk => crypto.subtle.importKey("jwk", jwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
 const importPrivateKey = jwk => crypto.subtle.importKey("jwk", jwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
 
+export const exportPrivateKeyJwk = privateKey => crypto.subtle.exportKey("jwk", privateKey);
+export const importPrivateKeyJwk = jwk => importPrivateKey(jwk);
+
 const passwordKey = async (passphrase, salt, iterations = PBKDF2_ITERATIONS) => {
   const material = await crypto.subtle.importKey("raw", encoder.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
@@ -58,11 +61,12 @@ export const createIdentityBundle = async passphrase => {
       iv: bytesToBase64(iv),
       ciphertext: bytesToBase64(new Uint8Array(wrapped))
     },
-    privateKey: pair.privateKey
+    privateKey: pair.privateKey,
+    privateJwk
   };
 };
 
-export const unlockIdentityBundle = async (privateBundle, passphrase) => {
+export const unlockIdentityBundleJwk = async (privateBundle, passphrase) => {
   const password = validateEncryptionPassphrase(passphrase);
   if (privateBundle?.version !== VERSION || !privateBundle?.ciphertext) throw new Error("This chat identity is not supported.");
   try {
@@ -72,11 +76,15 @@ export const unlockIdentityBundle = async (privateBundle, passphrase) => {
       key,
       base64ToBytes(privateBundle.ciphertext)
     );
-    return importPrivateKey(JSON.parse(decoder.decode(plain)));
+    const jwk = JSON.parse(decoder.decode(plain));
+    if (!jwk || typeof jwk !== "object" || typeof jwk.d !== "string") throw new Error("invalid");
+    return jwk;
   } catch {
     throw new Error("That chat encryption password could not unlock your messages.");
   }
 };
+
+export const unlockIdentityBundle = async (privateBundle, passphrase) => importPrivateKey(await unlockIdentityBundleJwk(privateBundle, passphrase));
 
 export const derivePairwiseKey = async (privateKey, otherPublicJwk, context) => {
   const publicKey = await importPublicKey(otherPublicJwk);

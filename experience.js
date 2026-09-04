@@ -1,4 +1,5 @@
 import { auth } from "./firebase-config.js";
+import { exitAfterAuthLoss } from "./push-exit.js";
 import { contributionSummary, readBookmarks, readExperienceSettings, saveExperienceSettings } from "./experience-preferences.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
@@ -15,4 +16,4 @@ const renderLocal = (uid = "") => {
 };
 form.addEventListener("submit", event => { event.preventDefault(); saveExperienceSettings(Object.fromEntries(Object.keys(readExperienceSettings()).map(key => [key, form.elements[key]?.checked]))); status.textContent = "Experience saved on this device."; });
 document.getElementById("share-anonchat").addEventListener("click", async () => { const data = { title: "AnonChat", text: "Join me on AnonChat.", url: "https://anonchatlogin.web.app/" }; try { if (navigator.share) await navigator.share(data); else { await navigator.clipboard.writeText(data.url); status.textContent = "AnonChat link copied."; } } catch {} });
-onAuthStateChanged(auth, user => { if (!user) return location.replace("index.html"); populate(); renderLocal(user.uid); document.getElementById("clear-drafts").onclick = () => { localStorage.removeItem(`anonchat:post-draft:${user.uid}`); renderLocal(user.uid); status.textContent = "Local drafts cleared."; }; });
+onAuthStateChanged(auth, async user => { if (!user) { await exitAfterAuthLoss(); return location.replace("index.html"); } populate(); renderLocal(user.uid); document.getElementById("clear-drafts").onclick = () => { localStorage.removeItem(`anonchat:post-draft:${user.uid}`); renderLocal(user.uid); status.textContent = "Local drafts cleared."; }; });
