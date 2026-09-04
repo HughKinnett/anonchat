@@ -16,8 +16,8 @@ assert.deepEqual(
 const profile = await readFile(new URL("../profile.js", import.meta.url), "utf8");
 assert.match(
   profile,
-  /const ownConnectionsVisible = targetUserId === user\.uid;/,
-  "profile explicitly gates follower/following details to the profile owner"
+  /const ownConnectionsVisible = targetUserId === currentUser\.uid;/,
+  "profile explicitly gates follower/following details to the signed-in profile owner"
 );
 assert.match(
   profile,
@@ -28,6 +28,11 @@ assert.match(
   profile,
   /followingLink\.textContent = ownConnectionsVisible[\s\S]*?"Following private"/,
   "other users' following totals are not rendered"
+);
+assert.match(
+  profile,
+  /if \(ownConnectionsVisible\)[\s\S]*?followersLink\.href[\s\S]*?followingLink\.href[\s\S]*?else[\s\S]*?removeAttribute\("href"\)/,
+  "connection links are only navigable for the profile owner"
 );
 
 console.log("Follower graph privacy surface passed");
