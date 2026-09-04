@@ -39,6 +39,15 @@ const secureDialog = ({
   heading.textContent = headingText;
   const explanation = document.createElement("p");
   explanation.textContent = explanationText;
+  const recoveryWarning = document.createElement("div");
+  recoveryWarning.className = "e2ee-recovery-warning";
+  recoveryWarning.hidden = !setup;
+  recoveryWarning.setAttribute("role", "note");
+  const warningTitle = document.createElement("strong");
+  warningTitle.textContent = "Important: save your encryption password and PIN.";
+  const warningText = document.createElement("p");
+  warningText.textContent = "AnonChat does not store your encryption password or PIN in a recoverable form. AnonChat cannot recover, reset, or tell you what they are if you lose them. If you lose the recovery information needed for your encrypted account, you may permanently lose access to your encrypted conversations.";
+  recoveryWarning.append(warningTitle, warningText);
   const input = document.createElement("input");
   input.type = "password";
   input.required = true;
@@ -68,6 +77,15 @@ const secureDialog = ({
     confirmation.minLength = 12;
     confirmation.maxLength = 256;
   }
+  const acknowledgmentLabel = document.createElement("label");
+  acknowledgmentLabel.className = "e2ee-recovery-acknowledgment";
+  acknowledgmentLabel.hidden = !setup;
+  const acknowledgment = document.createElement("input");
+  acknowledgment.type = "checkbox";
+  acknowledgment.required = setup;
+  const acknowledgmentText = document.createElement("span");
+  acknowledgmentText.textContent = "I understand that AnonChat cannot recover my encryption password or PIN.";
+  acknowledgmentLabel.append(acknowledgment, acknowledgmentText);
   const error = document.createElement("p");
   error.className = "e2ee-password-error";
   error.setAttribute("role", "alert");
@@ -80,7 +98,7 @@ const secureDialog = ({
   submit.type = "submit";
   submit.textContent = submitText;
   actions.append(cancel, submit);
-  form.append(heading, explanation, input, confirmation, error, actions);
+  form.append(heading, explanation, recoveryWarning, input, confirmation, acknowledgmentLabel, error, actions);
   dialog.append(form);
   document.body.append(dialog);
   const finish = callback => { dialog.close(); dialog.remove(); callback(); };
@@ -99,8 +117,13 @@ const secureDialog = ({
       error.textContent = pin ? "Those chat PINs do not match." : "Those chat encryption passwords do not match.";
       return;
     }
+    if (setup && !acknowledgment.checked) {
+      error.textContent = "Please confirm that you understand AnonChat cannot recover your encryption password or PIN.";
+      return;
+    }
     input.value = "";
     confirmation.value = "";
+    acknowledgment.checked = false;
     finish(() => resolve(value));
   });
   dialog.showModal();
