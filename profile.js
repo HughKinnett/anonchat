@@ -320,11 +320,21 @@ const renderFollowControl = () => {
   const count = followerCount();
   const following = followingCount();
   const followersLink = document.getElementById("profile-followers");
-  const followingLink = document.getElementById("profile-following");
-  followersLink.textContent = `${count} ${count === 1 ? "follower" : "followers"}`;
-  followingLink.textContent = `${following} following`;
+const followingLink = document.getElementById("profile-following");
+const ownConnectionsVisible = targetUserId === currentUser.uid;
+followersLink.textContent = ownConnectionsVisible
+  ? `${count} ${count === 1 ? "follower" : "followers"}`
+  : "Followers private";
+followingLink.textContent = ownConnectionsVisible
+  ? `${following} following`
+  : "Following private";
+if (ownConnectionsVisible) {
   followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
   followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
+} else {
+  followersLink.removeAttribute("href");
+  followingLink.removeAttribute("href");
+}
 
   if (currentUser.uid === targetUserId) {
     socialActions.hidden = true;
