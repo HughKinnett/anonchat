@@ -22,4 +22,10 @@ for (const [name, source] of [["timeline", timeline], ["profile", profile]]) {
   );
 }
 
+assert.match(
+  timeline,
+  /const interactionsReady = reactionsReady && commentsReady;[\s\S]*?if \(interactionsReady\)/,
+  "timeline does not publish a combined interaction total until both reactions and comments are ready"
+);
+
 console.log("Cross-surface interaction details passed");
