@@ -1357,14 +1357,33 @@ const renderPost = (postDoc) => {
   });
 
   commentsSection.append(commentsSummary, commentsList, commentForm);
-  } else if (interactionState === "unavailable") {
-    commentsSection = document.createElement("div");
-    commentsSection.hidden = true;
   } else {
-    commentsSection = document.createElement("p");
-    commentsSection.className = "interaction-load-state muted";
-    commentsSection.textContent = interactionParentStateMessage(interactionState);
-  }
+  commentsSection = document.createElement("details");
+  commentsSection.className = "comments-section";
+  const commentsSummary = document.createElement("summary");
+  commentsSummary.textContent = interactionState === "unavailable"
+    ? "Comments · Retry"
+    : "Comments · Loading…";
+  const commentsStatus = document.createElement("p");
+  commentsStatus.className = "interaction-load-state muted";
+  commentsStatus.textContent = interactionState === "unavailable"
+    ? "Comments could not load. Open this section to retry the original post thread."
+    : interactionParentStateMessage(interactionState);
+  commentsSection.append(commentsSummary, commentsStatus);
+  commentsSection.addEventListener("toggle", () => {
+    if (!commentsSection.open) return;
+    manuallyLoadedInteractionPaths.add(parent.path);
+    if (interactionState === "unavailable") {
+      const staleEntry = interactionSubscriptions.get(parent.path);
+      if (staleEntry) {
+        staleEntry.sourceUnsubscribe?.();
+        staleEntry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
+        interactionSubscriptions.delete(parent.path);
+      }
+    }
+    syncInteractionListeners();
+  }, { once: true });
+}
 
   const actions = document.createElement("div");
   actions.className = "post-actions";
