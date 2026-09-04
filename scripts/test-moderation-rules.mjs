@@ -271,7 +271,6 @@ try {
   }));
   await assertFails(setDoc(doc(admin, "moderationCases", "forged"), { status: "open" }));
   await assertFails(setDoc(doc(stranger, "moderationCases", "case-post-1", "reports", "forged"), { reporterUid: "stranger" }));
-  await assertSucceeds(deleteDoc(doc(admin, "posts", "post-2")), "authorized admins retain direct post deletion controls");
   const deletionTime = serverTimestamp(), deletionBatch = writeBatch(admin);
   deletionBatch.set(doc(admin, "moderationCases", "post_post-2"), {
     targetKind: "post", targetCollection: "posts", targetId: "post-2", targetPath: "posts/post-2", reportedUserId: "author",
@@ -280,6 +279,7 @@ try {
   deletionBatch.set(doc(admin, "moderationActions", "post_post-2"), { action: "deleteMaterial", requestedAt: deletionTime, requestedBy: "admin", status: "queued" });
   await assertSucceeds(deletionBatch.commit());
   assert.equal((await getDoc(doc(admin, "moderationCases", "post_post-2"))).data().status, "deleteQueued");
+  await assertSucceeds(deleteDoc(doc(admin, "posts", "post-2")), "authorized admins retain direct post deletion controls");
   await testEnv.withSecurityRulesDisabled(async (context) => setDoc(doc(context.firestore(), "moderationCases", "post_post-3"), {
     targetKind: "post", targetCollection: "posts", targetId: "post-3", targetPath: "posts/post-3", reportedUserId: "author",
     snapshot: { kind: "post" }, status: "restored", reportCount: 1, reasonTotals: { other: 1 }, createdAt: new Date(0), updatedAt: new Date(0)
