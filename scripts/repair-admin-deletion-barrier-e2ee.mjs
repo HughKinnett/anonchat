@@ -34,3 +34,4 @@ for (const [before, after] of replacements) {
 if (source.includes('doc(firestore, "directMessages", `message_${suffix}`)')) throw new Error("Legacy directMessages write remains.");
 await writeFile(path, source);
 console.log("Aligned admin deletion barrier fixtures with current E2EE message paths.");
+// Trigger the repair workflow after its definition exists on the branch.
