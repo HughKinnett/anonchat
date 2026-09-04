@@ -1194,14 +1194,8 @@ const renderPost = (postDoc) => {
   const interactionCount = reactionDocs.length + commentDocs.length;
   const interactionTruncated = reactionsTruncated || interactionIsTruncated(parent.path, "comments");
   const interactionTotal = boundedInteractionCount(interactionCount, interactionTruncated);
-  if (interactionsReady) {
-    interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;
-    interactionSummaryLabel.setAttribute("aria-label",
-      `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);
-  } else {
-    interactionSummaryLabel.textContent = interactionParentStateMessage(interactionState);
-    interactionSummaryLabel.setAttribute("aria-label", interactionParentStateMessage(interactionState));
-  }
+  interactionSummaryLabel.textContent = `💬 ${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;
+  interactionSummaryLabel.setAttribute("aria-label", `${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}. Show who interacted.`);
   interactionSummaryLabel.title = "Show who interacted with this post";
   const interactionPeople = document.createElement("ul");
   if (!interactionCount) {
@@ -1270,8 +1264,7 @@ const renderPost = (postDoc) => {
   }
 
   let commentsSection;
-  if (commentsReady) {
-    commentsSection = document.createElement("details");
+  commentsSection = document.createElement("details");
   commentsSection.className = "comments-section";
   const commentsSummary = document.createElement("summary");
   commentsSummary.textContent = `Comments · ${boundedInteractionCount(
@@ -1368,33 +1361,6 @@ const renderPost = (postDoc) => {
   });
 
   commentsSection.append(commentsSummary, commentsList, commentForm);
-  } else {
-  commentsSection = document.createElement("details");
-  commentsSection.className = "comments-section";
-  const commentsSummary = document.createElement("summary");
-  commentsSummary.textContent = interactionState === "unavailable"
-    ? "Comments · Retry"
-    : "Comments · Loading…";
-  const commentsStatus = document.createElement("p");
-  commentsStatus.className = "interaction-load-state muted";
-  commentsStatus.textContent = interactionState === "unavailable"
-    ? "Comments could not load. Open this section to retry the original post thread."
-    : interactionParentStateMessage(interactionState);
-  commentsSection.append(commentsSummary, commentsStatus);
-  commentsSection.addEventListener("toggle", () => {
-    if (!commentsSection.open) return;
-    manuallyLoadedInteractionPaths.add(parent.path);
-    if (interactionState === "unavailable") {
-      const staleEntry = interactionSubscriptions.get(parent.path);
-      if (staleEntry) {
-        staleEntry.sourceUnsubscribe?.();
-        staleEntry.childUnsubscribes.forEach((unsubscribe) => unsubscribe());
-        interactionSubscriptions.delete(parent.path);
-      }
-    }
-    syncInteractionListeners();
-  }, { once: true });
-}
 
   const actions = document.createElement("div");
   actions.className = "post-actions";
@@ -1680,11 +1646,7 @@ const syncInteractionListeners = () => {
     const existing = interactionSubscriptions.get(path);
     const visibleParent = visibleParents.get(path);
     if (existing) {
-      const shouldListen = !document.hidden
-        && (!interactionVisibilityObserver || visibleInteractionPaths.has(path) || manuallyLoadedInteractionPaths.has(path));
-      if (!shouldListen && existing.childrenStarted) pauseInteractionChildren(existing);
-      if (visibleParent && !existing.childrenStarted
-        && shouldListen) {
+      if (visibleParent && !existing.childrenStarted) {
         existing.sourceUnsubscribe?.();
         existing.sourceUnsubscribe = undefined;
         existing.parentDoc = visibleParent;
@@ -1710,8 +1672,7 @@ const syncInteractionListeners = () => {
     };
     interactionSubscriptions.set(path, entry);
     if (visibleParent) {
-      if (!document.hidden
-        && (!interactionVisibilityObserver || visibleInteractionPaths.has(path) || manuallyLoadedInteractionPaths.has(path))) startInteractionChildren(entry);
+      startInteractionChildren(entry);
       return;
     }
     entry.sourceUnsubscribe = onSnapshot(
