@@ -9,8 +9,8 @@ const protectPlaylistEmbed = (frame) => {
   const mask = document.createElement("div");
   mask.className = "spotify-playlist-name-mask";
   mask.setAttribute("aria-hidden", "true");
-  mask.innerHTML = '<span>Spotify playlist</span><small>Playlist name hidden for privacy</small>';
-  host.insertBefore(mask, frame);
+  mask.textContent = "Spotify playlist";
+  host.append(mask);
 };
 
 const protectAll = () => document.querySelectorAll(PLAYLIST_EMBED).forEach(protectPlaylistEmbed);
