@@ -26,25 +26,20 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
+
           path = Path('timeline.js')
           text = path.read_text()
-          old = '''  const reactionsReady = Boolean(interactionEntry?.ready?.reactions && interactionEntry?.ready?.viewerReaction);
-          const commentsReady = Boolean(interactionEntry?.ready?.comments);
-          const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");'''
-          new = '''  const reactionsReady = Boolean(interactionEntry?.ready?.reactions && interactionEntry?.ready?.viewerReaction);
-          const commentsReady = Boolean(interactionEntry?.ready?.comments);
-          const interactionsReady = reactionsReady && commentsReady;
-          const reactionsTruncated = interactionIsTruncated(parent.path, "reactions");'''
-          if old not in text:
-              raise SystemExit('interaction readiness block not found')
-          text = text.replace(old, new, 1)
-          old = '''  if (reactionsReady) {
-            interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;'''
-          new = '''  if (interactionsReady) {
-            interactionSummaryLabel.textContent = `${activeReactionIcons ? `${activeReactionIcons} · ` : ""}${interactionTotal} interaction${interactionCount === 1 ? "" : "s"}`;'''
-          if old not in text:
-              raise SystemExit('interaction summary gate not found')
-          path.write_text(text.replace(old, new, 1))
+          text, first = re.subn(
+              r'(\s*const commentsReady = Boolean\(interactionEntry\?\.ready\?\.comments\);\n)',
+              r'\1  const interactionsReady = reactionsReady && commentsReady;\n',
+              text,
+              count=1
+          )
+          text, second = re.subn(r'\bif \(reactionsReady\) \{', 'if (interactionsReady) {', text, count=1)
+          if first != 1 or second != 1:
+              raise SystemExit(f'expected one readiness insertion and one summary gate; got {first}, {second}')
+          path.write_text(text)
           PY
       - name: Run interaction regression
         run: node scripts/test-interaction-details.mjs
