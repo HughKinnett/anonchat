@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+import { exitAfterAuthLoss } from "./push-exit.js";
 import { hasPremiumAccess, premiumDefaults } from "./premium-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -18,7 +19,7 @@ const save = async (url) => {
   settings = { ...settings, spotifyPlaylistUrl: url }; render(url);
 };
 onAuthStateChanged(auth, async (user) => {
-  if (!user) { location.replace("index.html"); return; }
+  if (!user) { await exitAfterAuthLoss(); location.replace("index.html"); return; }
   currentUser = user;
   const [accessSnapshot, settingsSnapshot, profileSnapshot] = await Promise.all([getDoc(doc(db, "premiumAccess", user.uid)), getDoc(doc(db, "premiumSettings", user.uid)), getDoc(doc(db, "users", user.uid))]);
   if (!accessSnapshot.exists() || !hasPremiumAccess(accessSnapshot.data())) { location.replace("premium.html"); return; }
