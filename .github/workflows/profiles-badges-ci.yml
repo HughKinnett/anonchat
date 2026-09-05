@@ -18,10 +18,10 @@ jobs:
         with:
           node-version: "22"
       - run: node scripts/test-profile-privacy-policy.mjs
+      - run: node scripts/test-profile-pinning.mjs
       - run: node scripts/test-badge-policy.mjs
       - run: node scripts/test-badge-milestones.mjs
       - run: node scripts/test-badge-awards-contract.mjs
       - run: node scripts/test-badge-firestore-rules.mjs
-      - run: node scripts/test-profile-badges-surface.mjs
       - run: node scripts/test-profile-badge-gallery.mjs
       - run: node scripts/test-admin-badges-surface.mjs
