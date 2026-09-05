@@ -20,3 +20,4 @@ jobs:
       - run: node scripts/test-feed-mode-policy.mjs
       - run: node scripts/test-feed-ranking-policy.mjs
       - run: node scripts/test-feed-controls-surface.mjs
+      - run: node scripts/test-topic-policy.mjs
