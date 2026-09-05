@@ -16,13 +16,13 @@ assert.doesNotMatch(awardSource, /users["']\s*,\s*uid\s*,\s*["']badges["']/, "br
 assert.match(processorSource, /processBadgeAwards/, "trusted badge processor exports processBadgeAwards");
 assert.match(processorSource, /matchingAutomaticBadges/, "trusted processor uses the milestone evaluator");
 assert.match(processorSource, /already-earned/, "trusted processor preserves existing badge assignments");
-assert.match(processorSource, /assignedBy\s*:\s*["']system["']/, "trusted processor records system as the assigning actor");
-assert.match(processorSource, /awardSource\s*:\s*["']automatic["']/, "trusted processor records automatic award source");
 assert.match(processorSource, /changedMetrics/, "trusted processor evaluates only the metrics changed by canonical activity");
 
 assert.match(adapterSource, /users.*badges|badges.*users/s, "trusted Firestore adapter owns user badge assignment writes");
 assert.match(adapterSource, /runTransaction/, "trusted adapter performs idempotent badge assignment writes transactionally");
 assert.match(adapterSource, /badgeTypes/, "trusted adapter reads badge definitions");
+assert.match(adapterSource, /assignedBy\s*:\s*["']system["']/, "trusted adapter records system as the assigning actor");
+assert.match(adapterSource, /awardSource\s*:\s*["']automatic["']/, "trusted adapter records automatic award source");
 
 assert.match(firestoreSource, /awardSource/, "badge Firestore helper preserves assignment source metadata");
 
