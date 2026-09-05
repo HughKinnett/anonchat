@@ -25,3 +25,4 @@ jobs:
       - run: node scripts/test-group-moderator-controls.mjs
       - run: node scripts/test-private-group-contract.mjs
       - run: node scripts/test-private-group-surface.mjs
+      - run: node scripts/test-group-navigation.mjs
