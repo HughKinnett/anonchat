@@ -42,5 +42,10 @@ assert.match(
   /Connections private/,
   "connections page renders a private state when the target hides their graph"
 );
+assert.match(
+  connections,
+  /addEventListener\("pagehide", invalidateConnectionsSession\)/,
+  "connections page still invalidates listeners when the page is hidden"
+);
 
 console.log("Follower graph privacy surface passed");
