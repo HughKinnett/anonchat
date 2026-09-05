@@ -1,4 +1,4 @@
-name: Apply admin rule budget fix
+name: Apply admin site controls
 on:
   push:
     branches:
@@ -15,9 +15,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply suspension rule fix
-        run: node scripts/fix-admin-rule-budget.mjs
-      - name: Commit fix
+      - name: Apply admin control patches
+        run: |
+          node scripts/fix-admin-rule-budget.mjs
+          node scripts/apply-admin-site-controls.mjs
+      - name: Commit controls
         run: |
           if git diff --quiet; then
             echo "No changes needed"
@@ -25,6 +27,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add firestore.rules admin.js scripts/test-admin-expanded-controls.mjs
-          git commit -m "fix: enforce suspensions without extra rule lookup"
+          git add firestore.rules admin.js loginfirebase.js premium-playlist.js site-announcement.js sw.js index.html timeline.html profile.html community.html premium.html premium-playlist.html delete-account.html docs/superpowers/specs/2026-09-04-simplified-admin-command-center-design.md scripts/test-admin-expanded-controls.mjs
+          git commit -m "feat: enforce admin controls across the site"
           git push origin HEAD:feature/simplified-admin-command-center
