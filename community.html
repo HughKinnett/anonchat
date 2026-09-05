@@ -8,6 +8,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="anonchat-anonymous.png">
   <link rel="stylesheet" href="community.css">
+  <link rel="stylesheet" href="user-experience.css">
   <link rel="stylesheet" href="premium.css">
   <title>AnonChat — Community</title>
 </head>
@@ -20,6 +21,8 @@
         <button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button>
         <nav id="main-menu-panel" class="main-menu-panel" hidden>
           <a href="timeline.html">Timeline</a>
+          <a href="discover.html" data-requires-ux-feature="discoveryEnabled">Discover</a>
+          <a href="saved.html">Saved</a>
           <a href="community.html" aria-current="page">Community</a>
           <a href="profile.html">My profile</a>
           <a href="connections.html">Followers & following</a>
@@ -40,6 +43,7 @@
     <div class="tabs" role="tablist" aria-label="Community features">
       <button role="tab" aria-selected="true" data-panel="rooms-panel">Temporary rooms</button>
       <button role="tab" aria-selected="false" data-panel="messages-panel">Messages</button>
+      <button role="tab" aria-selected="false" data-panel="group-chats-panel" data-requires-ux-feature="groupChatsEnabled">Private groups</button>
       <button role="tab" aria-selected="false" data-panel="privacy-panel">Privacy</button>
     </div>
 
@@ -77,6 +81,7 @@
         <div class="card">
           <h2>Request a conversation</h2>
           <label>User<select id="message-user"></select></label>
+          <label>Who can request to message me?<select id="message-request-privacy"><option value="everyone">Everyone</option><option value="following">People I follow</option><option value="mutual">Mutual follows</option><option value="nobody">Nobody</option></select></label>
           <button id="request-chat" class="primary" type="button">Send request</button>
           <p id="request-status" class="muted" role="status" aria-live="polite"></p>
           <h3>Requests</h3><div id="request-list" class="stack compact"></div>
@@ -84,6 +89,8 @@
         <div class="card">
           <h2>Accepted conversations</h2>
           <label>Conversation<select id="conversation-user"></select></label>
+          <div id="direct-typing-indicator" class="typing-indicator" aria-live="polite"></div>
+          <div id="direct-reply-preview" class="reply-preview" hidden></div>
           <div id="direct-messages" class="message-stream"></div>
           <form id="direct-message-form" class="direct-message-composer">
             <div class="direct-message-entry-row">
@@ -103,6 +110,14 @@
           <button id="send-reveal" class="secondary" type="button">Request mutual reveal</button>
           <div id="reveal-status" class="muted"></div>
         </div>
+      </div>
+    </section>
+
+
+    <section id="group-chats-panel" class="panel" role="tabpanel" hidden data-requires-ux-feature="groupChatsEnabled">
+      <div class="group-chat-layout">
+        <div class="card"><h2>Private groups</h2><form id="group-create-form"><label>Group name<input id="group-name" maxlength="60" required></label><label>Invite usernames<input id="group-members" placeholder="@friend1, @friend2" required></label><button class="primary" type="submit">Create group</button></form><div id="group-chat-list" class="stack compact"></div></div>
+        <div class="card"><h2 id="group-chat-title">Choose a group</h2><p class="muted">Persistent private groups are visible only to invited members. Administrators can see group metadata for safety, not message text.</p><div id="group-messages" class="message-stream"></div><form id="group-message-form"><div class="message-entry-row"><input id="group-message" maxlength="1000" placeholder="Message your group"><button class="primary">Send</button></div></form></div>
       </div>
     </section>
 
@@ -126,8 +141,15 @@
         </div>
       </div>
     </section>
+
+      <section class="ux-card" data-requires-ux-feature="notificationControlsEnabled"><h2>Notification controls</h2><form id="notification-preferences"><div class="notification-preference-grid">
+        <label><input type="checkbox" data-notification-category="comments"> Comments & replies</label><label><input type="checkbox" data-notification-category="reactions"> Reactions</label><label><input type="checkbox" data-notification-category="follows"> Follows</label><label><input type="checkbox" data-notification-category="directMessages"> Direct messages</label><label><input type="checkbox" data-notification-category="messageRequests"> Message requests</label><label><input type="checkbox" data-notification-category="roomMessages"> Room messages</label><label><input type="checkbox" data-notification-category="mentions"> Mentions</label><label><input type="checkbox" data-notification-category="reveals"> Reveal requests</label><label><input type="checkbox" data-notification-category="groupMessages"> Group messages</label></div><h3>Quiet hours</h3><label class="switch"><input id="quiet-hours-enabled" type="checkbox"> Suppress phone alerts during quiet hours</label><div class="ux-actions"><label>Start<input id="quiet-hours-start" type="time" value="22:00"></label><label>End<input id="quiet-hours-end" type="time" value="07:00"></label></div><button class="primary" type="submit">Save notification settings</button></form></section>
+      <section class="ux-card"><h2>Appearance & accessibility</h2><label>Appearance<select id="appearance-select"><option value="system">Use device setting</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label>Text size<select id="text-size-select"><option value="0.9">Small</option><option value="1" selected>Standard</option><option value="1.15">Large</option><option value="1.3">Extra large</option></select></label></section>
   </main>
   <script type="module" src="community.js"></script>
+  <script type="module" src="community-extras.js"></script>
+  <script type="module" src="user-experience-gate.js"></script>
+  <script type="module" src="accessibility.js"></script>
   <script src="nav-menu.js" defer></script>
   <script type="module" src="premium-menu.js"></script>
   <script type="module" src="online-followers.js"></script>

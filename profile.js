@@ -469,6 +469,10 @@ const renderPosts = () => {
     const post = postDoc.data();
     const item = document.createElement("li");
     item.className = "feed-item";
+    item.dataset.postId = postDoc.id;
+    item.dataset.postCollection = postDoc.ref.parent.id;
+    item.dataset.authorId = post.authorId;
+    item.id = `post-${postDoc.ref.parent.id}-${postDoc.id}`;
     if (targetPremiumSettings) applyPremiumTheme(item, targetPremiumSettings);
 
     if (post.type === "repost") {
@@ -578,6 +582,8 @@ const renderPosts = () => {
       const comment = commentDoc.data();
       const commentItem = document.createElement("li");
       commentItem.className = "comment-item";
+      commentItem.dataset.commentId = commentDoc.id;
+      commentItem.dataset.commentUid = comment.uid;
       const author = document.createElement("a");
       author.className = "comment-author";
       author.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;

@@ -22,6 +22,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="anonchat-anonymous.png">
   <link rel="stylesheet" href="timeline.css">
+  <link rel="stylesheet" href="user-experience.css">
   <link rel="stylesheet" href="premium.css">
   <title>AnonChat — Timeline</title>
 </head>
@@ -49,7 +50,7 @@
       <div class="main-menu">
         <button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button>
         <nav id="main-menu-panel" class="main-menu-panel" hidden>
-          <a href="timeline.html">Timeline</a><a href="community.html">Community</a>
+          <a href="timeline.html">Timeline</a><a href="discover.html" data-requires-ux-feature="discoveryEnabled">Discover</a><a href="saved.html">Saved</a><a href="community.html">Community</a>
           <a id="menu-profile-link" href="profile.html">My profile</a><a href="connections.html">Followers & following</a>
           <button class="install-app menu-install" type="button">Install AnonChat</button><a class="menu-danger" href="delete-account.html">Delete account</a>
         </nav>
@@ -159,6 +160,9 @@
 
   <script type="module" src="upload.js"></script>
   <script type="module" src="timeline.js"></script>
+  <script type="module" src="content-extras.js"></script>
+  <script type="module" src="user-experience-gate.js"></script>
+  <script type="module" src="accessibility.js"></script>
   <script type="module" src="post-sharing.js"></script>
   <script src="nav-menu.js" defer></script>
   <script type="module" src="premium-menu.js"></script>

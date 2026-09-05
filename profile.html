@@ -18,6 +18,7 @@
   <meta name="format-detection" content="telephone=no">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="timeline.css">
+  <link rel="stylesheet" href="user-experience.css">
   <link rel="stylesheet" href="premium.css">
   <title>AnonChat — Profile</title>
 </head>
@@ -26,7 +27,7 @@
     <a class="brand" href="timeline.html">AnonChat</a>
     <div class="topbar-actions">
       <a class="secondary-button nav-button" href="timeline.html">← Timeline</a>
-      <div class="main-menu"><button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button><nav id="main-menu-panel" class="main-menu-panel" hidden><a href="timeline.html">Timeline</a><a href="community.html">Community</a><a href="connections.html">Followers & following</a><button class="install-app menu-install" type="button">Install AnonChat</button><a class="menu-danger" href="delete-account.html">Delete account</a></nav></div>
+      <div class="main-menu"><button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button><nav id="main-menu-panel" class="main-menu-panel" hidden><a href="timeline.html">Timeline</a><a href="discover.html" data-requires-ux-feature="discoveryEnabled">Discover</a><a href="saved.html">Saved</a><a href="community.html">Community</a><a href="connections.html">Followers & following</a><button class="install-app menu-install" type="button">Install AnonChat</button><a class="menu-danger" href="delete-account.html">Delete account</a></nav></div>
     </div>
   </header>
 
@@ -53,6 +54,15 @@
       </div>
     </section>
 
+    <section class="profile-about-grid">
+      <article class="ux-card"><p class="eyebrow">About</p><h2>About this user</h2><p id="profile-status-line" class="profile-status-line" hidden></p><p id="profile-about">Loading bio…</p><div id="profile-interests" class="profile-interests"></div>
+        <form id="profile-extras-form" class="profile-extras-form" hidden><label>Bio<textarea id="profile-bio-input" maxlength="240" rows="3" placeholder="Tell the community a little about your pseudonymous self"></textarea></label><label>Status<input id="profile-status-input" maxlength="80" placeholder="What are you up to?"></label><label>Interests<input id="profile-interests-input" maxlength="240" placeholder="music, gaming, outdoors"></label><button class="primary-button" type="submit">Save profile details</button></form>
+      </article>
+      <article class="ux-card" data-requires-ux-feature="badgesEnabled"><p class="eyebrow">Recognition</p><h2>Badges</h2><div id="profile-badges" class="profile-badge-grid"></div></article>
+    </section>
+    <section class="ux-card"><p class="eyebrow">Featured by this user</p><h2>Pinned posts</h2><div id="profile-pinned-posts" class="profile-pinned-posts"></div></section>
+    <section id="profile-share-card" class="ux-card"></section>
+
     <section id="profile-spotify-card" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-spotify-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="profile-spotify-title">Playing on Spotify</h2></div></div>
       <div id="profile-spotify-player"></div>
@@ -71,6 +81,10 @@
   </main>
 
   <script type="module" src="profile.js"></script>
+  <script type="module" src="profile-extras.js"></script>
+  <script type="module" src="content-extras.js"></script>
+  <script type="module" src="user-experience-gate.js"></script>
+  <script type="module" src="accessibility.js"></script>
   <script type="module" src="post-sharing.js"></script>
   <script src="nav-menu.js" defer></script>
   <script type="module" src="premium-menu.js"></script>

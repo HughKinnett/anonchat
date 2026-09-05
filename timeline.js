@@ -1112,6 +1112,9 @@ const renderPost = (postDoc) => {
   const item = document.createElement("li");
   item.className = "feed-item";
   item.dataset.interactionPath = parent.path;
+  item.dataset.postId = postDoc.id;
+  item.dataset.postCollection = sourceCollection;
+  item.dataset.authorId = post.authorId;
   item.id = `post-${sourceCollection}-${postDoc.id}`;
 
   if (post.type === "repost") {
@@ -1278,6 +1281,8 @@ const renderPost = (postDoc) => {
     const comment = commentDoc.data();
     const commentItem = document.createElement("li");
     commentItem.className = "comment-item";
+    commentItem.dataset.commentId = commentDoc.id;
+    commentItem.dataset.commentUid = comment.uid;
     const commenter = document.createElement("a");
     commenter.className = "comment-author";
     commenter.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
