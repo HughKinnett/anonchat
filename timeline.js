@@ -1182,6 +1182,7 @@ const renderPost = (postDoc) => {
     reactionButton(parent, "middle_finger", "🖕", reactionDocs, reactionsTruncated),
     reactionButton(parent, "laugh", "😂", reactionDocs, reactionsTruncated),
     reactionButton(parent, "smile", "😊", reactionDocs, reactionsTruncated),
+    reactionButton(parent, "heart", "❤️", reactionDocs),
     reactionButton(parent, "fire", "🔥", reactionDocs, reactionsTruncated)
   );
 
@@ -1582,8 +1583,6 @@ const startInteractionChildren = (entry) => {
     entry.childUnsubscribes.push(onSnapshot(
       query(
         collection(db, entry.parent.collection, entry.parent.id, kind),
-        orderBy("createdAt", "desc"),
-        orderBy(documentId(), "desc"),
         limit(MAX_INTERACTION_ITEMS_PER_PARENT)
       ),
       (snapshot) => {
