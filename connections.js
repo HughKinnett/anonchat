@@ -299,3 +299,5 @@ onAuthStateChanged(auth, async (user) => {
     setStatus("Could not load block preferences.", true);
   });
 });
+
+addEventListener("pagehide", invalidateConnectionsSession);
