@@ -29,6 +29,7 @@ jobs:
       - run: node scripts/test-phase-b-package.mjs
       - run: node scripts/test-phase-b-listener-order.mjs
       - run: node scripts/test-phase-b-reference-loading.mjs
+      - run: node scripts/test-phase-b-discovery-integration.mjs
       - run: node --check timeline.js
       - run: node --check profile.js
-      # This gate verifies the persisted generated timeline/profile source and canonical Saved/History loading.
+      # This gate verifies persisted Phase B source, private reference loading, and discovery behavior.
