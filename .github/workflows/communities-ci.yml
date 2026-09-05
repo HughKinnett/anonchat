@@ -19,3 +19,4 @@ jobs:
           node-version: "22"
       - run: node scripts/test-community-interest-policy.mjs
       - run: node scripts/test-community-interest-firestore-contract.mjs
+      - run: node scripts/test-community-interest-rules.mjs
