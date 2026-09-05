@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [html, badgeAdmin] = await Promise.all([
+const [html, badgeAdmin, badgePolicy] = await Promise.all([
   readFile(new URL("../admin.html", import.meta.url), "utf8"),
-  readFile(new URL("../admin-badges.js", import.meta.url), "utf8").catch(() => "")
+  readFile(new URL("../admin-badges.js", import.meta.url), "utf8").catch(() => ""),
+  readFile(new URL("../badge-policy.mjs", import.meta.url), "utf8")
 ]);
 
 const surface = `${html}\n${badgeAdmin}`;
@@ -26,11 +27,12 @@ for (const id of [
 ]) assert.match(surface, new RegExp(`id=["']${id}["']|id\\s*=\\s*["']${id}["']`), `admin badge surface includes #${id}`);
 
 assert.match(html, /admin-badges\.js/, "admin page loads badge management controller");
+assert.match(badgeAdmin, /BADGE_MILESTONE_METRICS/, "admin metric selector is populated from the shared milestone policy");
 assert.match(badgeAdmin, /automatic/i, "admin can choose automatic award mode");
 assert.match(badgeAdmin, /manual/i, "admin can choose manual award mode");
-assert.match(badgeAdmin, /posts_created/, "admin metric selector includes supported milestone metrics");
-assert.match(badgeAdmin, /account_age_days/, "admin metric selector includes account age metric");
-assert.match(badgeAdmin, /premium_active/, "admin metric selector includes premium metric");
+assert.match(badgePolicy, /posts_created/, "shared badge policy includes posts_created");
+assert.match(badgePolicy, /account_age_days/, "shared badge policy includes account_age_days");
+assert.match(badgePolicy, /premium_active/, "shared badge policy includes premium_active");
 assert.match(badgeAdmin, /saveBadgeType/, "badge admin controller persists badge definitions");
 assert.match(badgeAdmin, /setUserBadge/, "badge admin controller can assign badges manually");
 assert.match(badgeAdmin, /removeUserBadge/, "badge admin controller can remove user badges");
