@@ -44,7 +44,7 @@ const helpers = `    function interestCommunityActiveAfter(communityId) {
 
 if (!rules.includes("function isInterestCommunityModerator(communityId)")) {
   if (!rules.includes(helperAnchor)) throw new Error("Could not locate Firestore helper insertion point");
-  rules = rules.replace(helperAnchor, helpers + helperAnchor);
+  rules = rules.replace(helperAnchor, () => helpers + helperAnchor);
 }
 
 const communityMatchAnchor = `    match /communityPosts/{postId} {`;
@@ -125,7 +125,7 @@ const communityBlocks = `    match /communities/{communityId} {
 
 if (!rules.includes("match /communities/{communityId}")) {
   if (!rules.includes(communityMatchAnchor)) throw new Error("Could not locate Community post rules insertion point");
-  rules = rules.replace(communityMatchAnchor, communityBlocks + communityMatchAnchor);
+  rules = rules.replace(communityMatchAnchor, () => communityBlocks + communityMatchAnchor);
 }
 
 const communityPostPattern = /    match \/communityPosts\/\{postId\} \{[\s\S]*?\n    \}\n\n    match \/communityVotes\//;
@@ -165,7 +165,7 @@ if (!currentCommunityPostBlock.includes("request.resource.data.keys().hasAny(['c
     }
 
     match /communityVotes/`;
-  rules = rules.replace(communityPostPattern, replacement);
+  rules = rules.replace(communityPostPattern, () => replacement);
 }
 
 await writeFile(path, rules);
