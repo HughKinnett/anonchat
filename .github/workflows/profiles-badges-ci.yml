@@ -23,3 +23,4 @@ jobs:
       - run: node scripts/test-badge-firestore-rules.mjs
       - run: node scripts/test-profile-badges-surface.mjs
       - run: node scripts/test-profile-badge-gallery.mjs
+      - run: node scripts/test-admin-badges-surface.mjs
