@@ -1,6 +1,84 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0b0d12"><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="timeline.css"><link rel="stylesheet" href="premium.css"><title>AnonChat Premium</title></head>
-<body class="premium-surface"><header class="topbar"><a class="brand" href="timeline.html">AnonChat</a><div class="topbar-actions"><a class="secondary-button nav-button" href="timeline.html">← Timeline</a><div class="main-menu"><button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button><nav id="main-menu-panel" class="main-menu-panel" hidden><a href="timeline.html">Timeline</a><a href="community.html">Community</a><a href="profile.html">My profile</a><a href="connections.html">Followers & following</a></nav></div></div></header>
-<main class="premium-shell"><section class="premium-hero"><img class="premium-mascot" src="anonchat-anonymous.png" alt="AnonChat anonymous person"><p class="eyebrow">Private. Personal. Premium.</p><h1>AnonChat Premium</h1><p class="premium-price">$4.99 a month</p><p id="premium-status" class="premium-status" role="status">Checking your access…</p></section>
-<section class="premium-grid"><article class="premium-card"><div class="premium-icon">👻</div><h2>Ghost mode</h2><p>Turn online visibility off from the hamburger menu. Your followers will no longer see you in Followers online.</p></article><article class="premium-card"><div class="premium-icon">✨</div><h2>Profile customization</h2><p>Choose exclusive male and female avatars, matching cover artwork, a profile frame, banner atmosphere, and card style that visitors can see.</p><a class="button-link premium-only" href="customize.html">Customize</a></article><article class="premium-card"><div class="premium-icon">🎵</div><h2>Spotify playlist</h2><p>Put a playable Spotify playlist on your public profile without uploading music to AnonChat.</p><a class="button-link premium-only" href="premium-playlist.html">Set playlist</a></article><article class="premium-card"><div class="premium-icon">🔐</div><h2>Invite-only rooms</h2><p>Private Premium rooms with invited members, two moderators, message moderation, invitations, and member removal.</p><a class="button-link premium-only" href="premium-rooms.html">Open rooms</a></article><article class="premium-card"><div class="premium-icon">📝</div><h2>Long-form anonymous posts</h2><p>Premium members can publish posts up to 1,000 words instead of the standard 500-character limit.</p></article><article class="premium-card"><div class="premium-icon">🛡️</div><h2>Premium identity</h2><p>Your Premium badge, avatar, cover, and profile styling appear consistently on your profile and public posts.</p></article></section>
-<div class="premium-actions"><button id="premium-checkout" type="button" disabled>Stripe checkout coming soon</button><a class="button-link" href="timeline.html">Return to AnonChat</a></div></main><script src="nav-menu.js" defer></script><script type="module" src="premium-menu.js"></script><script type="module" src="premium.js"></script><script src="pwa.js" defer></script><script type="module" src="site-announcement.js"></script>
-</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="timeline.css">
+  <link rel="stylesheet" href="premium.css">
+  <link rel="stylesheet" href="payment-preparation.css">
+  <title>AnonChat Premium</title>
+</head>
+<body class="premium-surface">
+<header class="topbar">
+  <a class="brand" href="timeline.html">AnonChat</a>
+  <div class="topbar-actions">
+    <a class="secondary-button nav-button" href="timeline.html">← Timeline</a>
+    <div class="main-menu">
+      <button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button>
+      <nav id="main-menu-panel" class="main-menu-panel" hidden><a href="timeline.html">Timeline</a><a href="community.html">Community</a><a href="profile.html">My profile</a><a href="connections.html">Followers & following</a></nav>
+    </div>
+  </div>
+</header>
+<main class="premium-shell">
+  <section class="premium-hero">
+    <img class="premium-mascot" src="anonchat-anonymous.png" alt="AnonChat anonymous person">
+    <p class="eyebrow">Private. Personal. Premium.</p>
+    <h1>AnonChat Premium</h1>
+    <p class="premium-price">$4.99 a month</p>
+    <p id="premium-status" class="premium-status" role="status">Checking your access…</p>
+  </section>
+
+  <section class="premium-grid">
+    <article class="premium-card"><div class="premium-icon">👻</div><h2>Ghost mode</h2><p>Turn online visibility off from the hamburger menu. Your followers will no longer see you in Followers online.</p></article>
+    <article class="premium-card"><div class="premium-icon">✨</div><h2>Profile customization</h2><p>Choose exclusive male and female avatars, matching cover artwork, a profile frame, banner atmosphere, and card style that visitors can see.</p><a class="button-link premium-only" href="customize.html">Customize</a></article>
+    <article class="premium-card"><div class="premium-icon">🎵</div><h2>Spotify playlist</h2><p>Put a playable Spotify playlist on your public profile without uploading music to AnonChat.</p><a class="button-link premium-only" href="premium-playlist.html">Set playlist</a></article>
+    <article class="premium-card"><div class="premium-icon">🔐</div><h2>Invite-only rooms</h2><p>Private Premium rooms with invited members, two moderators, message moderation, invitations, and member removal.</p><a class="button-link premium-only" href="premium-rooms.html">Open rooms</a></article>
+    <article class="premium-card"><div class="premium-icon">📝</div><h2>Long-form anonymous posts</h2><p>Premium members can publish posts up to 1,000 words instead of the standard 500-character limit.</p></article>
+    <article class="premium-card"><div class="premium-icon">🛡️</div><h2>Premium identity</h2><p>Your Premium badge, avatar, cover, and profile styling appear consistently on your profile and public posts.</p></article>
+  </section>
+
+  <section class="payment-preparation-panel" aria-labelledby="payment-setup-heading">
+    <div class="payment-preparation-heading">
+      <div><p class="eyebrow">Billing setup</p><h2 id="payment-setup-heading">Premium payment setup</h2></div>
+      <span class="payment-status-chip">Preparation only</span>
+    </div>
+    <p id="payment-connection-status" class="payment-connection-status" role="status">Payments are not connected yet. No payment information will be submitted or saved.</p>
+    <div class="payment-plan-summary">
+      <div><span>Plan</span><strong>AnonChat Premium</strong></div>
+      <div><span>Price</span><strong>$4.99 / month</strong></div>
+      <div><span>Status</span><strong>Not connected</strong></div>
+    </div>
+    <div class="payment-form-grid" aria-label="Premium billing preparation fields">
+      <label>Billing frequency
+        <select id="billing-frequency" disabled>
+          <option value="monthly" selected>Monthly — $4.99</option>
+          <option value="annual" disabled>Annual — not configured</option>
+        </select>
+      </label>
+      <label>Name on account
+        <input id="billing-name" type="text" autocomplete="name" placeholder="Name will be collected when billing is connected" disabled>
+      </label>
+      <label>Billing email
+        <input id="billing-email" type="email" autocomplete="email" placeholder="Email will be collected when billing is connected" disabled>
+      </label>
+      <div id="payment-method-preview" class="payment-method-preview" aria-label="Payment method preview">
+        <span>Payment method</span>
+        <strong>Card / supported payment method</strong>
+        <small>Secure payment entry will be provided by the connected payment provider later. AnonChat does not collect card numbers here.</small>
+      </div>
+    </div>
+    <button id="premium-checkout" type="button" disabled>Subscribe — payments not connected</button>
+    <p class="payment-security-note">No charge can be made from this screen. Stripe, Firestore billing records, and Google Play Billing are not connected in this release.</p>
+  </section>
+
+  <div class="premium-actions"><a class="button-link" href="timeline.html">Return to AnonChat</a></div>
+</main>
+<script src="nav-menu.js" defer></script>
+<script type="module" src="premium-menu.js"></script>
+<script type="module" src="premium.js"></script>
+<script src="pwa.js" defer></script>
+<script type="module" src="site-announcement.js"></script>
+</body>
+</html>
