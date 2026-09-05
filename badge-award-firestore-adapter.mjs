@@ -5,6 +5,14 @@ export class FirestoreBadgeAwardAdapter {
     this.FieldValue = FieldValue;
   }
 
+  async featureEnabled(key, fallback = true) {
+    if (!key) return fallback;
+    const snapshot = await this.db.collection("siteSettings").doc("features").get();
+    if (!snapshot.exists) return fallback;
+    const value = snapshot.data()?.[key];
+    return typeof value === "boolean" ? value : fallback;
+  }
+
   async listActiveDefinitions() {
     const snapshot = await this.db.collection("badgeTypes").where("active", "==", true).get();
     return snapshot.docs.map((document) => ({ id: document.id, ...document.data() }));

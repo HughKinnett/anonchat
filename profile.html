@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="timeline.css">
   <link rel="stylesheet" href="premium.css">
   <link rel="stylesheet" href="mobile-hotfix.css">
+  <link rel="stylesheet" href="profile-phase-a.css">
   <title>AnonChat — Profile</title>
 </head>
 <body>
@@ -39,12 +40,16 @@
         <div class="view-profile-identity">
           <h1 id="profile-name">Loading profile…</h1>
           <p id="profile-handle"></p>
-          <div class="profile-connections-links">
+          <div class="profile-connections-links" data-profile-private-hidden="true">
             <a id="profile-followers" href="connections.html">0 followers</a>
             <a id="profile-following" href="connections.html">0 following</a>
           </div>
           <span id="profile-membership-badge" class="my-profile-link membership-badge">Founding Member</span>
           <a id="profile-admin-link" class="my-profile-link admin-link" href="admin.html" hidden>Admin dashboard</a>
+          <div class="profile-phase-a-actions" aria-label="Profile sharing">
+            <button id="profile-share-button" class="secondary-button" type="button">Share profile</button>
+            <button id="profile-qr-button" class="secondary-button" type="button">Profile QR</button>
+          </div>
         </div>
         <div id="profile-social-actions" class="profile-social-actions" hidden>
           <button id="profile-follow-button" class="follow-button" type="button" hidden>Follow</button>
@@ -54,23 +59,36 @@
       </div>
     </section>
 
-    <section id="profile-badges-section" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-badges-title" hidden>
+    <section id="profile-privacy-controls" class="profile-privacy-controls" aria-labelledby="profile-privacy-title" hidden>
+      <h2 id="profile-privacy-title">Profile privacy</h2>
+      <p>Choose what other people can see on your profile.</p>
+      <div class="profile-privacy-grid">
+        <label>Show posts <input type="checkbox" data-profile-privacy="showPosts" checked></label>
+        <label>Show badges <input type="checkbox" data-profile-privacy="showBadges" checked></label>
+        <label>Show followers and following <input type="checkbox" data-profile-privacy="showFollowersFollowing" checked></label>
+        <label>Show activity <input type="checkbox" data-profile-privacy="showActivity" checked></label>
+      </div>
+      <p id="profile-private-note" class="profile-private-note" hidden></p>
+    </section>
+
+    <section id="profile-badges-section" data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-badges-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Achievements</p><h2 id="profile-badges-title">Badges</h2></div></div>
       <div id="profile-badges-list" class="profile-badges-list"></div>
       <button id="profile-badges-view-all" class="secondary-button" type="button" hidden>View all badges</button>
     </section>
 
-    <section id="profile-spotify-card" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-spotify-title" hidden>
+    <section id="profile-spotify-card" data-profile-activity data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-spotify-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="profile-spotify-title">Playing on Spotify</h2></div></div>
       <div id="profile-spotify-player"></div>
     </section>
-    <section id="profile-playlist-card" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-playlist-title" hidden><div class="spotify-card-heading"><div><p class="eyebrow">Premium playlist</p><h2 id="profile-playlist-title">Spotify playlist</h2></div></div><div id="profile-playlist-player"></div></section>
+    <section id="profile-playlist-card" data-profile-activity data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-playlist-title" hidden><div class="spotify-card-heading"><div><p class="eyebrow">Premium playlist</p><h2 id="profile-playlist-title">Spotify playlist</h2></div></div><div id="profile-playlist-player"></div></section>
 
-    <section class="profile-posts-section" aria-labelledby="profile-posts-title">
+    <section class="profile-posts-section" data-profile-private-hidden="true" aria-labelledby="profile-posts-title">
       <div class="feed-header">
         <h2 id="profile-posts-title" class="section-title">Posts</h2>
         <span id="profile-post-count" class="follower-count"></span>
       </div>
+      <div id="profile-pinned-post" class="profile-pinned-post" aria-label="Pinned post" hidden></div>
       <p id="profile-status" role="status" aria-live="polite">Loading posts…</p>
       <ul class="feed" id="profile-feed"></ul>
     </section>
@@ -85,13 +103,25 @@
     <p id="profile-badge-dialog-earned"></p>
   </dialog>
 
+  <dialog id="profile-qr-dialog" class="profile-qr-dialog">
+    <div class="profile-qr-card">
+      <button id="profile-qr-close" class="secondary-button" type="button" aria-label="Close profile QR">Close</button>
+      <h2>AnonChat Profile QR</h2>
+      <p>Scan to view profile</p>
+      <div id="profile-qr-canvas" aria-label="Profile QR code"></div>
+      <p id="profile-qr-url" class="profile-qr-url"></p>
+    </div>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js" defer></script>
   <script type="module" src="profile.js"></script>
   <script type="module" src="profile-badges.js"></script>
+  <script type="module" src="profile-phase-a.js"></script>
   <script type="module" src="post-sharing.js"></script>
   <script src="nav-menu.js" defer></script>
   <script type="module" src="premium-menu.js"></script>
   <script type="module" src="online-followers.js"></script>
   <script src="pwa.js" defer></script>
-<script type="module" src="site-announcement.js"></script>
+  <script type="module" src="site-announcement.js"></script>
 </body>
 </html>

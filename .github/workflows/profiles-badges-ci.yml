@@ -3,7 +3,7 @@ name: Profiles and badges focused CI
 on:
   push:
     branches:
-      - profiles-badges-inline
+      - phase-a-profiles-identity
   workflow_dispatch:
 
 permissions:
@@ -17,10 +17,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: node scripts/test-profile-privacy-policy.mjs
+      - run: node scripts/test-profile-pinning.mjs
+      - run: node scripts/test-profile-share-contract.mjs
+      - run: node scripts/test-phase-a-profile-surface.mjs
+      - run: node scripts/test-profile-pinning-surface.mjs
+      - run: node scripts/test-follow-privacy-surface.mjs
+      - run: node scripts/test-phase-a-firestore-rules.mjs
+      - run: node scripts/test-phase-a-android-contract.mjs
+      - run: node scripts/test-phase-a-feature-switches.mjs
+      - run: node scripts/test-phase-a-privacy-offline.mjs
       - run: node scripts/test-badge-policy.mjs
       - run: node scripts/test-badge-milestones.mjs
       - run: node scripts/test-badge-awards-contract.mjs
       - run: node scripts/test-badge-firestore-rules.mjs
-      - run: node scripts/test-profile-badges-surface.mjs
       - run: node scripts/test-profile-badge-gallery.mjs
       - run: node scripts/test-admin-badges-surface.mjs

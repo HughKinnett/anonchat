@@ -58,6 +58,7 @@ let targetPremiumAccess;
 let targetPremiumSettings;
 let targetPosts = [];
 let targetCommunityPosts = [];
+let phaseAFeatures = { profilePinsEnabled: true };
 let users = [];
 let moderationClient;
 let targetBlocked = false;
@@ -321,14 +322,15 @@ const renderFollowControl = () => {
   const following = followingCount();
   const followersLink = document.getElementById("profile-followers");
 const followingLink = document.getElementById("profile-following");
-const ownConnectionsVisible = targetUserId === currentUser.uid;
-followersLink.textContent = ownConnectionsVisible
+const connectionsVisible = targetUserId === currentUser.uid
+  || targetProfile?.profilePrivacy?.showFollowersFollowing !== false;
+followersLink.textContent = connectionsVisible
   ? `${count} ${count === 1 ? "follower" : "followers"}`
   : "Followers private";
-followingLink.textContent = ownConnectionsVisible
+followingLink.textContent = connectionsVisible
   ? `${following} following`
   : "Following private";
-if (ownConnectionsVisible) {
+if (connectionsVisible) {
   followersLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#followers`;
   followingLink.href = `connections.html?uid=${encodeURIComponent(targetUserId)}#following`;
 } else {
@@ -463,12 +465,20 @@ const renderPosts = () => {
   const sorted = [...targetPosts, ...targetCommunityPosts]
     .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
     .filter((post) => isBlockedPost(post, viewerBlocks))
-    .sort(compareNewestFirst);
+    .sort((left, right) => {
+      const pinnedPostId = targetProfile?.pinnedPostId || "";
+      if (left.id === pinnedPostId && right.id !== pinnedPostId) return -1;
+      if (right.id === pinnedPostId && left.id !== pinnedPostId) return 1;
+      return compareNewestFirst(left, right);
+    });
 
   feed.replaceChildren(...sorted.map((postDoc) => {
     const post = postDoc.data();
     const item = document.createElement("li");
     item.className = "feed-item";
+    item.dataset.postId = postDoc.id;
+    item.dataset.postCollection = postDoc.ref.parent.id;
+    const isPinned = postDoc.id === targetProfile?.pinnedPostId;
     if (targetPremiumSettings) applyPremiumTheme(item, targetPremiumSettings);
 
     if (post.type === "repost") {
@@ -669,6 +679,37 @@ const renderPosts = () => {
       updateBookmark();
     });
     postActions.append(bookmark);
+    if (post.authorId === currentUser.uid && phaseAFeatures.profilePinsEnabled !== false) {
+      const pinPost = document.createElement("button");
+      pinPost.type = "button";
+      pinPost.textContent = isPinned ? "Unpin from profile" : "Pin to profile";
+      pinPost.addEventListener("click", async () => {
+        if (phaseAFeatures.profilePinsEnabled === false) {
+          setStatus("Profile pinning is temporarily paused.");
+          return;
+        }
+        pinPost.disabled = true;
+        try {
+          const featureSnapshot = await getDoc(doc(db, "siteSettings", "features"));
+          const profilePinsEnabled = featureSnapshot.exists()
+            ? featureSnapshot.data()?.profilePinsEnabled !== false
+            : true;
+          if (!profilePinsEnabled) {
+            setStatus("Profile pinning is temporarily unavailable.", true);
+            pinPost.disabled = false;
+            return;
+          }
+          const pinnedPostId = isPinned ? null : postDoc.id;
+          await updateDoc(doc(db, "users", currentUser.uid), { pinnedPostId });
+          targetProfile = { ...targetProfile, pinnedPostId };
+          schedulePostsRender();
+        } catch {
+          setStatus("Could not update your pinned post.", true);
+          pinPost.disabled = false;
+        }
+      });
+      postActions.append(pinPost);
+    }
     if (post.authorId !== currentUser.uid) {
       const reportTarget = postReportTarget(postDoc, post);
       const reported = moderationClient.cachedReported(reportTarget);
@@ -732,6 +773,21 @@ const renderPosts = () => {
     item.append(time, reactionsBar, reactionDetails, commentsSection, postActions);
     return item;
   }));
+
+  const pinnedRegion = document.getElementById("profile-pinned-post");
+  if (pinnedRegion) {
+    pinnedRegion.replaceChildren();
+    const pinnedItem = [...feed.children].find((item) => item.dataset.postId === targetProfile?.pinnedPostId);
+    if (pinnedItem) {
+      const label = document.createElement("p");
+      label.className = "profile-pinned-label";
+      label.textContent = "📌 Pinned";
+      pinnedRegion.append(label, pinnedItem);
+      pinnedRegion.hidden = false;
+    } else {
+      pinnedRegion.hidden = true;
+    }
+  }
 
   document.getElementById("profile-post-count").textContent =
     `${sorted.length} ${sorted.length === 1 ? "post" : "posts"}`;
@@ -1000,6 +1056,11 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  sessionListeners.push(onSnapshot(doc(db, "siteSettings", "features"), (snapshot) => {
+    const features = snapshot.exists() ? snapshot.data() : {};
+    phaseAFeatures = { profilePinsEnabled: features.profilePinsEnabled !== false };
+    schedulePostsRender();
+  }, () => { phaseAFeatures = { profilePinsEnabled: true }; }));
   blockTracker = createViewerBlockTracker(user.uid);
   viewerBlocks = blockTracker.current();
   const currentProfileRef = doc(db, "users", user.uid);

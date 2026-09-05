@@ -1,4 +1,5 @@
-const CACHE_NAME = "anonchat-v129";
+const QR_LIBRARY_URL = "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js";
+const CACHE_NAME = "anonchat-v130";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -81,6 +82,11 @@ const APP_SHELL = [
   "./profile.js",
   "./profile-bio.js",
   "./profile-badges.js",
+  "./profile-pinning.mjs",
+  "./profile-share.mjs",
+  "./profile-privacy-policy.mjs",
+  "./profile-phase-a.js",
+  "./profile-phase-a.css",
   "./badge-policy.mjs",
   "./badge-firestore.mjs",
   "./forgot-password.js",
@@ -147,7 +153,16 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET" || new URL(event.request.url).origin !== self.location.origin) return;
+  if (event.request.method !== "GET") return;
+  if (event.request.url === QR_LIBRARY_URL) {
+    event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+      return response;
+    }).catch(() => cached || Response.error())));
+    return;
+  }
+  if (new URL(event.request.url).origin !== self.location.origin) return;
   if (event.request.mode === "navigate" || event.request.destination === "document") {
     event.respondWith(fetch(event.request).then(response => {
       const copy = response.clone(); caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy)); return response;

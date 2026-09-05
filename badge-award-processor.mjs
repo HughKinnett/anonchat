@@ -12,6 +12,8 @@ export const CANONICAL_BADGE_SOURCES = Object.freeze({
 
 export const processBadgeAwards = async ({ adapter, uid, changedMetrics = [], metrics = {} }) => {
   if (!adapter || !uid) throw new Error("Badge award adapter and user are required.");
+  if (typeof adapter.featureEnabled === "function"
+    && await adapter.featureEnabled("badgeAwardsEnabled", true) === false) return [];
   const definitions = await adapter.listActiveDefinitions();
   const matches = matchingAutomaticBadges(definitions, metrics, changedMetrics);
   const results = [];

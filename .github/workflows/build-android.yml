@@ -6,6 +6,14 @@ on:
     branches: [main]
     paths:
       - 'android/**'
+      - 'profile.html'
+      - 'profile.js'
+      - 'profile-phase-a.js'
+      - 'profile-phase-a.css'
+      - 'profile-privacy-policy.mjs'
+      - 'profile-pinning.mjs'
+      - 'profile-share.mjs'
+      - 'sw.js'
       - '.github/workflows/build-android.yml'
 
 permissions:

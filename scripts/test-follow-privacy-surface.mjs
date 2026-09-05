@@ -4,8 +4,8 @@ import { resolveConnectionsTarget } from "../connections-target.mjs";
 
 assert.deepEqual(
   resolveConnectionsTarget("?uid=other-user", "signed-in-user"),
-  { targetUserId: "signed-in-user", canonicalSearch: "?uid=signed-in-user" },
-  "connections always resolves to the signed-in user's private follower/following graph"
+  { targetUserId: "other-user", canonicalSearch: "?uid=other-user" },
+  "connections preserves an explicitly requested profile target"
 );
 assert.deepEqual(
   resolveConnectionsTarget("", "signed-in-user"),
@@ -13,26 +13,39 @@ assert.deepEqual(
   "connections defaults to the signed-in user's graph"
 );
 
-const profile = await readFile(new URL("../profile.js", import.meta.url), "utf8");
+const [profile, connections] = await Promise.all([
+  readFile(new URL("../profile.js", import.meta.url), "utf8"),
+  readFile(new URL("../connections.js", import.meta.url), "utf8")
+]);
 assert.match(
   profile,
-  /const ownConnectionsVisible = targetUserId === currentUser\.uid;/,
-  "profile explicitly gates follower/following details to the signed-in profile owner"
+  /profilePrivacy\?\.showFollowersFollowing !== false/,
+  "profile uses the Phase A follower/following visibility preference"
 );
 assert.match(
   profile,
-  /followersLink\.textContent = ownConnectionsVisible[\s\S]*?"Followers private"/,
-  "other users' follower totals are not rendered"
+  /followersLink\.textContent = connectionsVisible[\s\S]*?"Followers private"/,
+  "profile hides follower totals when the owner disables connection visibility"
 );
 assert.match(
   profile,
-  /followingLink\.textContent = ownConnectionsVisible[\s\S]*?"Following private"/,
-  "other users' following totals are not rendered"
+  /followingLink\.textContent = connectionsVisible[\s\S]*?"Following private"/,
+  "profile hides following totals when the owner disables connection visibility"
 );
 assert.match(
-  profile,
-  /if \(ownConnectionsVisible\)[\s\S]*?followersLink\.href[\s\S]*?followingLink\.href[\s\S]*?else[\s\S]*?removeAttribute\("href"\)/,
-  "connection links are only navigable for the profile owner"
+  connections,
+  /showFollowersFollowing !== false/,
+  "connections page checks the target profile's Phase A visibility preference"
+);
+assert.match(
+  connections,
+  /Connections private/,
+  "connections page renders a private state when the target hides their graph"
+);
+assert.match(
+  connections,
+  /addEventListener\("pagehide", invalidateConnectionsSession\)/,
+  "connections page still invalidates listeners when the page is hidden"
 );
 
 console.log("Follower graph privacy surface passed");

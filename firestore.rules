@@ -633,6 +633,44 @@ service cloud.firestore {
         );
     }
 
+    function validProfilePrivacyUpdate(userId) {
+      let privacy = request.resource.data.profilePrivacy;
+      return request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profilePrivacy'])
+        && privacy is map
+        && privacy.keys().hasOnly(['showPosts', 'showBadges', 'showFollowersFollowing', 'showActivity'])
+        && privacy.keys().hasAll(['showPosts', 'showBadges', 'showFollowersFollowing', 'showActivity'])
+        && privacy.showPosts is bool
+        && privacy.showBadges is bool
+        && privacy.showFollowersFollowing is bool
+        && privacy.showActivity is bool;
+    }
+
+    function validProfilePinUpdate(userId) {
+      let pinnedPostId = request.resource.data.get('pinnedPostId', null);
+      return request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinnedPostId'])
+        && (pinnedPostId == null
+          || (pinnedPostId is string
+            && pinnedPostId.size() > 0
+            && pinnedPostId.size() <= 160
+            && ((existsAfter(/databases/$(database)/documents/posts/$(request.resource.data.pinnedPostId))
+                && getAfter(/databases/$(database)/documents/posts/$(request.resource.data.pinnedPostId)).data.authorId == userId
+                && getAfter(/databases/$(database)/documents/posts/$(request.resource.data.pinnedPostId)).data.get('moderationState', 'visible') != 'hidden')
+              || (existsAfter(/databases/$(database)/documents/communityPosts/$(request.resource.data.pinnedPostId))
+                && getAfter(/databases/$(database)/documents/communityPosts/$(request.resource.data.pinnedPostId)).data.authorId == userId
+                && getAfter(/databases/$(database)/documents/communityPosts/$(request.resource.data.pinnedPostId)).data.get('moderationState', 'visible') != 'hidden'))));
+    }
+
+    function profileBadgesReadable(userId) {
+      let profilePath = /databases/$(database)/documents/users/$(userId);
+      return signedIn()
+        && exists(profilePath)
+        && (request.auth.uid == userId
+          || isAdmin()
+          || get(profilePath).data.get('profilePrivacy', {}).get('showBadges', true) == true);
+    }
+
     function activeUser() {
       let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       return signedIn()
@@ -1158,6 +1196,10 @@ service cloud.firestore {
                 || request.resource.data.get('spotifyPlaylistUrl', '')
                   .matches('https://open[.]spotify[.]com/playlist/[A-Za-z0-9]+')))
             ||
+            validProfilePrivacyUpdate(userId)
+            ||
+            validProfilePinUpdate(userId)
+            ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bio'])
               && request.resource.data.get('bio', '') is string
               && request.resource.data.get('bio', '').size() <= 300)
@@ -1258,7 +1300,7 @@ service cloud.firestore {
     }
 
     match /users/{userId}/badges/{badgeId} {
-      allow read: if signedIn();
+      allow read: if profileBadgesReadable(userId);
       allow create, update, delete: if isAdmin();
     }
 
