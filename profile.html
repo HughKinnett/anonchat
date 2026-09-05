@@ -40,7 +40,7 @@
         <div class="view-profile-identity">
           <h1 id="profile-name">Loading profile…</h1>
           <p id="profile-handle"></p>
-          <div class="profile-connections-links">
+          <div class="profile-connections-links" data-profile-private-hidden="true">
             <a id="profile-followers" href="connections.html">0 followers</a>
             <a id="profile-following" href="connections.html">0 following</a>
           </div>
@@ -71,19 +71,19 @@
       <p id="profile-private-note" class="profile-private-note" hidden></p>
     </section>
 
-    <section id="profile-badges-section" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-badges-title" hidden>
+    <section id="profile-badges-section" data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-badges-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Achievements</p><h2 id="profile-badges-title">Badges</h2></div></div>
       <div id="profile-badges-list" class="profile-badges-list"></div>
       <button id="profile-badges-view-all" class="secondary-button" type="button" hidden>View all badges</button>
     </section>
 
-    <section id="profile-spotify-card" data-profile-activity class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-spotify-title" hidden>
+    <section id="profile-spotify-card" data-profile-activity data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-spotify-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="profile-spotify-title">Playing on Spotify</h2></div></div>
       <div id="profile-spotify-player"></div>
     </section>
-    <section id="profile-playlist-card" data-profile-activity class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-playlist-title" hidden><div class="spotify-card-heading"><div><p class="eyebrow">Premium playlist</p><h2 id="profile-playlist-title">Spotify playlist</h2></div></div><div id="profile-playlist-player"></div></section>
+    <section id="profile-playlist-card" data-profile-activity data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-playlist-title" hidden><div class="spotify-card-heading"><div><p class="eyebrow">Premium playlist</p><h2 id="profile-playlist-title">Spotify playlist</h2></div></div><div id="profile-playlist-player"></div></section>
 
-    <section class="profile-posts-section" aria-labelledby="profile-posts-title">
+    <section class="profile-posts-section" data-profile-private-hidden="true" aria-labelledby="profile-posts-title">
       <div class="feed-header">
         <h2 id="profile-posts-title" class="section-title">Posts</h2>
         <span id="profile-post-count" class="follower-count"></span>
