@@ -21,3 +21,4 @@ jobs:
       - run: node scripts/test-group-firestore-contract.mjs
       - run: node scripts/test-group-rules.mjs
       - run: node scripts/test-groups-surface.mjs
+      - run: node scripts/test-group-detail-surface.mjs
