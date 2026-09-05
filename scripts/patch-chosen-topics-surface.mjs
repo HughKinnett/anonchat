@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+// Triggered after workflow creation so the patch runs on growth-web-release.
 const htmlPath = "timeline.html";
 const jsPath = "timeline.js";
 let html = fs.readFileSync(htmlPath, "utf8");
