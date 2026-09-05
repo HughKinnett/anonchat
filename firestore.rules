@@ -451,7 +451,1315 @@ service cloud.firestore {
 
     function isProtectedAdministrator(username) {
       return username is string
-        && username.lower() in ['i_love_you_h', 'cybercapone'];
+        && username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*(i_love_you_h|cybercapone)[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*
+
+    function hasMatchingAdminReservation(profile) {
+      let normalizedUsername = profile.username.lower();
+      let reservationPath = /databases/$(database)/documents/usernames/$(normalizedUsername);
+      return profile.username is string
+        && normalizedUsername in ['i_love_you_h', 'cybercapone']
+        && exists(reservationPath)
+        && get(reservationPath).data.uid == request.auth.uid
+        && get(reservationPath).data.username == profile.username;
+    }
+
+    function hasNoDeletionQueueState(profile) {
+      return !profile.keys().hasAny([
+        'adminDeletionRequestedAt', 'adminDeletionRequestedBy', 'adminDeletionStatus'
+      ]);
+    }
+
+    function matchingDeletionQueueJob(job, targetUid) {
+      return job.keys().hasOnly(['targetUid', 'requesterUid', 'requestedAt', 'status'])
+        && job.targetUid == targetUid
+        && job.requesterUid == request.auth.uid
+        && job.requestedAt == request.time
+        && job.status == 'queued';
+    }
+
+    function matchingSelfDeletionQueueJob(job, targetUid, requestedAt) {
+      return job.keys().hasOnly(['targetUid', 'requesterUid', 'requestedAt', 'requestType', 'status'])
+        && targetUid == request.auth.uid
+        && job.targetUid == targetUid
+        && job.requesterUid == targetUid
+        && job.requestedAt == requestedAt
+        && job.requestType == 'self'
+        && job.status == 'queued';
+    }
+
+    function validDeletionQueueProfile(userId) {
+      return isAdmin()
+        && !isProtectedAdministrator(resource.data.username)
+        && hasNoDeletionQueueState(resource.data)
+        && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'banned', 'adminDeletionRequestedAt', 'adminDeletionRequestedBy', 'adminDeletionStatus'
+        ])
+        && request.resource.data.banned == true
+        && request.resource.data.adminDeletionRequestedAt == request.time
+        && request.resource.data.adminDeletionRequestedBy == request.auth.uid
+        && request.resource.data.adminDeletionStatus == 'queued'
+        && existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId))
+        && matchingDeletionQueueJob(
+          getAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId)).data,
+          userId
+        );
+    }
+
+    function validStandaloneAdminAccountControl(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return request.auth.uid != userId
+        && isAdmin()
+        && !isProtectedAdministrator(resource.data.username)
+        && (
+          (changed.hasOnly(['banned'])
+            && request.resource.data.banned is bool
+            && (request.resource.data.banned == true
+              || (hasNoDeletionQueueState(resource.data)
+                && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId)))))
+          ||
+          (changed.hasOnly(['suspendedUntil'])
+            && request.resource.data.suspendedUntil is timestamp)
+        );
+    }
+
+    function activeUser() {
+      let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return signedIn()
+        && accountAvailable(request.auth.uid)
+        && profile.get('banned', false) != true
+        && accountNotSuspended(profile);
+    }
+
+    function isPremiumUid(uid) {
+      return exists(/databases/$(database)/documents/premiumAccess/$(uid))
+        && get(/databases/$(database)/documents/premiumAccess/$(uid)).data.status == 'active'
+        && get(/databases/$(database)/documents/premiumAccess/$(uid)).data.tier in ['founder', 'founding', 'subscriber'];
+    }
+
+    function isPremiumUidAfter(uid) {
+      return existsAfter(/databases/$(database)/documents/premiumAccess/$(uid))
+        && getAfter(/databases/$(database)/documents/premiumAccess/$(uid)).data.status == 'active'
+        && getAfter(/databases/$(database)/documents/premiumAccess/$(uid)).data.tier in ['founder', 'founding', 'subscriber'];
+    }
+
+    function premiumRoomMember(roomId, uid) {
+      return exists(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + uid));
+    }
+
+    function premiumRoomMemberAfter(roomId, uid) {
+      return existsAfter(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + uid));
+    }
+
+    function temporaryRoomMember(roomId, uid) {
+      return exists(/databases/$(database)/documents/roomMembers/$(roomId + '_' + uid));
+    }
+
+    function temporaryRoomMemberAfter(roomId, uid) {
+      return existsAfter(/databases/$(database)/documents/roomMembers/$(roomId + '_' + uid));
+    }
+
+    function premiumRoomRole(roomId, uid) {
+      return get(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + uid)).data.role;
+    }
+
+    function premiumRoomOwner(roomId) {
+      return premiumRoomMember(roomId, request.auth.uid)
+        && premiumRoomRole(roomId, request.auth.uid) == 'owner';
+    }
+
+    function premiumRoomModerator(roomId) {
+      return premiumRoomMember(roomId, request.auth.uid)
+        && premiumRoomRole(roomId, request.auth.uid) == 'moderator';
+    }
+
+    function activePushUser() {
+      return activeUser()
+        && !exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
+    }
+
+    function activePushUserAfter() {
+      return activeUserAfter()
+        && !existsAfter(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
+    }
+
+    function selfDeletingPushUser() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid));
+    }
+
+    function pushReadDeleteUser() {
+      return activePushUser() || selfDeletingPushUser();
+    }
+
+    function validPushSubscriptionId(subscriptionId) {
+      return subscriptionId.matches('^[0-9a-f]{64}$');
+    }
+
+    function validEncryptedEnvelope(envelope, maximumCiphertextSize) {
+      return envelope is map
+        && envelope.keys().hasOnly(['version', 'algorithm', 'iv', 'ciphertext'])
+        && envelope.version == 1
+        && envelope.algorithm == 'A256GCM'
+        && envelope.iv is string
+        && envelope.iv.size() <= 24
+        && envelope.ciphertext is string
+        && envelope.ciphertext.size() > 0
+        && envelope.ciphertext.size() <= maximumCiphertextSize;
+    }
+
+    function validPushSubscription() {
+      return request.resource.data.keys().hasOnly([
+          'uid', 'endpoint', 'expirationTime', 'p256dh', 'auth', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.endpoint is string
+        && request.resource.data.endpoint.matches('^https://.*$')
+        && request.resource.data.endpoint.size() <= 2048
+        && (request.resource.data.expirationTime == null
+          || (request.resource.data.expirationTime is int
+            && request.resource.data.expirationTime >= 0))
+        && request.resource.data.p256dh is string
+        && request.resource.data.p256dh.matches('^[A-Za-z0-9_-]+$')
+        && request.resource.data.p256dh.size() <= 128
+        && request.resource.data.auth is string
+        && request.resource.data.auth.matches('^[A-Za-z0-9_-]+$')
+        && request.resource.data.auth.size() <= 64;
+    }
+
+    function currentUsername() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username;
+    }
+
+    function validOriginalPost() {
+      return request.resource.data.keys().hasOnly(['type', 'authorId', 'username', 'content', 'imageData', 'category', 'options', 'expiresAt', 'moderationState', 'createdAt'])
+        && request.resource.data.type == 'original'
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.content is string
+        && (request.resource.data.content.size() <= 500
+          || (isPremiumUidAfter(request.auth.uid) && request.resource.data.content.size() <= 20000))
+        && (request.resource.data.content.size() >= 1
+          || request.resource.data.get('imageData', '').size() > 0)
+        && request.resource.data.get('imageData', '').size() <= 160000
+        && request.resource.data.get('category', 'Post') in ['Post', 'Question', 'Confession', 'Advice', 'Rant', 'Good News', 'Poll']
+        && request.resource.data.get('options', []) is list
+        && request.resource.data.get('options', []).size() <= 4
+        && (request.resource.data.get('category', 'Post') != 'Poll'
+          || request.resource.data.get('options', []).size() >= 2)
+        && (request.resource.data.get('expiresAt', null) == null
+          || (request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt > request.time))
+        && request.resource.data.moderationState == 'visible'
+        && request.resource.data.createdAt == request.time;
+    }
+
+    function validRepost(postId) {
+      let original = getAfter(/databases/$(database)/documents/posts/$(request.resource.data.originalPostId));
+      return request.resource.data.keys().hasOnly([
+          'type', 'authorId', 'username', 'sourceCollection', 'originalPostId',
+          'originalAuthorId', 'originalUsername', 'content', 'imageData', 'moderationState', 'createdAt'
+        ])
+        && request.resource.data.type == 'repost'
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.sourceCollection == 'posts'
+        && postId == 'repost_' + request.auth.uid + '_' + request.resource.data.originalPostId
+        && original.data.type == 'original'
+        && original.data.get('moderationState', 'visible') != 'hidden'
+        && request.resource.data.originalAuthorId == original.data.authorId
+        && request.resource.data.originalUsername == original.data.username
+        && accountAvailableAfter(original.data.authorId)
+        && request.resource.data.content == original.data.content
+        && request.resource.data.get('imageData', '') == original.data.get('imageData', '')
+        && request.resource.data.moderationState == 'visible'
+        && request.resource.data.createdAt == request.time;
+    }
+
+    match /siteSettings/{settingId} {
+      allow read: if settingId in ['features', 'announcement'] || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /accountModeration/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow write: if isAdmin()
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && !isProtectedAdministrator(get(/databases/$(database)/documents/users/$(uid)).data.username);
+    }
+
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /system/accountStats {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['count', 'limit', 'updatedAt'])
+        && request.resource.data.limit == 500
+        && request.resource.data.updatedAt == request.time
+        && ((activeUserAfter() && request.resource.data.count == 5)
+          || (!exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid))
+            && !existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(request.auth.uid))
+            && request.resource.data.count == 6));
+      allow update: if signedIn()
+        && request.resource.data.keys().hasOnly(['count', 'limit', 'updatedAt'])
+        && request.resource.data.limit == 500
+        && request.resource.data.updatedAt == request.time
+        && (
+          (request.resource.data.count == resource.data.count + 1
+            && request.resource.data.count <= request.resource.data.limit
+            && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid))
+            && !existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(request.auth.uid)))
+          ||
+          (request.resource.data.count == resource.data.count - 1
+            && request.resource.data.count >= 0
+            && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
+            && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && !existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)))
+        );
+      allow delete: if false;
+    }
+
+    match /system/deletionProcessor {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /system/notificationProcessor {
+      allow read, create, update, delete: if false;
+    }
+
+    match /system/moderationProcessor {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /reportIntakes/{reportId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
+      allow create: if activeUserAfter()
+        && validReportIntake(reportId)
+        && exactReceiptAfterIntake();
+      allow update, delete: if false;
+    }
+
+    match /reportReceipts/{reporterUid}/{targetKind}/{targetId} {
+      allow get: if signedIn()
+        && reporterUid == request.auth.uid
+        && targetKind in ['post', 'communityPost', 'room', 'roomMessage', 'user']
+        && reportReceiptTargetExists(targetKind, targetId);
+      allow list: if false;
+      allow create: if activeUserAfter()
+        && reporterUid == request.auth.uid
+        && targetKind in ['post', 'communityPost', 'room', 'roomMessage', 'user']
+        && request.resource.data.keys().hasOnly(['reporterUid', 'targetKind', 'targetId', 'createdAt'])
+        && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.targetKind == targetKind
+        && request.resource.data.targetId == targetId
+        && request.resource.data.createdAt == request.time
+        && exactIntakeAfterReceipt(reporterUid, targetKind, targetId);
+      allow update, delete: if false;
+    }
+
+    match /moderationCases/{caseId} {
+      allow read: if isAdmin();
+      allow create: if validImmediateReportCase(caseId) || validAdminDeletionCase(caseId);
+      allow update: if validImmediateReportCase(caseId)
+        || (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt', 'resolvedAt', 'resolvedBy'])
+          && request.resource.data.status in ['restored', 'deleted']
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.resolvedAt == request.time
+          && request.resource.data.resolvedBy == request.auth.uid);
+      allow delete: if false;
+
+      match /reports/{reportId} {
+        allow read: if isAdmin();
+        allow create, update, delete: if false;
+      }
+
+      match /evidence/{evidenceId} {
+        allow read: if isAdmin();
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /moderationActions/{caseId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && validQueuedModerationAction(caseId);
+      allow update: if isAdmin() && validTerminalModerationActionRetry(caseId);
+      allow delete: if false;
+    }
+
+    match /legacyRoomQuarantine/{roomId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /legacyRoomActions/{actionId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && validLegacyRoomAction();
+      allow update, delete: if false;
+    }
+
+    match /blocks/{blockId} {
+      allow read: if isAdmin() || (signedIn()
+        && (resource.data.blockerUid == request.auth.uid
+          || resource.data.blockedUid == request.auth.uid));
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['blockerUid', 'blockedUid', 'createdAt'])
+        && request.resource.data.blockerUid == request.auth.uid
+        && request.resource.data.blockedUid is string
+        && request.resource.data.blockedUid != request.auth.uid
+        && accountAvailableAfter(request.resource.data.blockedUid)
+        && blockId == request.auth.uid + '_' + request.resource.data.blockedUid
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.blockerUid == request.auth.uid;
+    }
+
+    match /pageViews/{day} {
+      allow read: if isAdmin();
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['date', 'views', 'updatedAt'])
+        && request.resource.data.date == day
+        && request.resource.data.views == 1
+        && request.resource.data.updatedAt == request.time;
+      allow update: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['date', 'views', 'updatedAt'])
+        && request.resource.data.date == resource.data.date
+        && request.resource.data.views == resource.data.views + 1
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /usernames/{normalizedUsername} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && accountAvailableAfter(request.auth.uid)
+        && !exists(/databases/$(database)/documents/usernames/$(normalizedUsername))
+        && !isProtectedAdministrator(normalizedUsername)
+        && !isProtectedAdministrator(request.resource.data.username)
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+        && request.resource.data.username.lower() == normalizedUsername
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username
+          == request.resource.data.username
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if activeUser()
+        && resource.data.uid == request.auth.uid
+        && (
+          (exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
+            && resource.data.username.lower() == normalizedUsername)
+          ||
+          (getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower()
+            != normalizedUsername)
+        );
+    }
+
+    match /e2eePublicKeys/{uid} {
+      allow read: if activeUser();
+      allow create: if activeUserAfter()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'version', 'algorithm', 'publicJwk', 'fingerprint', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.version == 1
+        && request.resource.data.algorithm == 'P-256'
+        && request.resource.data.publicJwk is map
+        && request.resource.data.publicJwk.keys().hasOnly(['key_ops', 'ext', 'kty', 'x', 'y', 'crv'])
+        && request.resource.data.publicJwk.kty == 'EC'
+        && request.resource.data.publicJwk.crv == 'P-256'
+        && request.resource.data.publicJwk.x is string
+        && request.resource.data.publicJwk.x.size() <= 64
+        && request.resource.data.publicJwk.y is string
+        && request.resource.data.publicJwk.y.size() <= 64
+        && request.resource.data.fingerprint is string
+        && request.resource.data.fingerprint.size() == 29
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && uid == request.auth.uid;
+    }
+
+    match /e2eePrivateKeys/{uid} {
+      allow read: if activeUser() && uid == request.auth.uid;
+      allow create: if activeUserAfter()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'version', 'privateBundle', 'publicFingerprint', 'createdAt', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.version == 1
+        && request.resource.data.privateBundle is map
+        && request.resource.data.privateBundle.keys().hasOnly(['version', 'algorithm', 'iterations', 'salt', 'iv', 'ciphertext'])
+        && request.resource.data.privateBundle.version == 1
+        && request.resource.data.privateBundle.algorithm == 'P-256+PBKDF2-SHA256+A256GCM'
+        && request.resource.data.privateBundle.iterations >= 600000
+        && request.resource.data.privateBundle.salt is string
+        && request.resource.data.privateBundle.salt.size() <= 32
+        && request.resource.data.privateBundle.iv is string
+        && request.resource.data.privateBundle.iv.size() <= 24
+        && request.resource.data.privateBundle.ciphertext is string
+        && request.resource.data.privateBundle.ciphertext.size() <= 2048
+        && request.resource.data.publicFingerprint is string
+        && request.resource.data.publicFingerprint.size() == 29
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && uid == request.auth.uid;
+    }
+
+    match /e2eeRoomKeyEnvelopes/{envelopeId} {
+      allow read: if activeUser() && (resource.data.recipientUid == request.auth.uid
+        || (resource.data.kind == 'temporary' && temporaryRoomMember(resource.data.roomId, request.auth.uid))
+        || (resource.data.kind == 'premium' && premiumRoomMember(resource.data.roomId, request.auth.uid)));
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['kind', 'roomId', 'recipientUid', 'senderUid', 'envelope', 'version', 'createdAt'])
+        && request.resource.data.kind in ['temporary', 'premium']
+        && request.resource.data.roomId is string
+        && request.resource.data.roomId.size() > 0
+        && request.resource.data.recipientUid is string
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.version == 1
+        && envelopeId == request.resource.data.kind + '_' + request.resource.data.roomId + '_' + request.resource.data.recipientUid
+        && validEncryptedEnvelope(request.resource.data.envelope, 1024)
+        && existsAfter(/databases/$(database)/documents/e2eePublicKeys/$(request.resource.data.recipientUid))
+        && ((request.resource.data.kind == 'temporary'
+            && roomAvailableAfter(request.resource.data.roomId)
+            && temporaryRoomMemberAfter(request.resource.data.roomId, request.auth.uid)
+            && temporaryRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid))
+          || (request.resource.data.kind == 'premium'
+            && premiumRoomMemberAfter(request.resource.data.roomId, request.auth.uid)
+            && premiumRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid)))
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.recipientUid == request.auth.uid;
+    }
+
+    match /pushSubscriptions/{subscriptionId} {
+      allow get, list: if pushReadDeleteUser()
+        && resource.data.uid == request.auth.uid;
+      allow create: if activePushUserAfter()
+        && validPushSubscriptionId(subscriptionId)
+        && validPushSubscription()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if activePushUserAfter()
+        && validPushSubscriptionId(subscriptionId)
+        && resource.data.uid == request.auth.uid
+        && validPushSubscription()
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.endpoint == resource.data.endpoint
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'expirationTime', 'p256dh', 'auth', 'updatedAt'
+        ])
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if pushReadDeleteUser()
+        && resource.data.uid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && featureEnabled('registrationsEnabled')
+        && request.auth.uid == userId
+        && accountAvailableAfter(userId)
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'lastActiveAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+        && !isProtectedAdministrator(request.resource.data.username)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.lastActiveAt == request.time
+        && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid
+          == request.auth.uid
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.username
+          == request.resource.data.username
+        && ((exists(/databases/$(database)/documents/system/accountStats)
+          && getAfter(/databases/$(database)/documents/system/accountStats).data.count
+            == get(/databases/$(database)/documents/system/accountStats).data.count + 1)
+          || (!exists(/databases/$(database)/documents/system/accountStats)
+            && getAfter(/databases/$(database)/documents/system/accountStats).data.count == 6));
+      allow update: if validStandaloneAdminAccountControl(userId)
+        || validDeletionQueueProfile(userId)
+        || (activeUserAfter()
+          && request.auth.uid == userId
+          && (
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastActiveAt'])
+              && request.resource.data.lastActiveAt == request.time
+              && (!resource.data.keys().hasAny(['lastActiveAt'])
+                || (resource.data.lastActiveAt is timestamp
+                  && request.time - resource.data.lastActiveAt >= duration.value(24, 'h'))))
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['profileImage', 'coverImage'])
+              && featureEnabled('uploadsEnabled')
+              && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['profileImage'])
+                || request.resource.data.get('profileImage', '').size() <= 160000)
+              && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['coverImage'])
+                || request.resource.data.get('coverImage', '').size() <= 160000))
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['freeAvatarId', 'freeCoverId'])
+              && request.resource.data.get('freeAvatarId', '') is string
+              && request.resource.data.get('freeCoverId', '') is string
+              && (request.resource.data.get('freeAvatarId', '') == ''
+                || request.resource.data.get('freeAvatarId', '').matches('free-avatar-[1-8]'))
+              && (request.resource.data.get('freeCoverId', '') == ''
+                || request.resource.data.get('freeCoverId', '').matches('free-cover-[1-4]')))
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
+              && (!isProtectedAdministrator(resource.data.username)
+                || request.resource.data.username.lower() == resource.data.username.lower())
+              && request.resource.data.username is string
+              && request.resource.data.username.matches('^[A-Za-z0-9_]{3,30}$')
+              && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower()))
+              && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid
+                == request.auth.uid)
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['spotifyTrackUrl'])
+              && featureEnabled('spotifyEmbedsEnabled')
+              && request.resource.data.get('spotifyTrackUrl', '') is string
+              && request.resource.data.get('spotifyTrackUrl', '').size() <= 200
+              && (request.resource.data.get('spotifyTrackUrl', '') == ''
+                || request.resource.data.get('spotifyTrackUrl', '')
+                  .matches('https://open[.]spotify[.]com/track/[A-Za-z0-9]{22}')))
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['spotifyPlaylistUrl'])
+              && featureEnabled('spotifyEmbedsEnabled')
+              && isPremiumUidAfter(userId)
+              && request.resource.data.get('spotifyPlaylistUrl', '') is string
+              && request.resource.data.get('spotifyPlaylistUrl', '').size() <= 220
+              && (request.resource.data.get('spotifyPlaylistUrl', '') == ''
+                || request.resource.data.get('spotifyPlaylistUrl', '')
+                  .matches('https://open[.]spotify[.]com/playlist/[A-Za-z0-9]+')))
+          ));
+      allow delete: if activeUser()
+          && request.auth.uid == userId
+          && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
+          && !isProtectedAdministrator(resource.data.username);
+    }
+
+    match /adminDeletionJobs/{targetUid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == targetUid && resource.data.get('requestType', '') == 'self');
+      allow create: if (isAdmin()
+        && exists(/databases/$(database)/documents/users/$(targetUid))
+        && !isProtectedAdministrator(
+          get(/databases/$(database)/documents/users/$(targetUid)).data.username
+        )
+        && !exists(/databases/$(database)/documents/adminDeletionJobs/$(targetUid))
+        && matchingDeletionQueueJob(request.resource.data, targetUid)
+        && existsAfter(/databases/$(database)/documents/users/$(targetUid))
+        && hasNoDeletionQueueState(
+          get(/databases/$(database)/documents/users/$(targetUid)).data
+        )
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data
+          .diff(get(/databases/$(database)/documents/users/$(targetUid)).data)
+          .affectedKeys().hasOnly([
+            'banned', 'adminDeletionRequestedAt', 'adminDeletionRequestedBy', 'adminDeletionStatus'
+          ])
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.banned == true
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.adminDeletionRequestedAt
+          == request.time
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.adminDeletionRequestedBy
+          == request.auth.uid
+        && getAfter(/databases/$(database)/documents/users/$(targetUid)).data.adminDeletionStatus
+          == 'queued')
+        || (signedIn()
+          && request.auth.uid == targetUid
+          && exists(/databases/$(database)/documents/users/$(targetUid))
+          && !isProtectedAdministrator(get(/databases/$(database)/documents/users/$(targetUid)).data.username)
+          && !exists(/databases/$(database)/documents/adminDeletionJobs/$(targetUid))
+          && existsAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid))
+          && getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.keys()
+            .hasOnly(['uid', 'username', 'createdAt'])
+          && getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.uid == targetUid
+          && getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.username
+            == get(/databases/$(database)/documents/users/$(targetUid)).data.username
+          && getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.createdAt is timestamp
+          && matchingSelfDeletionQueueJob(
+            request.resource.data,
+            targetUid,
+            getAfter(/databases/$(database)/documents/accountDeletionRequests/$(targetUid)).data.createdAt
+          ));
+      allow update, delete: if false;
+    }
+
+    match /accountDeletionRequests/{userId} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow create: if activeUser()
+        && request.auth.uid == userId
+        && !isProtectedAdministrator(currentUsername())
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId))
+        && matchingSelfDeletionQueueJob(
+          getAfter(/databases/$(database)/documents/adminDeletionJobs/$(userId)).data,
+          userId,
+          request.time
+        );
+      allow update: if false;
+      allow delete: if signedIn() && request.auth.uid == userId
+        && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId));
+    }
+
+    match /premiumAccess/{userId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /premiumSettings/{userId} {
+      allow read: if signedIn();
+      allow create, update: if activeUserAfter()
+        && request.auth.uid == userId
+        && isPremiumUidAfter(userId)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'onlineVisible', 'avatarId', 'coverId', 'accent', 'profileFrame', 'cardStyle', 'bannerStyle',
+          'chatBubbleColor', 'timelineFeedColor', 'communityBackgroundColor', 'privateBoxColor',
+          'privateChatBubbleColor', 'temporaryChatBubbleColor', 'pageColor', 'headerColor', 'menuColor',
+          'profileColor', 'composerColor', 'timelineColor', 'postColor', 'buttonColor', 'inputColor',
+          'textColor', 'commentColor', 'temporaryBoxColor', 'spotifyPlaylistUrl', 'updatedAt'
+        ])
+        && request.resource.data.uid == userId
+        && request.resource.data.spotifyPlaylistUrl is string
+        && request.resource.data.spotifyPlaylistUrl.size() <= 220
+        && (request.resource.data.spotifyPlaylistUrl == ''
+          || request.resource.data.spotifyPlaylistUrl.matches('https://open[.]spotify[.]com/playlist/[A-Za-z0-9]+'))
+        && request.resource.data.onlineVisible is bool
+        && request.resource.data.avatarId in ['none', 'avatar-1', 'avatar-2', 'avatar-3', 'avatar-4', 'avatar-5', 'avatar-6', 'avatar-7', 'avatar-8', 'avatar-9', 'avatar-10', 'avatar-11', 'avatar-12', 'female-1', 'female-2', 'female-3', 'female-4', 'female-5', 'female-6', 'female-7', 'female-8', 'female-9', 'female-10', 'female-11', 'female-12']
+        && request.resource.data.coverId in ['none', 'cover-1', 'cover-2', 'cover-3', 'cover-4', 'cover-5', 'cover-6', 'cover-7', 'cover-8', 'cover-9', 'cover-10', 'cover-11', 'cover-12']
+        && request.resource.data.accent in ['violet', 'rose', 'ocean', 'emerald']
+        && request.resource.data.profileFrame in ['glow', 'double', 'minimal']
+        && request.resource.data.cardStyle in ['glass', 'solid', 'outline']
+        && request.resource.data.bannerStyle in ['midnight', 'aurora', 'ember']
+        && request.resource.data.chatBubbleColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.timelineFeedColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.communityBackgroundColor in ['black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'brown', 'teal']
+        && request.resource.data.privateBoxColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.privateChatBubbleColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.temporaryChatBubbleColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.pageColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.headerColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.menuColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.profileColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.composerColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.timelineColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.postColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.buttonColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.inputColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.textColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.commentColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.temporaryBoxColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /premiumCheckout/{documentId} {
+      allow read: if signedIn() && documentId == 'public';
+      allow write: if false;
+    }
+
+    match /customers/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow write: if false;
+
+      match /checkout_sessions/{sessionId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow create: if activeUserAfter() && request.auth.uid == userId
+          && exists(/databases/$(database)/documents/premiumCheckout/public)
+          && get(/databases/$(database)/documents/premiumCheckout/public).data.mode == 'test'
+          && get(/databases/$(database)/documents/premiumCheckout/public).data.enabled == true
+          && request.resource.data.keys().hasOnly(['price', 'success_url', 'cancel_url'])
+          && request.resource.data.price == get(/databases/$(database)/documents/premiumCheckout/public).data.priceId
+          && request.resource.data.success_url == 'https://anonchatlogin.web.app/premium.html?checkout=success'
+          && request.resource.data.cancel_url == 'https://anonchatlogin.web.app/premium.html?checkout=cancelled';
+        allow update, delete: if false;
+      }
+
+      match /subscriptions/{subscriptionId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow write: if false;
+      }
+    }
+
+    match /follows/{followId} {
+      allow read: if signedIn();
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followingId is string
+        && request.resource.data.followingId != request.auth.uid
+        && accountAvailableAfter(request.resource.data.followingId)
+        && !pairIsBlocked(request.auth.uid, request.resource.data.followingId)
+        && followId == request.auth.uid + '_' + request.resource.data.followingId
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn()
+        && (resource.data.followerId == request.auth.uid || resource.data.followingId == request.auth.uid);
+    }
+
+    match /appPresence/{userId} {
+      allow read: if activeUser()
+        && (request.auth.uid == userId
+          || exists(/databases/$(database)/documents/follows/$(userId + '_' + request.auth.uid)));
+      allow create, update: if activeUserAfter()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['uid', 'openedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.openedAt == request.time;
+      allow delete: if activeUser() && request.auth.uid == userId;
+    }
+
+    match /notificationReads/{readId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if activeUserAfter()
+        && readId == request.auth.uid + '_' + request.resource.data.eventId
+        && request.resource.data.keys().hasOnly(['uid', 'eventId', 'readAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.eventId is string
+        && request.resource.data.eventId.matches('^event-[0-9a-f]{16}$')
+        && request.resource.data.readAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /notificationEvents/{eventId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /notificationDeliveries/{deliveryId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /{documentPath=**}/comments/{commentId} {
+      allow read: if signedIn() && visibleContentOrAdmin(documentPath);
+      allow create: if activeUserAfter()
+        && featureEnabled('commentsEnabled')
+        && contentAvailableAfter(documentPath)
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'text', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 280
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if (signedIn() && resource.data.uid == request.auth.uid) || isAdmin();
+    }
+
+    match /{documentPath=**}/reactions/{reactionId} {
+      allow read: if signedIn() && visibleContentOrAdmin(documentPath);
+      allow create: if activeUserAfter()
+        && contentAvailableAfter(documentPath)
+        && reactionId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['wow', 'middle_finger', 'laugh', 'smile', 'fire', 'heart', 'sad']
+        && request.resource.data.createdAt == request.time;
+      allow update: if activeUserAfter()
+        && contentAvailableAfter(documentPath)
+        && reactionId == request.auth.uid
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['wow', 'middle_finger', 'laugh', 'smile', 'fire', 'heart', 'sad']
+        && request.resource.data.createdAt == request.time;
+      allow delete: if (signedIn()
+          && reactionId == request.auth.uid
+          && resource.data.uid == request.auth.uid)
+        || isAdmin();
+    }
+
+    function acceptedConversation(requestId) {
+      let conversation = get(/databases/$(database)/documents/messageRequests/$(requestId));
+      return exists(/databases/$(database)/documents/messageRequests/$(requestId))
+        && conversation.data.status == 'accepted'
+        && (requestId == conversation.data.fromId + '_' + conversation.data.toId
+          || requestId == conversation.data.toId + '_' + conversation.data.fromId)
+        && (conversation.data.fromId == request.auth.uid
+          || conversation.data.toId == request.auth.uid)
+        && !pairIsBlocked(conversation.data.fromId, conversation.data.toId);
+    }
+
+    function acceptedConversationMessageAfter(requestId, message) {
+      let conversation = getAfter(/databases/$(database)/documents/messageRequests/$(requestId));
+      return existsAfter(/databases/$(database)/documents/messageRequests/$(requestId))
+        && conversation.data.status == 'accepted'
+        && (requestId == conversation.data.fromId + '_' + conversation.data.toId
+          || requestId == conversation.data.toId + '_' + conversation.data.fromId)
+        && (conversation.data.fromId == request.auth.uid
+          || conversation.data.toId == request.auth.uid)
+        && accountAvailableAfter(conversation.data.fromId)
+        && accountAvailableAfter(conversation.data.toId)
+        && !pairIsBlocked(conversation.data.fromId, conversation.data.toId)
+        && message.participants is list
+        && message.participants.size() == 2
+        && conversation.data.fromId in message.participants
+        && conversation.data.toId in message.participants
+        && message.senderId == request.auth.uid;
+    }
+
+    function acceptedChat(otherId) {
+      return !pairIsBlocked(request.auth.uid, otherId)
+        && ((exists(/databases/$(database)/documents/messageRequests/$(request.auth.uid + '_' + otherId))
+          && get(/databases/$(database)/documents/messageRequests/$(request.auth.uid + '_' + otherId)).data.status == 'accepted')
+        || (exists(/databases/$(database)/documents/messageRequests/$(otherId + '_' + request.auth.uid))
+          && get(/databases/$(database)/documents/messageRequests/$(otherId + '_' + request.auth.uid)).data.status == 'accepted'));
+    }
+
+    function mutualReveal(otherId) {
+      return !pairIsBlocked(request.auth.uid, otherId)
+        && exists(/databases/$(database)/documents/reveals/$(request.auth.uid + '_' + otherId))
+        && exists(/databases/$(database)/documents/reveals/$(otherId + '_' + request.auth.uid))
+        && get(/databases/$(database)/documents/reveals/$(request.auth.uid + '_' + otherId)).data.status == 'accepted'
+        && get(/databases/$(database)/documents/reveals/$(otherId + '_' + request.auth.uid)).data.status == 'accepted';
+    }
+
+    match /userPrivate/{userId} {
+      allow read: if activeUser() && (request.auth.uid == userId || mutualReveal(userId));
+      allow create, update: if activeUserAfter()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['uid', 'interests', 'region', 'ageRange', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.interests is string
+        && request.resource.data.interests.size() <= 100
+        && request.resource.data.region is string
+        && request.resource.data.region.size() <= 60
+        && request.resource.data.ageRange is string
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /userPreferences/{userId} {
+      allow read: if activeUser() && request.auth.uid == userId;
+      allow create, update: if activeUserAfter() && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['uid', 'mutedKeywords', 'contextCheck', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.mutedKeywords is list
+        && request.resource.data.mutedKeywords.size() <= 20
+        && request.resource.data.contextCheck is bool
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /circles/{circleId} {
+      allow read: if signedIn();
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['name', 'description', 'ownerId', 'createdAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 3
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 180
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isAdmin() || (activeUser() && resource.data.ownerId == request.auth.uid);
+    }
+
+    match /circleMembers/{memberId} {
+      allow read: if signedIn();
+      allow create: if activeUserAfter()
+        && memberId == request.resource.data.circleId + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['circleId', 'uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && circleAvailableAfter(request.resource.data.circleId)
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /communityPosts/{postId} {
+      allow read: if signedIn() && visibleOrAdmin();
+      allow create: if activeUserAfter()
+        && featureEnabled('postingEnabled')
+        && request.resource.data.keys().hasOnly(['authorId', 'username', 'content', 'category', 'circleId', 'options', 'expiresAt', 'moderationState', 'createdAt'])
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.content is string
+        && request.resource.data.content.size() >= 1
+        && (request.resource.data.content.size() <= 500
+          || (isPremiumUidAfter(request.auth.uid) && request.resource.data.content.size() <= 20000))
+        && request.resource.data.category in ['Question', 'Confession', 'Advice', 'Rant', 'Good News', 'Poll']
+        && request.resource.data.circleId is string
+        && circleAvailableAfter(request.resource.data.circleId)
+        && request.resource.data.options is list
+        && request.resource.data.options.size() <= 4
+        && request.resource.data.moderationState == 'visible'
+        && request.resource.data.createdAt == request.time;
+      allow update: if validModerationHoldUpdate('communityPost', postId, resource.data.authorId)
+        || validAdminMaterialRestore();
+      allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    match /communityVotes/{voteId} {
+      allow read: if signedIn() && communityVoteVisibleOrAdmin();
+      allow create, update: if activeUserAfter()
+        && votePostAvailableAfter(request.resource.data.postCollection, request.resource.data.postId)
+        && voteId == request.resource.data.postCollection + ':' + request.resource.data.postId + ':' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['postCollection', 'postId', 'uid', 'option', 'createdAt'])
+        && request.resource.data.postCollection in ['posts', 'communityPosts']
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.option is int
+        && request.resource.data.option >= 0
+        && request.resource.data.option <= 3
+        && request.resource.data.createdAt == request.time;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /premiumRooms/{roomId} {
+      allow read: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid));
+      allow create: if activeUserAfter() && isPremiumUidAfter(request.auth.uid)
+        && request.resource.data.keys().hasOnly(['name', 'topic', 'roomColor', 'ownerId', 'moderatorIds', 'createdAt', 'updatedAt', 'moderationState', 'encrypted', 'cipherVersion'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string && request.resource.data.name.size() >= 3 && request.resource.data.name.size() <= 40
+        && request.resource.data.topic is string && request.resource.data.topic.size() <= 100
+        && request.resource.data.roomColor in ['black','white','gray','silver','red','orange','yellow','green','blue','purple','pink','brown','teal','navy','neonPink','neonPurple','neonBlue','neonCyan','neonGreen','neonYellow','neonOrange','neonRed','sunset','oceanGlow','purpleRain','fireIce','limeSky','candy','midnightTeal','goldPurple','redBlack','galaxy','watermelon','royal']
+        && request.resource.data.moderatorIds == []
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.moderationState == 'visible'
+        && premiumRoomMemberAfter(roomId, request.auth.uid)
+        && getAfter(/databases/$(database)/documents/premiumRoomMembers/$(roomId + '_' + request.auth.uid)).data.role == 'owner';
+      allow update: if activeUserAfter() && premiumRoomOwner(roomId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moderatorIds', 'updatedAt'])
+        && request.resource.data.moderatorIds is list && request.resource.data.moderatorIds.size() <= 2
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin() || (activeUser() && premiumRoomOwner(roomId));
+    }
+
+    match /premiumRoomMembers/{memberId} {
+      allow read: if isAdmin() || (activeUser() && (resource.data.uid == request.auth.uid || premiumRoomMember(resource.data.roomId, request.auth.uid)));
+      allow create: if activeUserAfter()
+        && memberId == request.resource.data.roomId + '_' + request.resource.data.uid
+        && request.resource.data.keys().hasOnly(['roomId', 'uid', 'role', 'invitedBy', 'joinedAt'])
+        && request.resource.data.uid is string && isPremiumUidAfter(request.resource.data.uid)
+        && request.resource.data.role in ['owner', 'moderator', 'member']
+        && request.resource.data.invitedBy == request.auth.uid && request.resource.data.joinedAt == request.time
+        && ((request.resource.data.uid == request.auth.uid && request.resource.data.role == 'owner'
+            && existsAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId))
+            && getAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId)).data.ownerId == request.auth.uid)
+          || (exists(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId))
+            && (premiumRoomOwner(request.resource.data.roomId) || premiumRoomModerator(request.resource.data.roomId))
+            && (request.resource.data.role == 'member'
+              || (premiumRoomOwner(request.resource.data.roomId)
+                && request.resource.data.uid in getAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId)).data.moderatorIds))));
+      allow update: if activeUserAfter() && premiumRoomOwner(resource.data.roomId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.invitedBy == resource.data.invitedBy
+        && request.resource.data.joinedAt == resource.data.joinedAt
+        && request.resource.data.role in ['moderator', 'member']
+        && ((request.resource.data.role == 'moderator'
+            && resource.data.uid in getAfter(/databases/$(database)/documents/premiumRooms/$(resource.data.roomId)).data.moderatorIds)
+          || (request.resource.data.role == 'member'
+            && !(resource.data.uid in getAfter(/databases/$(database)/documents/premiumRooms/$(resource.data.roomId)).data.moderatorIds)));
+      allow delete: if isAdmin() || (activeUser() && (premiumRoomOwner(resource.data.roomId)
+        || (premiumRoomModerator(resource.data.roomId) && resource.data.role == 'member')
+        || (resource.data.uid == request.auth.uid && resource.data.role != 'owner')));
+    }
+
+    match /premiumRooms/{roomId}/messages/{messageId} {
+      allow read: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid));
+      allow create: if activeUserAfter() && isPremiumUidAfter(request.auth.uid)
+        && premiumRoomMemberAfter(roomId, request.auth.uid)
+        && request.resource.data.keys().hasOnly(['senderId', 'username', 'encrypted', 'cipherVersion', 'bodyCipher', 'createdAt'])
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.username == currentUsername()
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && request.resource.data.createdAt == request.time;
+      allow update: if activeUserAfter() && premiumRoomMember(roomId, request.auth.uid)
+        && resource.data.get('encrypted', false) != true
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && !request.resource.data.keys().hasAny(['text'])
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['text', 'encrypted', 'cipherVersion', 'bodyCipher']);
+      allow delete: if isAdmin() || (activeUser() && premiumRoomMember(roomId, request.auth.uid)
+        && (resource.data.senderId == request.auth.uid || premiumRoomOwner(roomId) || premiumRoomModerator(roomId)));
+    }
+
+    match /premiumRoomNotifications/{notificationId} {
+      allow read: if false;
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'createdAt'])
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && premiumRoomMemberAfter(request.resource.data.roomId, request.auth.uid)
+        && existsAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId))
+        && getAfter(/databases/$(database)/documents/premiumRooms/$(request.resource.data.roomId)).data.moderationState == 'visible';
+      allow update, delete: if false;
+    }
+
+    match /rooms/{roomId} {
+      allow read: if signedIn() && visibleOrAdmin();
+      allow create: if activeUserAfter() && featureEnabled('temporaryChatsEnabled')
+        && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'createdAt', 'expiresAt', 'moderationState', 'encrypted', 'cipherVersion'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 3
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.topic is string
+        && request.resource.data.topic.size() <= 100
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.moderationState == 'visible'
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validRoomExpiry();
+      allow update: if validModerationHoldUpdate('room', roomId, resource.data.ownerId)
+        || (activeUserAfter()
+          && resource.data.ownerId == request.auth.uid
+          && resource.data.get('moderationState', 'visible') == 'visible'
+          && resource.data.get('cleanupState', 'open') != 'closing'
+          && request.resource.data.get('cleanupState', '') == 'closing'
+          && request.resource.data.closedAt == request.time
+          && request.resource.data.expiresAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['cleanupState', 'closedAt', 'expiresAt']));
+      allow delete: if false;
+    }
+
+    match /roomMembers/{memberId} {
+      allow read: if activeUser() && (resource.data.uid == request.auth.uid
+        || temporaryRoomMember(resource.data.roomId, request.auth.uid));
+      allow create: if activeUserAfter()
+        && memberId == request.resource.data.roomId + '_' + request.auth.uid
+        && request.resource.data.keys().hasOnly(['roomId', 'uid', 'joinedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && roomAvailableAfter(request.resource.data.roomId)
+        && !pairIsBlocked(request.auth.uid,
+          getAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.ownerId)
+        && request.resource.data.joinedAt == request.time;
+      allow update: if activeUserAfter()
+        && roomAvailableAfter(request.resource.data.roomId)
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinedAt'])
+        && !pairIsBlocked(request.auth.uid,
+          getAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.ownerId)
+        && request.resource.data.joinedAt == request.time;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /roomMessages/{messageId} {
+      allow read: if isAdmin() || (signedIn()
+        && resource.data.get('moderationState', 'visible') != 'hidden'
+        && linkedRoomAvailable(resource.data.roomId));
+      allow create: if activeUserAfter()
+        && featureEnabled('temporaryChatsEnabled')
+        && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher', 'expiresAt', 'moderationState', 'createdAt'])
+        && request.resource.data.senderId == request.auth.uid
+        && roomAvailableAfter(request.resource.data.roomId)
+        && !pairIsBlocked(request.auth.uid,
+          getAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomId)).data.ownerId)
+        && request.resource.data.tempName is string
+        && request.resource.data.tempName.size() <= 40
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && (!request.resource.data.keys().hasAny(['imageCipher'])
+          || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
+        && request.resource.data.moderationState == 'visible'
+        && validRoomMessageExpiry(request.resource.data.roomId)
+        && request.resource.data.createdAt == request.time;
+      allow update: if activeUserAfter()
+        && temporaryRoomMember(resource.data.roomId, request.auth.uid)
+        && linkedRoomAvailable(resource.data.roomId)
+        && resource.data.get('encrypted', false) != true
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && (!request.resource.data.keys().hasAny(['imageCipher'])
+          || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
+        && !request.resource.data.keys().hasAny(['text', 'imageData'])
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['text', 'imageData', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher']);
+      allow delete: if isAdmin() || (signedIn()
+        && resource.data.senderId == request.auth.uid
+        && linkedRoomAvailable(resource.data.roomId));
+    }
+
+    match /messageRequests/{requestId} {
+      allow read: if signedIn()
+        && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
+      allow create: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
+        && accountAvailableAfter(request.resource.data.toId)
+        && request.resource.data.keys().hasOnly(['fromId', 'toId', 'status', 'createdAt', 'respondedAt'])
+        && request.resource.data.fromId == request.auth.uid
+        && request.resource.data.toId != request.auth.uid
+        && !pairIsBlocked(request.auth.uid, request.resource.data.toId)
+        && (request.resource.data.status == 'pending'
+          || (request.resource.data.status == 'accepted'
+            && mutuallyFollowAfter(request.resource.data.fromId, request.resource.data.toId)
+            && request.resource.data.respondedAt == request.time))
+        && (requestId == request.resource.data.fromId + '_' + request.resource.data.toId
+          || requestId == request.resource.data.toId + '_' + request.resource.data.fromId)
+        && request.resource.data.createdAt == request.time
+        && (request.resource.data.status == 'accepted'
+          || !request.resource.data.keys().hasAny(['respondedAt']));
+      allow update: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
+        && accountAvailableAfter(request.resource.data.fromId)
+        && accountAvailableAfter(request.resource.data.toId)
+        && !pairIsBlocked(request.resource.data.fromId, request.resource.data.toId)
+        && (
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+            && resource.data.toId == request.auth.uid
+            && request.resource.data.status in ['accepted', 'declined'])
+          ||
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+            && resource.data.fromId == request.auth.uid
+            && resource.data.status == 'declined'
+            && request.resource.data.status == 'pending')
+          ||
+          (request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['fromId', 'toId', 'status', 'createdAt'])
+            && resource.data.status == 'declined'
+            && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid)
+            && request.resource.data.fromId == request.auth.uid
+            && request.resource.data.toId == (resource.data.fromId == request.auth.uid
+              ? resource.data.toId : resource.data.fromId)
+            && request.resource.data.status == 'pending'
+            && request.resource.data.createdAt == request.time)
+        )
+        && (!request.resource.data.keys().hasAny(['respondedAt'])
+          || request.resource.data.respondedAt == resource.data.get('respondedAt', null)
+          || request.resource.data.respondedAt == request.time);
+      allow delete: if signedIn()
+        && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
+    }
+
+    match /messageRequests/{requestId}/messages/{messageId} {
+      allow read: if activeUser()
+        && acceptedConversation(requestId);
+      allow create: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
+        && request.resource.data.keys().hasOnly([
+          'participants', 'senderId', 'text', 'imageData', 'encrypted', 'cipherVersion',
+          'bodyCipher', 'imageCipher', 'createdAt', 'expiresAt'
+        ])
+        && acceptedConversationMessageAfter(requestId, request.resource.data)
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+        && (!request.resource.data.keys().hasAny(['imageCipher'])
+          || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
+        && !request.resource.data.keys().hasAny(['text', 'imageData'])
+        && request.resource.data.createdAt == request.time
+        && (!request.resource.data.keys().hasAny(['expiresAt'])
+          || (request.resource.data.expiresAt is timestamp
+            && request.resource.data.expiresAt >= request.time + duration.value(23, 'h')
+              + duration.value(55, 'm')
+            && request.resource.data.expiresAt <= request.time + duration.value(24, 'h')
+              + duration.value(5, 'm')));
+      allow update: if activeUserAfter()
+        && acceptedConversation(requestId)
+        && request.auth.uid in resource.data.participants
+        && (
+          (resource.data.senderId != request.auth.uid
+            && (resource.data.get('imageData', '').size() > 0 || resource.data.keys().hasAny(['imageCipher']))
+            && request.resource.data.get('imageData', '') == ''
+            && !request.resource.data.keys().hasAny(['imageCipher'])
+            && request.resource.data.photoViewedBy == request.auth.uid
+            && request.resource.data.photoViewedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['imageData', 'imageCipher', 'photoViewedBy', 'photoViewedAt']))
+          ||
+          (resource.data.get('encrypted', false) != true
+            && request.resource.data.encrypted == true
+            && request.resource.data.cipherVersion == 1
+            && validEncryptedEnvelope(request.resource.data.bodyCipher, 2048)
+            && (!request.resource.data.keys().hasAny(['imageCipher'])
+              || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
+            && !request.resource.data.keys().hasAny(['text', 'imageData'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['text', 'imageData', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher']))
+        );
+      allow delete: if signedIn()
+        && request.auth.uid in resource.data.participants;
+    }
+
+    match /directMessages/{messageId} {
+      allow read: if activeUser()
+        && resource.data.participants is list
+        && resource.data.participants.size() == 2
+        && resource.data.participants[0] != resource.data.participants[1]
+        && resource.data.senderId in resource.data.participants
+        && request.auth.uid in resource.data.participants
+        && acceptedChat(resource.data.participants[0] == request.auth.uid
+          ? resource.data.participants[1] : resource.data.participants[0]);
+      allow create: if false;
+      allow update: if false;
+      allow delete: if signedIn() && request.auth.uid in resource.data.participants;
+    }
+
+    match /reveals/{revealId} {
+      allow read: if activeUser()
+        && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['fromId', 'toId', 'fields', 'status', 'createdAt'])
+        && request.resource.data.fromId == request.auth.uid
+        && accountAvailableAfter(request.resource.data.toId)
+        && !pairIsBlocked(request.auth.uid, request.resource.data.toId)
+        && acceptedChat(request.resource.data.toId)
+        && request.resource.data.fields.keys().hasOnly(['interests', 'region', 'ageRange'])
+        && request.resource.data.status == 'pending'
+        && revealId == request.auth.uid + '_' + request.resource.data.toId
+        && request.resource.data.createdAt == request.time;
+      allow update: if activeUserAfter()
+        && accountAvailableAfter(resource.data.fromId)
+        && accountAvailableAfter(resource.data.toId)
+        && !pairIsBlocked(resource.data.fromId, resource.data.toId)
+        && resource.data.toId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+        && request.resource.data.status == 'accepted'
+        && request.resource.data.respondedAt == request.time;
+      allow delete: if signedIn()
+        && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
+    }
+
+    match /posts/{postId}/comments/{commentId} {
+      allow delete: if signedIn()
+        && get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid;
+    }
+
+    match /communityPosts/{postId}/comments/{commentId} {
+      allow delete: if signedIn()
+        && get(/databases/$(database)/documents/communityPosts/$(postId)).data.authorId == request.auth.uid;
+    }
+
+    match /posts/{postId}/reactions/{reactionId} {
+      allow delete: if signedIn()
+        && get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid;
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn() && visibleOrAdmin();
+      allow create: if activeUserAfter() && featureEnabled('postingEnabled')
+        && (featureEnabled('uploadsEnabled') || request.resource.data.get('imageData', '') == '')
+        && (validOriginalPost() || validRepost(postId));
+      allow update: if validModerationHoldUpdate('post', postId, resource.data.authorId)
+        || validAdminMaterialRestore();
+      allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);
+    }
+  }
+}
+);
     }
 
     function hasMatchingAdminReservation(profile) {
