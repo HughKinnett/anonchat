@@ -6,57 +6,65 @@ const replaceRequired = (source, before, after, label) => {
   return source.replace(before, after);
 };
 
+const replacePattern = (source, pattern, replacement, label) => {
+  if (source.includes(replacement)) return source;
+  if (!pattern.test(source)) throw new Error(`Could not find ${label}`);
+  return source.replace(pattern, replacement);
+};
+
 const adminPath = new URL("../admin.js", import.meta.url);
 let admin = await readFile(adminPath, "utf8");
 
-admin = replaceRequired(
+admin = replacePattern(
   admin,
-  'features: { registrationsEnabled: false, postingEnabled: true, commentsEnabled: true, privateMessagingEnabled: true, temporaryChatsEnabled: true, uploadsEnabled: true, spotifyEmbedsEnabled: true }, announcement:',
+  /features: \{ registrationsEnabled: false,[^}]*spotifyEmbedsEnabled: true[^}]*\}, announcement:/,
   'features: { registrationsEnabled: false, postingEnabled: true, commentsEnabled: true, privateMessagingEnabled: true, temporaryChatsEnabled: true, uploadsEnabled: true, spotifyEmbedsEnabled: true, badgeAwardsEnabled: true, profilePinsEnabled: true, profileQrEnabled: true }, announcement:',
   "admin feature state"
 );
 
-admin = replaceRequired(
+admin = replacePattern(
   admin,
-  'const DEFAULT_FEATURES = Object.freeze({ registrationsEnabled: false, postingEnabled: true, commentsEnabled: true, privateMessagingEnabled: true, temporaryChatsEnabled: true, uploadsEnabled: true, spotifyEmbedsEnabled: true });',
+  /const DEFAULT_FEATURES = Object\.freeze\(\{[^\n]*\}\);/,
   'const DEFAULT_FEATURES = Object.freeze({ registrationsEnabled: false, postingEnabled: true, commentsEnabled: true, privateMessagingEnabled: true, temporaryChatsEnabled: true, uploadsEnabled: true, spotifyEmbedsEnabled: true, badgeAwardsEnabled: true, profilePinsEnabled: true, profileQrEnabled: true });',
   "default feature list"
 );
 
-admin = replaceRequired(
+admin = replacePattern(
   admin,
-  'const FEATURE_INFO = [["registrationsEnabled","New registrations","Allow new people to create AnonChat accounts."],["postingEnabled","Posting","Allow users to create new timeline and community posts."],["commentsEnabled","Comments","Allow users to add new comments."],["privateMessagingEnabled","Private messaging","Allow private message requests and messages."],["temporaryChatsEnabled","Temporary chats","Allow temporary rooms and room messages."],["uploadsEnabled","Photo uploads","Allow users to attach new photos."],["spotifyEmbedsEnabled","Spotify embeds","Allow new Spotify playlist embeds."]];',
+  /const FEATURE_INFO = \[[^\n]*\];/,
   'const FEATURE_INFO = [["registrationsEnabled","New registrations","Allow new people to create AnonChat accounts."],["postingEnabled","Posting","Allow users to create new timeline and community posts."],["commentsEnabled","Comments","Allow users to add new comments."],["privateMessagingEnabled","Private messaging","Allow private message requests and messages."],["temporaryChatsEnabled","Temporary chats","Allow temporary rooms and room messages."],["uploadsEnabled","Photo uploads","Allow users to attach new photos."],["spotifyEmbedsEnabled","Spotify embeds","Allow new Spotify playlist embeds."],["badgeAwardsEnabled","Badge awarding","Allow automatic achievement badges to be awarded."],["profilePinsEnabled","Profile pinning","Allow users to pin and unpin profile posts."],["profileQrEnabled","Profile QR","Allow users to open profile QR cards."]];',
   "feature descriptions"
 );
 
-admin = replaceRequired(
+admin = replacePattern(
   admin,
-  'const EMERGENCY_FEATURES = new Set(["registrationsEnabled", "postingEnabled", "privateMessagingEnabled"]);',
+  /const EMERGENCY_FEATURES = new Set\(\[[^\n]*\]\);/,
   'const EMERGENCY_FEATURES = new Set(["registrationsEnabled", "postingEnabled", "privateMessagingEnabled", "badgeAwardsEnabled", "profilePinsEnabled", "profileQrEnabled"]);',
   "emergency feature list"
 );
 
-admin = replaceRequired(
+admin = replacePattern(
   admin,
-  'if (!enabled && EMERGENCY_FEATURES.has(key) && !window.confirm("This emergency control can stop registration, posting, or messaging for users. Continue?"))',
+  /if \(!enabled && EMERGENCY_FEATURES\.has\(key\) && !window\.confirm\("[^"]*"\)\)/,
   'if (!enabled && EMERGENCY_FEATURES.has(key) && !window.confirm("This emergency control pauses a user-facing AnonChat feature. Continue?"))',
   "emergency confirmation"
 );
 
-admin = replaceRequired(
+admin = replacePattern(
   admin,
-  'host.replaceChildren(...["registrationsEnabled","postingEnabled","privateMessagingEnabled"].map(key=>',
+  /host\.replaceChildren\(\.\.\.\["registrationsEnabled","postingEnabled","privateMessagingEnabled"[^\]]*\]\.map\(key=>/,
   'host.replaceChildren(...["registrationsEnabled","postingEnabled","privateMessagingEnabled","badgeAwardsEnabled","profilePinsEnabled","profileQrEnabled"].map(key=>',
   "emergency control rendering"
 );
 
-admin = replaceRequired(
-  admin,
-  '["Spotify embeds",state.features.spotifyEmbedsEnabled,state.features.spotifyEmbedsEnabled?"Available":"Paused"],["Moderation service"',
-  '["Spotify embeds",state.features.spotifyEmbedsEnabled,state.features.spotifyEmbedsEnabled?"Available":"Paused"],["Badge awarding",state.features.badgeAwardsEnabled,state.features.badgeAwardsEnabled?"Available":"Paused"],["Profile pinning",state.features.profilePinsEnabled,state.features.profilePinsEnabled?"Available":"Paused"],["Profile QR",state.features.profileQrEnabled,state.features.profileQrEnabled?"Available":"Paused"],["Moderation service"',
-  "site health rows"
-);
+if (!admin.includes('["Badge awarding",state.features.badgeAwardsEnabled')) {
+  admin = replaceRequired(
+    admin,
+    '["Spotify embeds",state.features.spotifyEmbedsEnabled,state.features.spotifyEmbedsEnabled?"Available":"Paused"],["Moderation service"',
+    '["Spotify embeds",state.features.spotifyEmbedsEnabled,state.features.spotifyEmbedsEnabled?"Available":"Paused"],["Badge awarding",state.features.badgeAwardsEnabled,state.features.badgeAwardsEnabled?"Available":"Paused"],["Profile pinning",state.features.profilePinsEnabled,state.features.profilePinsEnabled?"Available":"Paused"],["Profile QR",state.features.profileQrEnabled,state.features.profileQrEnabled?"Available":"Paused"],["Moderation service"',
+    "site health rows"
+  );
+}
 
 await writeFile(adminPath, admin);
 
