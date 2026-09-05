@@ -18,7 +18,11 @@ for (const id of [
   "badge-milestone-metric",
   "badge-milestone-threshold",
   "badge-save",
-  "badge-definition-list"
+  "badge-definition-list",
+  "badge-user-id",
+  "badge-user-select",
+  "badge-user-refresh",
+  "badge-user-assignments"
 ]) assert.match(surface, new RegExp(`id=["']${id}["']|id\\s*=\\s*["']${id}["']`), `admin badge surface includes #${id}`);
 
 assert.match(html, /admin-badges\.js/, "admin page loads badge management controller");
@@ -28,10 +32,15 @@ assert.match(badgeAdmin, /posts_created/, "admin metric selector includes suppor
 assert.match(badgeAdmin, /account_age_days/, "admin metric selector includes account age metric");
 assert.match(badgeAdmin, /premium_active/, "admin metric selector includes premium metric");
 assert.match(badgeAdmin, /saveBadgeType/, "badge admin controller persists badge definitions");
+assert.match(badgeAdmin, /setUserBadge/, "badge admin controller can assign badges manually");
+assert.match(badgeAdmin, /removeUserBadge/, "badge admin controller can remove user badges");
+assert.match(badgeAdmin, /setBadgeFeatured/, "badge admin controller can feature earned badges");
+assert.match(badgeAdmin, /listUserBadges/, "badge admin controller lists a selected user's earned badges");
 assert.match(badgeAdmin, /milestoneMetric/, "badge admin controller handles milestone metric configuration");
 assert.match(badgeAdmin, /milestoneThreshold/, "badge admin controller handles milestone thresholds");
 assert.match(badgeAdmin, /awardMode/, "badge admin controller handles automatic versus manual mode");
 assert.match(badgeAdmin, /active/, "badge admin controller can activate or deactivate definitions");
 assert.match(badgeAdmin, /edit/i, "badge admin controller exposes edit behavior");
+assert.match(badgeAdmin, /featured/i, "badge admin controller exposes featured badge controls");
 
 console.log("admin badge surface tests passed");
