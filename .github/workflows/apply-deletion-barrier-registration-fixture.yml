@@ -1,0 +1,30 @@
+name: Apply deletion barrier registration fixture
+on:
+  push:
+    branches:
+      - feature/simplified-admin-command-center
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/simplified-admin-command-center
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply fixture change
+        run: node scripts/patch-deletion-barrier-registration-fixture.mjs
+      - name: Commit fixture change
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/test-admin-deletion-barrier-rules.mjs
+          git commit -m "test: enable registrations in deletion barrier fixture"
+          git push origin HEAD:feature/simplified-admin-command-center
