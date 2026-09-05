@@ -25,4 +25,4 @@ jobs:
           node-version: "22"
       - run: npm ci
       - run: npx firebase emulators:exec --only firestore "node scripts/test-phase-b-rules.mjs"
-      # This gate runs against the generated Phase B rules file.
+      # Regenerated from the clean pre-Phase-B-rules baseline before this gate runs.
