@@ -1,5 +1,9 @@
+import { auth, db } from "./firebase-config.js";
+import { isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
 import { listBadgeTypes, saveBadgeType } from "./badge-firestore.mjs";
 import { BADGE_CATEGORIES, BADGE_MILESTONE_METRICS } from "./badge-policy.mjs";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const FIXED_METRICS = new Set(["early_member", "premium_active"]);
 const $ = (id) => document.getElementById(id);
@@ -31,8 +35,7 @@ export const createBadgeAdminSection = () => {
     <p id="badge-admin-status" class="admin-note" role="status" aria-live="polite"></p>
     <div class="admin-actions"><button id="badge-save" class="admin-action" type="button">Save badge</button><button id="badge-cancel-edit" class="admin-action" type="button" hidden>Cancel edit</button></div>
     <div id="badge-definition-list" class="admin-list compact-list" aria-live="polite"></div>`;
-  const analytics = document.querySelector(".analytics-section");
-  analytics?.before(section);
+  document.querySelector(".analytics-section")?.before(section);
   return section;
 };
 
@@ -108,3 +111,15 @@ export const initAdminBadges = ({ db, adminUid, setStatus = () => {} }) => {
   void render().catch(() => localStatus("Could not load badge definitions.", true));
   return { refresh: render };
 };
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user || $("badge-admin-section")) return;
+  try {
+    const profile = await getDoc(doc(db, "users", user.uid));
+    const username = profile.exists() ? String(profile.data().username || "") : "";
+    if (!isProtectedAdministrator(username) || profile.data().banned === true) return;
+    const reservation = await getDoc(doc(db, "usernames", normalizeUsername(username)));
+    if (!reservation.exists() || reservation.data().uid !== user.uid || reservation.data().username !== username) return;
+    initAdminBadges({ db, adminUid: user.uid });
+  } catch { /* Main admin surface remains usable if badge controls cannot initialize. */ }
+});
