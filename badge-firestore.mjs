@@ -67,7 +67,7 @@ export const setUserBadge = async (
   uid,
   badgeId,
   adminUid,
-  { featured = false, earnedAt = null } = {}
+  { featured = false, earnedAt = null, awardSource = "manual" } = {}
 ) => {
   const actor = String(adminUid || "").trim();
   if (!uid || !badgeId || !actor) throw new Error("User, badge, and administrator are required.");
@@ -76,12 +76,14 @@ export const setUserBadge = async (
   const existing = await getDoc(ref);
   const existingData = existing.exists() ? existing.data() : null;
   const resolvedEarnedAt = existingData?.earnedAt || earnedAt || serverTimestamp();
+  const resolvedAwardSource = existingData?.awardSource || (awardSource === "automatic" ? "automatic" : "manual");
 
   await setDoc(ref, {
     badgeId,
     earnedAt: resolvedEarnedAt,
     assignedAt: serverTimestamp(),
     assignedBy: actor,
+    awardSource: resolvedAwardSource,
     featured: existingData ? existingData.featured === true || Boolean(featured) : Boolean(featured)
   }, { merge: true });
 };
