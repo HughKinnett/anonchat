@@ -19,3 +19,4 @@ jobs:
           node-version: "22"
       - run: node scripts/test-group-policy.mjs
       - run: node scripts/test-group-firestore-contract.mjs
+      - run: node scripts/test-group-rules.mjs
