@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+// Storage-boundary contract: admin badge definitions must stay within the supported schema.
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 
 assert.match(rules, /match \/badgeTypes\/\{badgeId\}/, "badge definitions have an explicit rules block");
