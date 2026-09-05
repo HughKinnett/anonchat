@@ -25,8 +25,8 @@
 ## Temporary and persistent social spaces
 
 - [ ] Expand Temporary Rooms for live events, sports, TV, music, relationships, local topics, and other time-limited discussions.
-- [ ] Add persistent public groups and private/invite-only groups without removing the existing temporary-room behavior.
-- [ ] Add micro-community/group-chat experiences with member and moderator controls.
+- [x] Add persistent public groups and private/invite-only groups without removing the existing temporary-room behavior.
+- [x] Add micro-community/group-chat experiences with member and moderator controls.
 - [ ] Add room/community moderation, pinned content, membership controls, and clear expiration indicators where content is temporary.
 
 ## Discussion quality
@@ -65,7 +65,7 @@
 ## Premium features
 
 - [ ] Create invite-only Communities.
-- [ ] Create persistent private groups.
+- [x] Create persistent private groups.
 - [ ] Add advanced room controls for Premium room/community owners.
 - [ ] Add custom disappearance timers beyond the free presets.
 - [ ] Add advanced profile privacy options while keeping essential privacy free.
