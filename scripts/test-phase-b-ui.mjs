@@ -29,6 +29,12 @@ assert.match(timeline, /Edited/, "post/comment rendering includes the Edited lab
 assert.match(timeline, /Edit post|Edit comment/, "owners receive edit actions");
 assert.match(timeline, /Reply/, "comments expose Reply actions");
 assert.match(timeline, /Copy text/, "posts expose Copy text action");
+assert.match(timeline, /media:\s*(?:composerMedia|pendingPostMedia)/, "canonical post writes include the Phase B media array");
+assert.match(timeline, /postGifUrl[^\n]*value|postGifUrl\?\.value/, "GIF URL participates in composer media state");
+assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']saved["']\)/, "Saved posts use a private user Firestore collection");
+assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']viewHistory["']\)/, "History uses a private user Firestore collection");
+assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']recentSearches["']\)/, "recent searches use a private user Firestore collection");
+assert.match(timeline, /className = "hashtag-link"|className\s*=\s*["']hashtag-link["']/, "hashtags render as clickable topic links");
 assert.match(timeline, /interactionParentForPost\(postDoc\)/, "Phase B preserves canonical interaction parent IDs");
 assert.match(timeline, /visiblePosts\.map\(renderPost\)|map\(renderPost\)/, "feed surfaces continue to reuse the canonical post renderer");
 assert.doesNotMatch(timeline, /collection\(db,\s*["'](?:phaseBPosts|savedPosts|historyPosts|trendingPosts|popularPosts)["']/, "Phase B does not create alternate post-body collections");
