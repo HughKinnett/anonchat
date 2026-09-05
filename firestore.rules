@@ -451,7 +451,8 @@ service cloud.firestore {
 
     function isProtectedAdministrator(username) {
       return username is string
-        && username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*(i_love_you_h|cybercapone)[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*
+        && username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*(i_love_you_h|cybercapone)[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$');
+    }
 
     function hasMatchingAdminReservation(profile) {
       let normalizedUsername = profile.username.lower();
