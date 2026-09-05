@@ -5,6 +5,8 @@ import {
   initializeTestEnvironment
 } from "@firebase/rules-unit-testing";
 import {
+  addDoc,
+  collection,
   doc,
   getDoc,
   serverTimestamp,
@@ -55,6 +57,33 @@ await env.withSecurityRulesDisabled(async (context) => {
     archivedAt: new Date()
   });
 });
+
+await assertSucceeds(addDoc(collection(ownerDb, "posts"), {
+  type: "original",
+  authorId: "owner",
+  username: "owner_user",
+  content: "media #music",
+  imageData: "data:image/jpeg;base64,a",
+  media: [
+    { type: "image", url: "data:image/jpeg;base64,a" },
+    { type: "image", url: "data:image/jpeg;base64,b" }
+  ],
+  category: "Post",
+  options: [],
+  expiresAt: null,
+  moderationState: "visible",
+  createdAt: serverTimestamp(),
+  topics: ["post", "music"]
+}));
+
+await assertSucceeds(addDoc(collection(ownerDb, "posts", "p1", "comments"), {
+  uid: "owner",
+  username: "owner_user",
+  text: "thread reply",
+  parentCommentId: "c1",
+  threadRootId: "c1",
+  createdAt: serverTimestamp()
+}));
 
 const savedOwner = doc(ownerDb, "users", "owner", "saved", "posts%2Fp1");
 await assertSucceeds(setDoc(savedOwner, {
