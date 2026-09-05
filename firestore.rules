@@ -1040,11 +1040,25 @@ service cloud.firestore {
               && (request.resource.data.get('spotifyPlaylistUrl', '') == ''
                 || request.resource.data.get('spotifyPlaylistUrl', '')
                   .matches('https://open[.]spotify[.]com/playlist/[A-Za-z0-9]+')))
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bio'])
+              && request.resource.data.get('bio', '') is string
+              && request.resource.data.get('bio', '').size() <= 300)
           ));
       allow delete: if activeUser()
           && request.auth.uid == userId
           && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
           && !isProtectedAdministrator(resource.data.username);
+    }
+
+    match /badgeTypes/{badgeId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /users/{userId}/badges/{badgeId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
     }
 
     match /adminDeletionJobs/{targetUid} {
