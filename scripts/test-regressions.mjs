@@ -6,7 +6,7 @@ const me = "signed-in-user";
 
 assert.deepEqual(
   messageRequestButtonState(null, me),
-  { action: "send", label: "Send request", disabled: false, hint: "" },
+  { action: "create", label: "Send request", disabled: false, hint: "" },
   "a user with no request can send one"
 );
 assert.deepEqual(
