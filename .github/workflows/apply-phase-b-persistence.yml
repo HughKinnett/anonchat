@@ -1,0 +1,36 @@
+name: Apply Phase B persistence integration
+
+on:
+  push:
+    branches:
+      - phase-b-content-discovery
+    paths:
+      - scripts/apply-phase-b-persistence.mjs
+      - .github/workflows/apply-phase-b-persistence.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-b-content-discovery
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/apply-phase-b-persistence.mjs
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No patch changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timeline.js
+          git commit -m "feat: persist Phase B private state and media"
+          git push origin HEAD:phase-b-content-discovery
