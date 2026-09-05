@@ -26,7 +26,7 @@ assert.match(
 );
 assert.match(
   profile,
-  /\["wow", "middle_finger", "laugh", "smile", "fire", "heart"\]/,
+  /\["wow", "middle_finger", "laugh", "smile", "heart", "fire"\]/,
   "profile reaction controls include the same heart reaction"
 );
 
