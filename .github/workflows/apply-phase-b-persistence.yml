@@ -6,6 +6,7 @@ on:
       - phase-b-content-discovery
     paths:
       - scripts/apply-phase-b-persistence.mjs
+      - scripts/fix-phase-b-persistence-anchor.mjs
       - .github/workflows/apply-phase-b-persistence.yml
   workflow_dispatch:
 
@@ -22,6 +23,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: node scripts/fix-phase-b-persistence-anchor.mjs
       - run: node scripts/apply-phase-b-persistence.mjs
       - name: Commit patch
         run: |
@@ -31,6 +33,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add timeline.js
+          git add timeline.js scripts/apply-phase-b-persistence.mjs
           git commit -m "feat: persist Phase B private state and media"
           git push origin HEAD:phase-b-content-discovery
