@@ -112,7 +112,7 @@ async function toggleUserSuspension(user) {
   const suspended = userIsSuspended(user.id);
   if (!suspended && !window.confirm("Suspend this account for 24 hours? They will be blocked from normal posting, commenting, messaging, and room actions until the suspension expires.")) return;
   const until = suspended ? new Date(0) : new Date(Date.now()+24*60*60*1000);
-  try { await setDoc(doc(db,"accountModeration",user.id), { uid:user.id, suspendedUntil:until, suspensionReason:suspended?"":"24-hour administrator suspension", updatedAt:serverTimestamp(), updatedBy:adminUid }, {merge:true}); setStatus(suspended?"Suspension ended.":"Account suspended for 24 hours."); } catch { setStatus("Could not change that suspension.",true); }
+  try { const batch=writeBatch(db); batch.set(doc(db,"accountModeration",user.id), { uid:user.id, suspendedUntil:until, suspensionReason:suspended?"":"24-hour administrator suspension", updatedAt:serverTimestamp(), updatedBy:adminUid }, {merge:true}); batch.update(doc(db,"users",user.id), { suspendedUntil:until }); await batch.commit(); setStatus(suspended?"Suspension ended.":"Account suspended for 24 hours."); } catch { setStatus("Could not change that suspension.",true); }
 }
 function activityByUser() {
   const points = new Map(), add = (uid, amount = 1) => { if (uid) points.set(uid, (points.get(uid) || 0) + amount); };

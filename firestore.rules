@@ -23,10 +23,9 @@ service cloud.firestore {
         || get(/databases/$(database)/documents/siteSettings/features).data.get(featureName, true) == true;
     }
 
-    function accountNotSuspended(uid) {
-      return !exists(/databases/$(database)/documents/accountModeration/$(uid))
-        || !get(/databases/$(database)/documents/accountModeration/$(uid)).data.keys().hasAny(['suspendedUntil'])
-        || get(/databases/$(database)/documents/accountModeration/$(uid)).data.suspendedUntil <= request.time;
+    function accountNotSuspended(profile) {
+      return !profile.keys().hasAny(['suspendedUntil'])
+        || profile.suspendedUntil <= request.time;
     }
 
     function hasNoDeletionBarrierAfter(uid) {
@@ -35,10 +34,11 @@ service cloud.firestore {
     }
 
     function activeUserAfter() {
+      let profile = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       return signedIn()
         && accountAvailableAfter(request.auth.uid)
-        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true
-        && accountNotSuspended(request.auth.uid);
+        && profile.get('banned', false) != true
+        && accountNotSuspended(profile);
     }
 
     function contentAvailableAfter(documentPath) {
@@ -518,11 +518,19 @@ service cloud.firestore {
             && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId))));
     }
 
+    function validStandaloneAdminSuspension(userId) {
+      return isAdmin()
+        && !isProtectedAdministrator(resource.data.username)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['suspendedUntil'])
+        && request.resource.data.suspendedUntil is timestamp;
+    }
+
     function activeUser() {
+      let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       return signedIn()
         && accountAvailable(request.auth.uid)
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true
-        && accountNotSuspended(request.auth.uid);
+        && profile.get('banned', false) != true
+        && accountNotSuspended(profile);
     }
 
     function isPremiumUid(uid) {
@@ -981,6 +989,7 @@ service cloud.firestore {
           || (!exists(/databases/$(database)/documents/system/accountStats)
             && getAfter(/databases/$(database)/documents/system/accountStats).data.count == 6));
       allow update: if validStandaloneAdminBan(userId)
+        || validStandaloneAdminSuspension(userId)
         || validDeletionQueueProfile(userId)
         || (activeUserAfter()
           && request.auth.uid == userId
