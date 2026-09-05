@@ -95,6 +95,25 @@ replaceOnce(
 );
 
 replaceOnce(
+`        try {
+          const pinnedPostId = isPinned ? null : postDoc.id;
+          await updateDoc(doc(db, "users", currentUser.uid), { pinnedPostId });`,
+`        try {
+          const featureSnapshot = await getDoc(doc(db, "siteSettings", "features"));
+          const profilePinsEnabled = featureSnapshot.exists()
+            ? featureSnapshot.data()?.profilePinsEnabled !== false
+            : true;
+          if (!profilePinsEnabled) {
+            setStatus("Profile pinning is temporarily unavailable.", true);
+            pinPost.disabled = false;
+            return;
+          }
+          const pinnedPostId = isPinned ? null : postDoc.id;
+          await updateDoc(doc(db, "users", currentUser.uid), { pinnedPostId });`,
+"profile pin feature switch"
+);
+
+replaceOnce(
 `  }));
 
   document.getElementById("profile-post-count").textContent =`,
