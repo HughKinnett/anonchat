@@ -6,6 +6,7 @@ on:
       - phase-b-content-discovery
     paths:
       - scripts/apply-phase-b-rules.mjs
+      - scripts/fix-phase-b-rules-patcher.mjs
       - .github/workflows/apply-phase-b-rules.yml
   workflow_dispatch:
 
@@ -19,11 +20,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: phase-b-content-discovery
+          fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Restore clean pre-Phase-B-rules baseline
+        run: |
+          git fetch --depth=1 origin d93ea0339db8f8052fef870ca8064384527a27bf
+          git show d93ea0339db8f8052fef870ca8064384527a27bf:firestore.rules > firestore.rules
+      - run: node scripts/fix-phase-b-rules-patcher.mjs
       - run: node scripts/apply-phase-b-rules.mjs
-      - name: Commit rules
+      - name: Commit rules and repaired patcher
         run: |
           if git diff --quiet; then
             echo "No rule changes required"
@@ -31,6 +38,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add firestore.rules
-          git commit -m "feat: enforce Phase B Firestore privacy and edits"
+          git add firestore.rules scripts/apply-phase-b-rules.mjs
+          git commit -m "fix: regenerate valid Phase B Firestore rules"
           git push origin HEAD:phase-b-content-discovery
