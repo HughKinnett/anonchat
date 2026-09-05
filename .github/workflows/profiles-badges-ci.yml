@@ -23,6 +23,7 @@ jobs:
       - run: node scripts/test-phase-a-profile-surface.mjs
       - run: node scripts/test-profile-pinning-surface.mjs
       - run: node scripts/test-phase-a-firestore-rules.mjs
+      - run: node scripts/test-phase-a-android-contract.mjs
       - run: node scripts/test-badge-policy.mjs
       - run: node scripts/test-badge-milestones.mjs
       - run: node scripts/test-badge-awards-contract.mjs
