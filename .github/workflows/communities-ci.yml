@@ -24,3 +24,4 @@ jobs:
       - run: node scripts/test-community-detail-surface.mjs
       - run: node scripts/test-community-moderator-controls.mjs
       - run: node scripts/test-community-polls.mjs
+      - run: node scripts/test-community-badges.mjs
