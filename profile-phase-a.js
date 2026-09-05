@@ -1,7 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { normalizeProfilePrivacy, resolveProfileVisibility } from "./profile-privacy-policy.mjs";
 import { buildProfileShareData, safeProfileQrPayload } from "./profile-share.mjs";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const targetUserId = new URLSearchParams(location.search).get("uid");
@@ -161,12 +160,14 @@ qrDialog?.addEventListener("click", (event) => {
   if (event.target === qrDialog) qrDialog.close();
 });
 
-onAuthStateChanged(auth, async (user) => {
-  viewer = user;
-  if (!user || !targetUserId) return;
+const initialize = async () => {
+  await auth.authStateReady();
+  viewer = auth.currentUser;
+  if (!viewer || !targetUserId) return;
   await loadFeatures();
   await loadProfile();
-});
+};
+void initialize();
 
 const visibilityObserver = new MutationObserver(() => applyVisibility());
 const observed = [
