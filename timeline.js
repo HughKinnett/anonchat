@@ -25,7 +25,7 @@ import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
 import { filterFeedPosts, sortFeedPosts } from "./feed-mode-policy.mjs";
-import { normalizeTopic } from "./topic-policy.mjs";
+import { normalizeTopic, postTopics } from "./topic-policy.mjs";
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
 import { pollVoteDocumentId as voteDocumentId } from "./poll-vote-policy.mjs";
 import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
@@ -453,6 +453,46 @@ const openPostFromSearch = (postId) => {
   });
 };
 
+const renderRecentSearches = () => {
+  if (!recentSearchList) return;
+  recentSearchList.replaceChildren(...recentSearches.map((value) => {
+    const row = document.createElement("div");
+    row.className = "recent-search-row";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = value;
+    open.addEventListener("click", () => { searchInput.value = value; renderSearchResults(); searchInput.focus(); });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove recent search ${value}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", async () => {
+      if (!currentUser) return;
+      recentSearches = removeRecentSearch(recentSearches, value);
+      renderRecentSearches();
+      const snapshot = await getDocs(collection(db, "users", currentUser.uid, "recentSearches"));
+      const match = snapshot.docs.find((entry) => normalizeRecentSearch(entry.data().value) === normalizeRecentSearch(value));
+      if (match) await deleteDoc(match.ref);
+    });
+    row.append(open, remove);
+    return row;
+  }));
+};
+
+const persistRecentSearch = async (value) => {
+  if (!currentUser) return;
+  const normalized = normalizeRecentSearch(value);
+  if (normalized.length < 2) return;
+  recentSearches = mergeRecentSearches(recentSearches, normalized, 20);
+  renderRecentSearches();
+  const entryId = encodeURIComponent(normalized).slice(0, 200);
+  await setDoc(doc(db, "users", currentUser.uid, "recentSearches", entryId), {
+    uid: currentUser.uid,
+    value: normalized,
+    searchedAt: serverTimestamp()
+  });
+};
+
 const renderSearchResults = () => {
   if (!viewerBlocks.ready) {
     closeSearch();
@@ -533,6 +573,7 @@ searchInput.addEventListener("input", () => {
   userSearchTimer = window.setTimeout(refreshUserSearch, 280);
 });
 searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); void persistRecentSearch(searchInput.value); renderSearchResults(); return; }
   if (event.key === "Escape") {
     searchInput.value = "";
     closeSearch();
@@ -573,7 +614,22 @@ const formatNotificationTime = (timestamp) =>
   timestamp?.toDate ? timestamp.toDate().toLocaleString() : "Just now";
 
 const appendLinkedText = (container, value) => {
-  String(value || "").split(/(@[A-Za-z0-9_]{3,30})/g).forEach((part) => {
+  String(value || "").split(/(@[A-Za-z0-9_]{3,30}|#[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*)/g).forEach((part) => {
+    if (part.startsWith("#")) {
+      const topic = normalizeTopic(part.slice(1));
+      if (!topic) { container.append(document.createTextNode(part)); return; }
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "hashtag-link";
+      link.textContent = part;
+      link.addEventListener("click", () => {
+        selectedTopics = new Set([topic]);
+        renderChosenTopics();
+        setFeedView("topics");
+      });
+      container.append(link);
+      return;
+    }
     if (!part.startsWith("@")) {
       container.append(document.createTextNode(part));
       return;
@@ -1106,6 +1162,7 @@ const sharePost = async (postDoc) => {
     originalUsername: sourceUsername,
     content: post.content,
     imageData: post.imageData || "",
+    media: post.media || [],
     createdAt: serverTimestamp()
   }));
 };
@@ -1150,6 +1207,7 @@ const renderPost = (postDoc) => {
   const item = document.createElement("li");
   item.className = "feed-item";
   item.dataset.interactionPath = parent.path;
+  item.dataset.canonicalPostPath = parent.path;
   item.id = `post-${sourceCollection}-${postDoc.id}`;
 
   if (post.type === "repost") {
@@ -1427,11 +1485,16 @@ const renderPost = (postDoc) => {
   const bookmark = document.createElement("button");
   bookmark.type = "button";
   bookmark.className = "bookmark-button";
-  const updateBookmarkLabel = () => { bookmark.textContent = isBookmarked(parent.path) ? "🔖 Saved" : "🔖 Bookmark"; };
+  const updateBookmarkLabel = () => { bookmark.textContent = savedPostPaths.has(parent.path) ? "🔖 Saved" : "🔖 Save"; };
   updateBookmarkLabel();
-  bookmark.addEventListener("click", () => {
-    toggleBookmark({ path: parent.path, author: displayedUsername, excerpt: post.content });
-    updateBookmarkLabel();
+  bookmark.addEventListener("click", async () => {
+    const savedRef = doc(db, "users", currentUser.uid, "saved", savedPostEntryId(parent.path));
+    bookmark.disabled = true;
+    try {
+      if (savedPostPaths.has(parent.path)) await deleteDoc(savedRef);
+      else await setDoc(savedRef, { uid: currentUser.uid, postPath: parent.path, savedAt: serverTimestamp() });
+    } catch { setStatus("Could not update Saved posts.", true); }
+    finally { bookmark.disabled = false; }
   });
   actions.append(bookmark);
   if (post.content) {
@@ -1450,7 +1513,7 @@ const renderPost = (postDoc) => {
           if (!snapshot.exists() || !canEditOwnedContent(snapshot.data(), currentUser.uid)) throw new Error("not-authorized");
           const meta = nextEditMetadata(snapshot.data(), Date.now());
           transaction.set(doc(postDoc.ref, "editHistory", `v${meta.editVersion}`), { ...buildEditHistorySnapshot(snapshot.data(), currentUser.uid, Date.now()), archivedAt: serverTimestamp() });
-          transaction.update(postDoc.ref, { content: nextContent, topics: normalizeTopic(nextContent) ? snapshot.data().topics : snapshot.data().topics, editedAt: serverTimestamp(), editVersion: meta.editVersion });
+          transaction.update(postDoc.ref, { content: nextContent, topics: postTopics({ ...snapshot.data(), content: nextContent }), editedAt: serverTimestamp(), editVersion: meta.editVersion });
         });
       } catch { setStatus("Could not edit that post.", true); }
     });
@@ -1592,7 +1655,6 @@ const renderFeed = () => {
     : orderedPosts;
 
   feed.replaceChildren(...visiblePosts.map(renderPost));
-  visiblePosts.forEach((post) => { const path = interactionParentForPost(post).path; viewedPostPaths = [path, ...viewedPostPaths.filter((item) => item !== path)].slice(0, 100); });
   if (suggestedFollowsList) {
     const followedUidsForSuggestions = new Set(visibleFollows().filter((follow) => follow.data().followerId === currentUser?.uid).map((follow) => follow.data().followingId));
     const candidates = visibleUsers().map((profile) => ({ uid: profile.id, mutuals: visibleFollows().filter((f) => f.data().followingId === profile.id).length, sharedTopics: 0, publicInteractions: 0, username: profile.data().username }));
@@ -1609,6 +1671,21 @@ const renderFeed = () => {
       : "No posts yet. Start the conversation.");
 };
 
+const recordedHistoryPaths = new Set();
+const recordViewedPost = async (postPath) => {
+  if (!currentUser || !postPath || recordedHistoryPaths.has(postPath)) return;
+  recordedHistoryPaths.add(postPath);
+  try {
+    await setDoc(doc(db, "users", currentUser.uid, "viewHistory", historyEntryId(postPath)), {
+      uid: currentUser.uid,
+      postPath,
+      viewedAt: serverTimestamp()
+    });
+    const snapshot = await getDocs(query(collection(db, "users", currentUser.uid, "viewHistory"), orderBy("viewedAt", "desc"), limit(101)));
+    await Promise.all(snapshot.docs.slice(100).map((entry) => deleteDoc(entry.ref)));
+  } catch { recordedHistoryPaths.delete(postPath); }
+};
+
 const interactionVisibilityObserver = typeof IntersectionObserver === "function"
   ? new IntersectionObserver((entries) => {
       let changed = false;
@@ -1617,6 +1694,7 @@ const interactionVisibilityObserver = typeof IntersectionObserver === "function"
         if (!path) return;
         if (entry.isIntersecting && !visibleInteractionPaths.has(path)) {
           visibleInteractionPaths.add(path);
+          void recordViewedPost(entry.target.dataset.canonicalPostPath);
           changed = true;
         } else if (!entry.isIntersecting && visibleInteractionPaths.delete(path)) {
           changed = true;
@@ -1946,7 +2024,12 @@ trendingPostsButton?.addEventListener("click", () => setFeedView("trending"));
 popularTodayPostsButton?.addEventListener("click", () => setFeedView("popular-today"));
 savedPostsButton?.addEventListener("click", () => setFeedView("saved-posts"));
 historyPostsButton?.addEventListener("click", () => setFeedView("history"));
-clearRecentSearchesButton?.addEventListener("click", () => { recentSearches = []; if (recentSearchList) recentSearchList.replaceChildren(); });
+clearRecentSearchesButton?.addEventListener("click", async () => {
+  if (!currentUser) return;
+  recentSearches = []; renderRecentSearches();
+  const snapshot = await getDocs(collection(db, "users", currentUser.uid, "recentSearches"));
+  const batch = writeBatch(db); snapshot.docs.forEach((entry) => batch.delete(entry.ref)); await batch.commit();
+});
 
 const stopTimelineResources = () => {
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
@@ -2082,6 +2165,21 @@ onAuthStateChanged(auth, async (user) => {
   }
   listeners.push(clearPollVoteListeners);
   listeners.push(clearInteractionListeners);
+  listeners.push(listenForSession(
+    query(collection(db, "users", user.uid, "saved"), orderBy("savedAt", "desc"), limit(250)),
+    (snapshot) => { savedPostPaths = new Set(snapshot.docs.map((entry) => entry.data().postPath).filter(Boolean)); renderFeed(); },
+    () => setStatus("Could not load Saved posts.", true)
+  ));
+  listeners.push(listenForSession(
+    query(collection(db, "users", user.uid, "viewHistory"), orderBy("viewedAt", "desc"), limit(100)),
+    (snapshot) => { viewedPostPaths = snapshot.docs.map((entry) => entry.data().postPath).filter(Boolean); if (feedMode === "history") renderFeed(); },
+    () => setStatus("Could not load viewed history.", true)
+  ));
+  listeners.push(listenForSession(
+    query(collection(db, "users", user.uid, "recentSearches"), orderBy("searchedAt", "desc"), limit(20)),
+    (snapshot) => { recentSearches = snapshot.docs.map((entry) => normalizeRecentSearch(entry.data().value)).filter(Boolean); renderRecentSearches(); },
+    () => setStatus("Could not load recent searches.", true)
+  ));
   const listenForSession = (reference, next, failed) => onSnapshot(
     reference,
     (snapshot) => { if (sessionIsCurrent()) next(snapshot); },
@@ -2196,18 +2294,16 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const postContent = content.value.trim();
   const category = postCategory.value;
-  const options = [...document.querySelectorAll(".poll-option")]
-    .map((input) => input.value.trim())
-    .filter(Boolean);
+  const options = [...document.querySelectorAll(".poll-option")].map((input) => input.value.trim()).filter(Boolean);
   const premiumWordCount = postContent ? postContent.split(/\s+/).filter(Boolean).length : 0;
+  const gifUrl = postGifUrl?.value.trim() || "";
+  const composerMedia = gifUrl ? [{ type: "gif", url: gifUrl }] : pendingPostMedia;
+  const mediaValidation = validatePostMedia(composerMedia);
+  if (!mediaValidation.ok) { setStatus("Choose up to four photos, or one GIF.", true); return; }
   if (!currentUser || (!currentUserIsPremium && postContent.length > 500) || (currentUserIsPremium && premiumWordCount > 1000)) { setStatus(currentUserIsPremium ? "Premium posts can contain up to 1,000 words." : "Posts can contain up to 500 characters.", true); return; }
-  if (category === "Poll" && options.length < 2) {
-    setStatus("Add at least two poll choices.", true);
-    return;
-  }
-  if (category !== "Poll" && !postContent && !pendingPostImage) return;
+  if (category === "Poll" && options.length < 2) { setStatus("Add at least two poll choices.", true); return; }
+  if (category !== "Poll" && !postContent && !composerMedia.length) return;
   const expiryHours = Number(postExpiry.value);
-
   const submit = form.querySelector("button[type='submit']");
   submit.disabled = true;
   try {
@@ -2215,7 +2311,8 @@ form.addEventListener("submit", async (event) => {
       authorId: currentUser.uid,
       username: profileUsername,
       content: postContent || "Poll",
-      imageData: pendingPostImage,
+      imageData: composerMedia[0]?.url || "",
+      media: composerMedia,
       category,
       options: category === "Poll" ? options : [],
       expiresAt: expiryHours ? Timestamp.fromMillis(Date.now() + expiryHours * 3600000) : null,
@@ -2224,6 +2321,8 @@ form.addEventListener("submit", async (event) => {
     content.value = "";
     localStorage.removeItem(`anonchat:post-draft:${currentUser.uid}`);
     pendingPostImage = "";
+    pendingPostMedia = [];
+    if (postGifUrl) postGifUrl.value = "";
     postImageInput.value = "";
     postImagePreviewWrap.hidden = true;
     setPhotoSelected(false);
@@ -2231,11 +2330,8 @@ form.addEventListener("submit", async (event) => {
     postExpiry.value = "0";
     pollOptions.hidden = true;
     recordContribution();
-  } catch {
-    setStatus("Could not publish your post.", true);
-  } finally {
-    submit.disabled = false;
-  }
+  } catch { setStatus("Could not publish your post.", true); }
+  finally { submit.disabled = false; }
 });
 
 document.getElementById("sign-out").addEventListener("click", async () => {

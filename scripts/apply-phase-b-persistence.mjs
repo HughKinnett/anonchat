@@ -244,7 +244,7 @@ js = replaceOnce(
   "clear recent searches persistence"
 );
 
-const submitStart = 'form.addEventListener("submit", async (event) => {';
+const submitStart = 'form.addEventListener("submit", async (event) => {\n  event.preventDefault();\n  const postContent = content.value.trim();';
 const signoutStart = 'document.getElementById("sign-out").addEventListener("click", async () => {';
 js = replaceSection(
   js,
@@ -300,8 +300,11 @@ js = replaceSection(
 
 js = replaceOnce(
   js,
-  '    imageData: post.imageData || "",\n    createdAt: serverTimestamp()',
-  '    imageData: post.imageData || "",\n    media: post.media || [],\n    createdAt: serverTimestamp()',
+  `    imageData: post.imageData || "",
+    createdAt: serverTimestamp()`,
+  `    imageData: post.imageData || "",
+    media: post.media || [],
+    createdAt: serverTimestamp()`,
   "repost media preservation"
 );
 
