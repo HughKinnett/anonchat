@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [awardSource, firestoreSource, processorSource, adapterSource, routingSource, timelineSource, activityClientSource] = await Promise.all([
+const [awardSource, firestoreSource, processorSource, adapterSource, routingSource] = await Promise.all([
   readFile(new URL("../badge-awards.mjs", import.meta.url), "utf8").catch(() => ""),
   readFile(new URL("../badge-firestore.mjs", import.meta.url), "utf8"),
   readFile(new URL("../badge-award-processor.mjs", import.meta.url), "utf8").catch(() => ""),
   readFile(new URL("../badge-award-firestore-adapter.mjs", import.meta.url), "utf8").catch(() => ""),
-  readFile(new URL("../badge-activity-routing.mjs", import.meta.url), "utf8").catch(() => ""),
-  readFile(new URL("../timeline.js", import.meta.url), "utf8").catch(() => ""),
-  readFile(new URL("../badge-activity-client.mjs", import.meta.url), "utf8").catch(() => "")
+  readFile(new URL("../badge-activity-routing.mjs", import.meta.url), "utf8").catch(() => "")
 ]);
 
 assert.match(awardSource, /evaluateBadgeMilestones/, "automatic badge award service exports evaluateBadgeMilestones");
@@ -19,7 +17,17 @@ assert.doesNotMatch(awardSource, /users["']\s*,\s*uid\s*,\s*["']badges["']/, "br
 assert.match(processorSource, /processBadgeAwards/, "trusted badge processor exports processBadgeAwards");
 assert.match(processorSource, /matchingAutomaticBadges/, "trusted processor uses the milestone evaluator");
 assert.match(processorSource, /already-earned/, "trusted processor preserves existing badge assignments");
-assert.match(processorSource, /changedMetrics/, "trusted processor evaluates only the metrics changed by canonical activity");
+assert.match(processorSource, /changedMetrics/, "trusted processor evaluates only changed metrics");
+assert.match(processorSource, /CANONICAL_BADGE_SOURCES/, "trusted processor declares canonical activity sources");
+assert.match(processorSource, /posts/, "trusted processor observes committed posts");
+assert.match(processorSource, /comments/, "trusted processor observes committed comments");
+assert.match(processorSource, /reactions/, "trusted processor observes committed reactions");
+assert.match(processorSource, /follows/, "trusted processor observes committed follow changes");
+assert.match(processorSource, /premiumAccess/, "trusted processor observes committed premium state");
+assert.match(processorSource, /users/, "trusted processor observes committed profile state");
+assert.match(processorSource, /badgeMetricsForActivity/, "canonical activity is routed through the shared metric mapping");
+assert.match(processorSource, /processCanonicalBadgeActivity/, "trusted processor exposes canonical source processing");
+assert.match(processorSource, /metricsForCanonicalSource/, "trusted processor derives metrics from canonical stored data instead of client claims");
 
 assert.match(adapterSource, /users.*badges|badges.*users/s, "trusted Firestore adapter owns user badge assignment writes");
 assert.match(adapterSource, /runTransaction/, "trusted adapter performs idempotent badge assignment writes transactionally");
@@ -36,17 +44,6 @@ assert.match(routingSource, /followers_count/, "follow changes route to follower
 assert.match(routingSource, /premium_active/, "premium reconciliation routes to premium_active");
 assert.match(routingSource, /early_member/, "profile initialization routes to early_member");
 assert.match(routingSource, /account_age_days/, "profile initialization routes to account_age_days");
-
-assert.match(activityClientSource, /queueBadgeActivity/, "client exposes a bounded badge activity queue helper");
-assert.match(activityClientSource, /badgeActivityEvents/, "client queues only activity hints for the trusted processor");
-assert.doesNotMatch(activityClientSource, /users.*badges|badges.*users/s, "activity client never writes badge assignments");
-assert.match(timelineSource, /queueBadgeActivity/, "timeline imports the canonical badge activity queue helper");
-assert.match(timelineSource, /activity:\s*["']post_created["']/, "successful post creation queues post_created");
-assert.match(timelineSource, /activity:\s*["']post_interaction_received["']/, "successful reaction updates queue post_interaction_received");
-assert.match(timelineSource, /activity:\s*["']comment_or_reply_created["']/, "successful comment creation queues comment_or_reply_created");
-assert.match(timelineSource, /activity:\s*["']comment_received["']/, "successful comment creation queues comment_received for the post author");
-assert.match(timelineSource, /activity:\s*["']premium_reconciled["']/, "premium state load queues premium_reconciled");
-assert.match(timelineSource, /activity:\s*["']profile_initialized["']/, "profile load queues profile_initialized");
 
 assert.match(firestoreSource, /awardSource/, "badge Firestore helper preserves assignment source metadata");
 
