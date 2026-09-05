@@ -169,4 +169,4 @@ if (!currentCommunityPostBlock.includes("request.resource.data.keys().hasAny(['c
 }
 
 await writeFile(path, rules);
-console.log("Communities Firestore patch applied");
+console.log("Communities Firestore security patch applied");
