@@ -1,0 +1,30 @@
+name: Remove duplicated rules tail
+on:
+  push:
+    branches:
+      - feature/simplified-admin-command-center
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/simplified-admin-command-center
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Remove duplicated tail
+        run: node scripts/remove-duplicated-rules-tail.mjs
+      - name: Commit cleanup
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firestore.rules
+          git commit -m "fix: remove duplicated Firestore rules tail"
+          git push origin HEAD:feature/simplified-admin-command-center
