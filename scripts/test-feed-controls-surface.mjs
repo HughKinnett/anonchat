@@ -28,4 +28,5 @@ assert.doesNotMatch(js, /collection\(db,\s*["']feedPosts["']\)/, "feed modes mus
 assert.doesNotMatch(js, /collection\(db,\s*["']feedComments["']\)/, "feed modes must not create alternate comment storage");
 assert.doesNotMatch(js, /collection\(db,\s*["']feedReactions["']\)/, "feed modes must not create alternate reaction storage");
 
+// Verification touch: ensures normal user-authored CI runs on the generated Task 2 production commit.
 console.log("Feed controls surface passed");
