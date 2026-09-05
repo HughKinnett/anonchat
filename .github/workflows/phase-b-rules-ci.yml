@@ -1,0 +1,27 @@
+name: Phase B Firestore rules CI
+
+on:
+  push:
+    branches:
+      - phase-b-content-discovery
+    paths:
+      - firestore.rules
+      - scripts/test-phase-b-rules.mjs
+      - .github/workflows/phase-b-rules-ci.yml
+      - package.json
+      - package-lock.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase-b-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: firebase emulators:exec --only firestore "node scripts/test-phase-b-rules.mjs"
