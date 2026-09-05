@@ -42,7 +42,7 @@ replaceOnce(
         const data = version.data();
         const row = create("article", undefined, "admin-edit-version");
         row.append(
-          create("small", `Version ${data.editVersion ?? "?"} · ${formatDate(data.archivedAt)}`),
+          create("small", "Version " + (data.editVersion ?? "?") + " · " + formatDate(data.archivedAt)),
           create("p", String(data.content || "Empty post text"))
         );
         section.append(row);
@@ -56,13 +56,13 @@ replaceOnce(
       commentHistories.forEach(({ comment, history }) => {
         if (history.empty) return;
         const current = comment.data();
-        const heading = create("small", `Current comment by @${current.username || "anonymous"}: ${String(current.text || "").slice(0, 120)}`);
+        const heading = create("small", "Current comment by @" + (current.username || "anonymous") + ": " + String(current.text || "").slice(0, 120));
         section.append(heading);
         history.docs.forEach((version) => {
           const data = version.data();
           const row = create("article", undefined, "admin-edit-version");
           row.append(
-            create("small", `Version ${data.editVersion ?? "?"} · ${formatDate(data.archivedAt)}`),
+            create("small", "Version " + (data.editVersion ?? "?") + " · " + formatDate(data.archivedAt)),
             create("p", String(data.content || "Empty comment text"))
           );
           section.append(row);
@@ -86,13 +86,8 @@ function renderContent() {`,
 );
 
 replaceOnce(
-  `    const open = create("a", "View", "admin-action nav-button"); open.href = entry.type === "community" ? "community.html" : \`timeline.html#post-\${entry.id}\`;`,
-  `    const open = create("a", "View", "admin-action nav-button"); open.href = entry.type === "community" ? "community.html" : \`timeline.html#post-\${entry.id}\`;
-    const historyHost = create("div", undefined, "admin-edit-history-host");
-    const viewHistory = create("button", "View edit history", "admin-action");
-    viewHistory.type = "button";
-    viewHistory.onclick = () => loadContentEditHistory(entry, historyHost, viewHistory);
-    info.append(historyHost);`,
+  '    const open = create("a", "View", "admin-action nav-button"); open.href = entry.type === "community" ? "community.html" : `timeline.html#post-${entry.id}`;',
+  '    const open = create("a", "View", "admin-action nav-button"); open.href = entry.type === "community" ? "community.html" : `timeline.html#post-${entry.id}`;\n    const historyHost = create("div", undefined, "admin-edit-history-host");\n    const viewHistory = create("button", "View edit history", "admin-action");\n    viewHistory.type = "button";\n    viewHistory.onclick = () => loadContentEditHistory(entry, historyHost, viewHistory);\n    info.append(historyHost);',
   "content View action"
 );
 
