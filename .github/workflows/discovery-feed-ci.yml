@@ -6,6 +6,7 @@ on:
       - growth-web-release
       - mobile-topics-hotfix-tests
       - mobile-topics-hotfix
+      - remove-saved-filters-hotfix
   workflow_dispatch:
 
 permissions:
@@ -26,3 +27,4 @@ jobs:
       - run: node scripts/test-content-writer-topics.mjs
       - run: node scripts/test-chosen-topics-feed.mjs
       - run: node scripts/test-mobile-hashtag-topic-surface.mjs
+      - run: node scripts/test-saved-filters-removed.mjs
