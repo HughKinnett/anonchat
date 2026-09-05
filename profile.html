@@ -58,6 +58,12 @@
       <p id="profile-bio"></p>
     </section>
 
+    <section id="profile-badges-section" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-badges-title" hidden>
+      <div class="spotify-card-heading"><div><p class="eyebrow">Achievements</p><h2 id="profile-badges-title">Badges</h2></div></div>
+      <div id="profile-badges-list" class="profile-badges-list"></div>
+      <button id="profile-badges-view-all" class="secondary-button" type="button" hidden>View all badges</button>
+    </section>
+
     <section id="profile-spotify-card" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-spotify-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="profile-spotify-title">Playing on Spotify</h2></div></div>
       <div id="profile-spotify-player"></div>
@@ -75,8 +81,17 @@
     <p class="install-help" role="status" aria-live="polite"></p>
   </main>
 
+  <dialog id="profile-badge-dialog" class="profile-badge-dialog">
+    <button id="profile-badge-dialog-close" class="secondary-button" type="button" aria-label="Close badge details">Close</button>
+    <img id="profile-badge-dialog-image" alt="">
+    <h2 id="profile-badge-dialog-name"></h2>
+    <p id="profile-badge-dialog-description"></p>
+    <p id="profile-badge-dialog-earned"></p>
+  </dialog>
+
   <script type="module" src="profile.js"></script>
   <script type="module" src="profile-bio.js"></script>
+  <script type="module" src="profile-badges.js"></script>
   <script type="module" src="post-sharing.js"></script>
   <script src="nav-menu.js" defer></script>
   <script type="module" src="premium-menu.js"></script>
