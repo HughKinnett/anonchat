@@ -96,4 +96,5 @@ profilePostsButton.addEventListener("click", () => setFeedView("profile"));`,
 "feed click handlers");
 await writeFile("timeline.js", js);
 
+// Trigger the Task 2 patch workflow after the workflow file exists.
 console.log("Discovery/feed Task 2 patch applied");
