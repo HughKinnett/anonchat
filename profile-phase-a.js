@@ -17,6 +17,7 @@ const qrUrl = document.getElementById("profile-qr-url");
 
 let viewer = null;
 let profile = null;
+let featureSettings = { profileQrEnabled: true };
 
 const setStatus = (message, error = false) => {
   const status = document.getElementById("profile-status");
@@ -52,12 +53,27 @@ const applyVisibility = () => {
   markPrivate(document.querySelector(".profile-connections-links"), !visibility.followersFollowing);
   document.querySelectorAll("[data-profile-activity]").forEach((node) => markPrivate(node, !visibility.activity));
 
+  if (qrButton) {
+    const enabled = featureSettings.profileQrEnabled !== false;
+    qrButton.disabled = !enabled;
+    qrButton.title = enabled ? "" : "Profile QR is temporarily unavailable.";
+  }
+
   if (ownerView && privateNote) {
     const hidden = Object.entries(privacy).filter(([, value]) => !value).map(([key]) => key);
     privateNote.hidden = hidden.length === 0;
     privateNote.textContent = hidden.length
       ? "You can still see sections you have hidden from other users."
       : "";
+  }
+};
+
+const loadFeatures = async () => {
+  try {
+    const snapshot = await getDoc(doc(db, "siteSettings", "features"));
+    if (snapshot.exists()) featureSettings = { ...featureSettings, ...snapshot.data() };
+  } catch {
+    featureSettings = { profileQrEnabled: true };
   }
 };
 
@@ -129,6 +145,10 @@ const renderQr = async () => {
 
 qrButton?.addEventListener("click", async () => {
   if (!profile || !qrDialog) return;
+  if (featureSettings.profileQrEnabled === false) {
+    setStatus("Profile QR is temporarily unavailable. You can still use Share.", true);
+    return;
+  }
   try {
     await renderQr();
     qrDialog.showModal();
@@ -144,6 +164,7 @@ qrDialog?.addEventListener("click", (event) => {
 onAuthStateChanged(auth, async (user) => {
   viewer = user;
   if (!user || !targetUserId) return;
+  await loadFeatures();
   await loadProfile();
 });
 
