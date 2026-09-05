@@ -27,4 +27,4 @@ jobs:
       - run: node scripts/test-content-writer-policy.mjs
       - run: node scripts/test-phase-b-ui.mjs
       - run: node --check timeline.js
-      # This gate runs against the generated timeline source, not the patch script alone.
+      # This gate runs against the persisted generated timeline source.
