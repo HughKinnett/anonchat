@@ -506,7 +506,7 @@ const renderPosts = () => {
     const reactionsBar = document.createElement("div");
     reactionsBar.className = "reactions";
     const myReaction = reactionDocs.find((reaction) => reaction.data().uid === currentUser.uid)?.data().type;
-    ["wow", "middle_finger", "laugh", "smile", "fire"].forEach((type) => {
+    ["wow", "middle_finger", "laugh", "smile", "heart", "fire"].forEach((type) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "reaction-button";
