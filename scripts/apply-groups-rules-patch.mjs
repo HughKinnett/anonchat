@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 
+// Applies the approved persistent Groups security additions idempotently.
 const path = new URL("../firestore.rules", import.meta.url);
 let rules = await readFile(path, "utf8");
 
