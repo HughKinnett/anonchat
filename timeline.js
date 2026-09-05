@@ -8,7 +8,7 @@ import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
 import { buildEditHistorySnapshot, canEditOwnedContent, nextEditMetadata } from "./content-edit-policy.mjs";
 import { groupCommentThreads, threadRootId } from "./threaded-reply-policy.mjs";
 import { normalizePostMedia, validatePostMedia } from "./post-media-policy.mjs";
-import { historyEntryId, savedPostEntryId } from "./saved-history-policy.mjs";
+import { canonicalPostPathParts, historyEntryId, savedPostEntryId } from "./saved-history-policy.mjs";
 import { applicationDayBounds, popularTodayScore, trendingScore } from "./hashtag-discovery-policy.mjs";
 import { suggestFollowCandidates } from "./suggested-follow-policy.mjs";
 import { mergeRecentSearches, normalizeRecentSearch, removeRecentSearch } from "./recent-search-policy.mjs";
@@ -89,6 +89,7 @@ let activeReplyTarget = null;
 let recentSearches = [];
 let savedPostPaths = new Set();
 let viewedPostPaths = [];
+let referencedPostDocs = new Map();
 const chosenTopicInput = document.getElementById("chosen-topic-input");
 const addChosenTopicButton = document.getElementById("add-chosen-topic");
 const chosenTopicList = document.getElementById("chosen-topic-list");
@@ -170,8 +171,12 @@ const pendingPostDeletes = new Set();
 const postDeleteStatuses = new Map();
 
 const blockedUid = (uid) => isBlockedActor(uid, viewerBlocks);
-const visibleTimelinePosts = () => allTimelinePosts()
+const visibleTimelinePosts = () => [...new Map([
+  ...allTimelinePosts(),
+  ...referencedPostDocs.values()
+].map((post) => [post.ref.path, post])).values()]
   .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
+  .filter((post) => post.data().moderationState !== "hidden")
   .filter((post) => isBlockedPost(post, viewerBlocks))
   .filter((post) => reportCardStatuses.get(post.ref.path)?.hidden !== true);
 const syncReportedHolds = (collectionName, documents) => {
@@ -1611,6 +1616,35 @@ const renderPost = (postDoc) => {
   return item;
 };
 
+const loadReferencedPostDocs = async (paths = []) => {
+  const uniquePaths = [...new Set(paths.map((path) => String(path || "").trim()).filter(Boolean))];
+  const requested = uniquePaths
+    .map((path) => ({ path, parts: canonicalPostPathParts(path) }))
+    .filter((entry) => entry.parts);
+  const next = new Map(referencedPostDocs);
+  await Promise.all(requested.map(async ({ path, parts }) => {
+    try {
+      const snapshot = await getDoc(doc(db, parts.collection, parts.id));
+      if (!snapshot.exists()
+        || snapshot.data().moderationState === "hidden"
+        || (snapshot.data().expiresAt?.toMillis?.() && snapshot.data().expiresAt.toMillis() <= Date.now())
+        || !isBlockedPost(snapshot, viewerBlocks)) {
+        next.delete(path);
+        return;
+      }
+      next.set(path, snapshot);
+    } catch {
+      next.delete(path);
+    }
+  }));
+  const stillReferenced = new Set([...savedPostPaths, ...viewedPostPaths]);
+  for (const path of next.keys()) if (!stillReferenced.has(path)) next.delete(path);
+  referencedPostDocs = next;
+  syncInteractionListeners();
+  renderFeed();
+  void hydrateVisibleAuthorMetadata();
+};
+
 const renderFeed = () => {
   if (!viewerBlocks.ready) {
     feed.replaceChildren();
@@ -2041,6 +2075,10 @@ const stopTimelineResources = () => {
   clearInteractionListeners();
   postDocs = [];
   communityPostDocs = [];
+  savedPostPaths = new Set();
+  viewedPostPaths = [];
+  recentSearches = [];
+  referencedPostDocs = new Map();
   follows = [];
   followerCountsByUid = new Map();
   users = [];
@@ -2173,12 +2211,20 @@ onAuthStateChanged(auth, async (user) => {
   listeners.push(clearInteractionListeners);
   listeners.push(listenForSession(
     query(collection(db, "users", user.uid, "saved"), orderBy("savedAt", "desc"), limit(250)),
-    (snapshot) => { savedPostPaths = new Set(snapshot.docs.map((entry) => entry.data().postPath).filter(Boolean)); renderFeed(); },
+    (snapshot) => {
+      savedPostPaths = new Set(snapshot.docs.map((entry) => entry.data().postPath).filter(Boolean));
+      void loadReferencedPostDocs([...savedPostPaths]);
+      renderFeed();
+    },
     () => setStatus("Could not load Saved posts.", true)
   ));
   listeners.push(listenForSession(
     query(collection(db, "users", user.uid, "viewHistory"), orderBy("viewedAt", "desc"), limit(100)),
-    (snapshot) => { viewedPostPaths = snapshot.docs.map((entry) => entry.data().postPath).filter(Boolean); if (feedMode === "history") renderFeed(); },
+    (snapshot) => {
+      viewedPostPaths = snapshot.docs.map((entry) => entry.data().postPath).filter(Boolean);
+      void loadReferencedPostDocs(viewedPostPaths);
+      if (feedMode === "history") renderFeed();
+    },
     () => setStatus("Could not load viewed history.", true)
   ));
   listeners.push(listenForSession(
