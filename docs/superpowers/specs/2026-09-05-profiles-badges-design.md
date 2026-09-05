@@ -1,290 +1,295 @@
-# Profiles + Badges Design
+# Phase A — Profiles, Identity, Privacy, Sharing, Pins, and Badges Design
 
 ## Scope
 
-This first expansion stage adds richer profile identity and a complete badge system, including automatic milestone awards, without enabling Stripe, Google Play Billing, or Firebase billing. It is intentionally centered on profile bio/about, visible badges, admin badge management, and a milestone-award engine so the larger expansion can remain independently testable.
+Phase A expands the existing profile and badge work into a complete cross-platform identity subsystem for AnonChat. It preserves the existing badge engine and admin badge tooling while adding pinned posts, profile sharing, QR profile cards, granular profile privacy controls, polished badge presentation, and Android UI parity.
+
+This phase must be independently testable and deployable before Phase B begins.
 
 ## Goals
 
-- Add an editable profile bio/about field.
-- Add a visible Badges section to every user profile on web.
-- Support original AnonChat badge artwork, names, descriptions, earned dates, and featured badges.
-- Automatically award objective achievement badges when users cross configured milestones.
-- Preserve manual/admin-only badges for staff, events, special recognition, and corrections.
-- Let admins create, edit, activate/deactivate, assign, remove, inspect, and configure badge definitions.
-- Keep membership/premium labeling separate from earned badges.
-- Store badge data in a structure that the Android app can consume without a later migration.
-- Preserve existing profile privacy, blocking, moderation, premium/free themes, comments, reactions, bookmarks, Spotify content, and follower behavior.
+- Let users pin and unpin their own posts on their profile.
+- Add a profile share action using the canonical public profile URL.
+- Add a QR profile card that encodes only the canonical public profile URL.
+- Add granular privacy controls for profile posts, badges, followers/following, and activity.
+- Preserve existing blocking behavior as a stronger access restriction than privacy preferences.
+- Keep the existing achievement badge system and improve its profile presentation.
+- Preserve automatic and manual badge awards, earned dates, featured badges, and admin badge management.
+- Add the same profile, privacy, sharing, pinned-post, and badge experience to the Android app using the same Firestore contracts.
+- Keep the existing membership/Premium indicator separate from achievement badges.
+- Add admin visibility for profile/privacy/pinning/badge subsystem status without exposing private user data unnecessarily.
 
 ## Non-goals
 
+- No follow-approval/private-account request system in Phase A.
 - No payment processing or billing activation.
-- No machine-learning or subjective reputation scoring for automatic awards.
-- No redesign of unrelated timeline, messaging, notification, or discovery systems.
-- No Android UI implementation in this stage; only Android-compatible data contracts.
+- No redesign of unrelated messaging, notification, discovery, timeline ranking, or comment systems.
+- No arbitrary executable badge rules stored in Firestore.
 
 ## Existing integration points
 
-The current profile surface is implemented through `profile.html`, `profile.js`, and shared profile/theme helpers. The current admin surface uses `admin.html`, `admin.css`, and its associated JavaScript/policy modules. Firestore security is governed by `firestore.rules`, and regression coverage lives under `scripts/`.
+The current web profile surface uses `profile.html`, `profile.js`, shared profile/theme helpers, Firestore-backed user data, and existing privacy/blocking behavior. The admin surface uses the task-first admin dashboard and badge modules including `admin-badges.js`, `badge-policy.mjs`, `badge-firestore.mjs`, `badge-awards.mjs`, `badge-award-processor.mjs`, `badge-milestones.mjs`, and related tests.
 
-The existing `profile-membership-badge` remains the subscription/membership indicator. Achievement badges are rendered in a separate profile section so users do not confuse Premium/Member state with earned recognition.
+The current badge implementation already supports badge definitions, user assignments, automatic milestone evaluation, featured badges, and public profile rendering. Phase A extends rather than duplicates that system.
 
-## Data model
+The Android app must consume the same canonical Firestore fields and collections so web and Android display the same profile state.
 
-### `badgeTypes/{badgeId}`
+## Profile privacy model
 
-Fields:
+Phase A uses granular visibility controls rather than a follower-approval system.
 
-- `name: string` — 1 to 60 characters.
-- `description: string` — 1 to 280 characters.
-- `imageUrl: string` — HTTPS asset URL for the badge artwork.
-- `category: string` — one of `early_supporter`, `staff`, `contributor`, `popular_post`, `community_helper`, `long_time_member`, `premium`, `event`, `milestone`, `special`.
-- `awardMode: string` — `automatic` or `manual`.
-- `milestoneMetric: string|null` — metric key used by automatic awards.
-- `milestoneThreshold: number|null` — numeric threshold for automatic awards.
-- `active: boolean` — inactive badge types remain visible on profiles where previously earned but cannot be newly assigned or automatically awarded.
-- `createdAt: timestamp`.
-- `updatedAt: timestamp`.
-- `createdBy: uid`.
+### `users/{uid}.profilePrivacy`
 
-Manual badges must have `milestoneMetric = null` and `milestoneThreshold = null`. Automatic badges must use one supported metric and a positive threshold, except fixed-condition metrics such as `premium_active` and `early_member`, whose qualifying condition is defined by policy.
+Store a map with these boolean fields:
 
-### `users/{uid}/badges/{badgeId}`
+- `showPosts`
+- `showBadges`
+- `showFollowersFollowing`
+- `showActivity`
 
-Fields:
+Defaults for existing and new users are `true` for all four fields.
 
-- `badgeId: string` — must match the document ID.
-- `earnedAt: timestamp`.
-- `assignedAt: timestamp`.
-- `assignedBy: uid|string` — admin UID for manual assignments, or `system` for automatic awards.
-- `awardSource: string` — `automatic` or `manual`.
-- `featured: boolean`.
+Rules:
 
-The assignment document does not duplicate badge name, description, or artwork. Profiles resolve assignments against `badgeTypes`, so administrators can update presentation metadata globally while preserving each user’s earned date.
+- The profile identity header remains viewable when the profile itself is otherwise accessible.
+- `showPosts = false` hides the profile post feed from other users.
+- `showBadges = false` hides achievement badges from other users.
+- `showFollowersFollowing = false` hides follower/following counts and lists from other users.
+- `showActivity = false` hides profile-level recent activity surfaces from other users.
+- The profile owner can always see their own hidden sections and sees a clear private/hidden indicator.
+- Admin moderation tooling may access data through existing admin-authorized paths when required for safety/moderation.
+- Blocking overrides these settings. A blocked/unavailable profile must not leak sections merely because a privacy flag is true.
+- Privacy settings must be enforced in UI queries/rendering and in Firestore access rules wherever direct collection access would otherwise expose hidden data.
 
-### `users/{uid}` profile additions
+## Pinned posts
 
-- `bio: string` — optional, maximum 300 characters after trimming.
+### Data model
 
-No billing-related field is introduced by this stage.
+Use a single pinned post reference on the user document:
 
-## Supported automatic milestone metrics
+- `pinnedPostId: string|null`
 
-The initial automatic badge engine supports these objective metrics:
+Constraints:
 
-- `posts_created`
-- `single_post_interactions`
-- `total_interactions_received`
-- `comments_received`
-- `comments_or_replies_created`
-- `followers_count`
-- `account_age_days`
-- `early_member`
-- `premium_active`
+- Only the profile owner may change their `pinnedPostId`.
+- The referenced post must be authored by that user and must still exist.
+- A user may have at most one pinned post in Phase A.
+- Pinning a new post replaces the previous pin.
+- Deleting the pinned post clears or safely ignores the stale reference.
+- A hidden profile post feed also hides the pinned post from other users.
 
-The initial badge catalog is:
+### User experience
 
-- **First Post** — `posts_created >= 1`.
-- **Contributor** — `posts_created >= 10`.
-- **Top Contributor** — `posts_created >= 100`.
-- **Community Favorite** — any one post reaches `25` interactions.
-- **Popular Creator** — `total_interactions_received >= 100`.
-- **Conversation Starter** — `comments_received >= 25`.
-- **Community Helper** — `comments_or_replies_created >= 50`.
-- **Connected** — `followers_count >= 25`.
-- **Well Known** — `followers_count >= 100`.
-- **Long-Time Member** — `account_age_days >= 365`.
-- **Early Member** — account creation date is at or before the fixed AnonChat launch cutoff configured in the badge policy.
-- **Premium Member** — current premium-access record is active.
+- The owner sees `Pin to profile` / `Unpin from profile` on eligible own posts.
+- A visible pinned post is labeled `Pinned` and appears above the normal profile feed.
+- The pinned post uses the same canonical post renderer and interaction counts as every other timeline; it must not create a duplicate post data model.
+- If a referenced post is missing or unavailable, the profile renders normally without an error-blocking state.
 
-Admins may create future automatic milestone badges using the supported metrics and configurable thresholds. New metric types require code/policy support rather than arbitrary executable conditions stored in Firestore.
+## Profile share and QR card
 
-## Automatic award architecture
+### Canonical URL
 
-Automatic awarding is handled by a focused milestone policy/evaluator rather than by profile rendering code.
+All share and QR actions use the same canonical public profile URL already supported by AnonChat routing. No private tokens, internal Firestore IDs beyond the existing public route identifier, session data, or analytics secrets are encoded in the QR payload.
 
-The evaluator receives a user ID plus the metric(s) affected by the current activity. It loads active automatic badge definitions for those metrics, resolves current counters/state from the canonical AnonChat data model, and writes any newly satisfied assignments.
+### Share action
 
-Awards are idempotent: `users/{uid}/badges/{badgeId}` is the unique award record. If it already exists, evaluation does not overwrite the original `earnedAt` or create a duplicate.
+- Web uses the Web Share API where available and falls back to copying the canonical profile link.
+- Android uses the native Android share sheet.
+- Share text identifies the profile as an AnonChat profile without exposing hidden profile sections.
 
-Automatic evaluation is triggered from canonical activity paths:
+### QR profile card
 
-- successful original post creation → evaluate `posts_created` and, where applicable, creator totals;
-- new reaction/comment/interaction on a post → evaluate `single_post_interactions`, `total_interactions_received`, and `comments_received` for the post author;
-- new comment/reply creation → evaluate `comments_or_replies_created` for the author;
-- successful follow creation/removal → evaluate `followers_count` for the followed user;
-- premium access state change or authenticated premium-state reconciliation → evaluate `premium_active`;
-- account creation/login/profile initialization → evaluate `early_member` and `account_age_days`;
-- a bounded scheduled/periodic reconciliation may evaluate `account_age_days` so users can receive Long-Time Member without needing unrelated activity on the anniversary date.
+- Provide a `QR` or `Profile QR` action on the profile.
+- Show a clean AnonChat-branded card containing the QR code, display name/username allowed by the existing identity model, and a short `Scan to view profile` message.
+- The QR code resolves to the same canonical profile URL as the share action.
+- QR rendering must work offline once the profile URL is known; it must not depend on a third-party QR tracking service.
+- Users can close the QR card using the existing modal/sheet interaction conventions.
 
-The implementation must use existing canonical collections/counting conventions and avoid creating divergent per-timeline counters.
+## Badge system
 
-## Award timing and earned dates
+### Existing data model
 
-For event-driven milestones, `earnedAt` is the server timestamp of the first successful evaluation after the threshold is crossed.
+Keep the current structures:
 
-For account-age milestones, `earnedAt` should represent the first award evaluation at or after eligibility. It does not need to backdate exactly to the anniversary if the evaluator runs later.
+#### `badgeTypes/{badgeId}`
 
-For idempotency, a previously earned badge keeps its original `earnedAt` even if the user later falls below a reversible threshold such as follower count.
+Fields include:
 
-## Revocation and threshold reversal
+- `name`
+- `description`
+- `imageUrl`
+- `category`
+- `awardMode`
+- `milestoneMetric`
+- `milestoneThreshold`
+- `active`
+- creation/update metadata
 
-Automatic milestone badges are achievements, not live status indicators. Once earned, they remain earned if a count later drops below the threshold.
+#### `users/{uid}/badges/{badgeId}`
 
-Exceptions:
+Fields include:
 
-- Admins may manually remove an award for moderation/correction reasons.
-- `Premium Member` is treated as an achievement badge in this stage once awarded; the separate existing membership badge remains the live premium/member state indicator.
-- Deactivating a badge type stops future awards but does not remove existing assignments.
+- `badgeId`
+- `earnedAt`
+- `assignedAt`
+- `assignedBy`
+- `awardSource`
+- `featured`
+
+Do not duplicate badge name, description, or artwork into assignment documents.
+
+### Badge presentation
+
+- Add/retain a clearly labeled `Badges` section on every accessible profile when badges are visible under privacy settings.
+- Show badge artwork as a primary visual element, not text-only labels.
+- Featured badges appear first.
+- Up to three assignments may be featured.
+- The collapsed profile view shows up to four badges.
+- If more exist, show `View all badges`.
+- Tapping/clicking a badge opens a detail view with image, name, description, earned date, and award category/source where appropriate.
+- Inactive badge definitions remain visible to users who already earned them but are not newly assignable/awarded.
+- Missing or invalid artwork uses a local AnonChat fallback badge image.
+- Original AnonChat artwork must be used; no copied Facebook/Reddit badge artwork.
+
+### Initial badge categories
+
+Retain support for:
+
+- Early supporter / early member
+- Verified admin / moderator
+- Top contributor
+- Popular post creator
+- Community helper
+- Long-time member
+- Premium member
+- Event / milestone / special achievement
+
+### Automatic badge engine
+
+Retain the current objective milestone system and idempotent award behavior. Supported metrics include the existing post, interaction, comment/reply, follower, account-age, early-member, and premium-active metrics.
+
+Automatic awards remain achievements: falling below a reversible threshold does not remove an already-earned badge. Admins may remove awards for moderation/correction purposes.
+
+## Admin dashboard
+
+Extend the existing badge management and task-first admin dashboard with Phase A status and controls.
+
+Admins can:
+
+- create/edit/activate/deactivate badge types;
+- choose automatic or manual award mode;
+- configure supported milestone thresholds;
+- assign/remove badges;
+- feature/unfeature user badges;
+- see which users have which badges;
+- inspect pinning/privacy subsystem health counts without exposing hidden content in aggregate views;
+- inspect failed badge-award/reconciliation operations where supported by the existing health framework;
+- disable new badge awarding through a safe feature switch if a production issue occurs;
+- disable profile QR rendering or profile pin mutations through safe emergency feature switches if a production issue occurs.
+
+Admins must not be able to silently change a regular user's privacy preferences from ordinary badge/profile management controls. Any moderation-specific override must use existing explicit moderation workflows.
+
+## Android parity
+
+Phase A is not complete until Android exposes the same user-facing capabilities:
+
+- pinned post display and owner pin/unpin controls;
+- profile share through Android share sheet;
+- profile QR card;
+- privacy switches for posts, badges, followers/following, and activity;
+- badge preview, `View all badges`, featured ordering, and badge details;
+- correct hiding of sections according to privacy/block state;
+- admin badge/profile controls available to admin accounts through the existing Android admin-dashboard access pattern where that control is already exposed cross-platform.
+
+Android must use the same Firestore fields and badge collections as web and must not create an Android-only copy of profile state.
 
 ## Security and permissions
 
-- Signed-in users may read active badge definitions.
-- Signed-in users may read badge assignments for profiles they are otherwise allowed to view.
-- Regular users cannot directly create, edit, assign, feature, or remove badges.
-- Only designated admins may manage `badgeTypes` and manually manage user badge assignments.
-- Automatic badge writes must occur through trusted application/server-controlled paths or tightly validated transactional rules; client users must never be able to self-award by writing badge assignments directly.
-- A user may edit only their own `bio`, subject to length/type validation and the repository’s existing user-document protections.
-- Blocking/privacy behavior continues to suppress protected profile details. If a profile is unavailable because of block state, its bio and badges are not displayed.
-- Admin-only fields and automatic award metadata are not editable from profile UI.
-
-## Profile experience
-
-### Bio/About
-
-- The owner’s profile editing experience exposes a multiline About/Bio input.
-- Save trims surrounding whitespace.
-- Empty content removes/clears the bio.
-- Profile view renders the bio beneath identity/membership content and above profile feed content.
-- Text is rendered as text, not raw HTML.
-
-### Badge section
-
-- Add a `Badges` section to the user profile.
-- Badge artwork is visually prominent enough to identify without opening details.
-- Show featured badges first, then remaining badges by newest earned date.
-- The collapsed profile view shows up to four badges.
-- If more than four exist, show `View all badges`.
-- If a user has no badges, do not show an empty public badge gallery; the owner may see a small empty-state message.
-- Inactive badge types remain visible to users who already earned them; they are not newly assignable or automatically awarded.
-
-### Badge detail interaction
-
-Clicking/tapping a badge opens a detail dialog containing:
-
-- badge artwork,
-- badge name,
-- description,
-- earned date.
-
-The dialog closes through its close control, Escape, or clicking outside when supported by the existing modal patterns.
-
-## Featured badges
-
-- Admins control the `featured` flag on assignments.
-- A profile may feature at most three badges.
-- If an admin attempts to feature a fourth badge, the operation is rejected with a clear admin message.
-- Featured badges appear first in the profile badge section.
-
-## Admin experience
-
-Add a `Badges` management area to the existing task-first admin dashboard.
-
-### Badge type management
-
-Admins can:
-
-- create a badge type,
-- choose `automatic` or `manual` award mode,
-- for automatic badges, select a supported milestone metric and threshold,
-- edit name/description/category/artwork URL,
-- activate/deactivate a badge type,
-- inspect creation/update metadata.
-
-Badge artwork is referenced by URL in this stage. Existing project image-hosting/upload mechanisms may be reused if present, but the badge system itself does not introduce a new binary-storage subsystem.
-
-### Assignment management
-
-Admins can:
-
-- search/select a user,
-- view that user’s badge assignments,
-- see whether each badge was earned automatically or assigned manually,
-- manually assign an active badge,
-- remove a badge,
-- mark/unmark an assignment as featured,
-- see the earned date and assigning admin/system source.
-
-Assigning an already-earned badge is idempotent: the existing assignment is preserved instead of creating a duplicate.
-
-## Rendering and compatibility
-
-Badge rendering logic should be isolated in a focused module rather than expanding `profile.js` with all badge-specific formatting and sorting logic. Automatic milestone evaluation should likewise live in a dedicated policy/evaluator module rather than in timeline/profile DOM code.
-
-The Firestore document shapes use only primitives and timestamps so the same collections can be consumed by the Android app later without data migration.
+- Users may edit only their own profile privacy map and pinned post reference.
+- Users cannot pin another user's post or a post they did not author.
+- Regular users cannot create/edit/assign/remove/feature badge definitions or awards.
+- Badge writes remain limited to trusted automatic-award paths and admin-authorized operations.
+- Hidden profile sections must not be re-exposed through alternate profile components.
+- Blocking remains authoritative over all profile section visibility.
+- Share and QR payloads contain only the canonical public profile URL.
+- Text content is rendered as text rather than raw HTML.
 
 ## Error handling
 
-- Profile badge load failure shows a non-destructive profile status message and leaves the rest of the profile usable.
-- Missing/deleted badge definitions are ignored rather than breaking profile rendering.
-- Invalid artwork URLs fall back to a local AnonChat badge placeholder.
-- Admin writes surface clear success/failure messages and never silently fail.
-- Permission failures are treated as authorization errors, not retried indefinitely.
-- Automatic award evaluation failures must not block the originating post/comment/follow interaction from succeeding; failed evaluations are retryable through the next qualifying evaluation or reconciliation pass.
-- Duplicate/concurrent evaluators must resolve safely to one assignment document without resetting `earnedAt`.
+- A failed pinned-post lookup does not break profile rendering.
+- A failed QR render leaves the share-link action usable and shows a clear retryable error.
+- Clipboard/share API failure surfaces a concise status message rather than silently failing.
+- Privacy preference write failure restores the previous visible switch state and reports the failure.
+- Badge load failure leaves the rest of the profile usable.
+- Missing/deleted badge definitions are ignored safely.
+- Permission failures are treated as authorization failures, not endlessly retried.
+- Automatic badge evaluation failure never blocks the originating post/comment/follow action.
 
 ## Testing
 
-Add focused regression tests under `scripts/` for:
+Add or extend focused regression coverage for:
 
-- badge schema/policy validation,
-- `automatic` vs `manual` award modes,
-- supported metric validation and threshold validation,
-- automatic evaluator qualification for every initial milestone,
-- idempotent awarding and preserved `earnedAt`,
-- no self-award capability for regular users,
-- event-to-metric routing for posts, interactions, comments/replies, follows, premium status, and account age,
-- threshold reversal not removing previously earned achievement badges,
-- inactive automatic badges not receiving new awards,
-- Firestore rules for badge definitions and assignments,
-- profile bio validation and safe rendering contract,
-- badge ordering (featured first, then newest earned),
-- four-badge collapsed limit and `View all badges` behavior,
-- badge detail content,
-- featured badge maximum of three,
-- admin-only mutation protection,
-- inactive badge visibility vs assignment restrictions,
-- blocked/unavailable profile hiding bio and badges,
-- existing profile, comment, reaction, interaction-consistency, and runtime-budget regression suites remaining green.
+- privacy defaults for existing/new users;
+- owner-only privacy mutation;
+- posts hidden when `showPosts` is false;
+- badges hidden when `showBadges` is false;
+- followers/following hidden when `showFollowersFollowing` is false;
+- activity hidden when `showActivity` is false;
+- owner visibility of their own hidden sections;
+- block state overriding privacy settings;
+- one-pin maximum;
+- owner-only pin/unpin;
+- preventing pins to posts authored by another user;
+- replacing an existing pinned post;
+- stale/deleted pinned post handling;
+- pinned post rendered from the canonical post source;
+- canonical share URL consistency;
+- QR payload equals the canonical share URL;
+- QR/share payload contains no private tokens/session data;
+- Web Share API fallback to clipboard;
+- badge ordering, four-badge preview, and `View all badges`;
+- badge detail contents;
+- featured badge maximum of three;
+- automatic/manual badge policy validation;
+- idempotent badge awarding and preserved `earnedAt`;
+- admin-only badge mutation protection;
+- emergency feature-switch behavior;
+- Android contract/UI tests for privacy, pinning, share/QR, and badges;
+- existing profile, comments, reactions, interaction consistency, messaging, notification, admin, and mobile-layout regressions remaining green.
 
-## Rollout
+## Rollout and deployment
 
-1. Add/extend badge policy and data helpers with automatic-award metadata and failing tests.
-2. Add milestone evaluator and failing tests for all initial milestone rules.
-3. Add Firestore/trusted-write protections and rules tests.
-4. Add event hooks/reconciliation triggers for automatic evaluation.
-5. Add profile bio support.
-6. Add public profile badge rendering and badge details.
-7. Add admin badge type management, including automatic/manual configuration.
-8. Add admin assignment/featured management.
-9. Run the full relevant regression suite.
-10. Deploy web only after tests pass.
-
-Android UI work remains a later parity stage, but it will consume the same `badgeTypes` and `users/{uid}/badges` structures defined here.
+1. Preserve and regression-test the existing badge engine before touching profile behavior.
+2. Add privacy data policy and tests.
+3. Add pinned-post policy/data helpers and tests.
+4. Add web privacy controls and profile section enforcement.
+5. Add web pinned-post controls and rendering.
+6. Add web share and QR card.
+7. Polish web badge rendering/details and admin status controls.
+8. Add Android parity using the same contracts.
+9. Run focused and full relevant regression suites.
+10. Build Android and run Android-specific checks.
+11. Deploy Phase A web changes only after tests pass.
+12. Produce the Android package/build artifact through the existing workflow only after Android checks pass.
+13. Verify deployment/build status before declaring Phase A complete.
+14. Begin Phase B only after Phase A is successfully deployed/packaged.
 
 ## Acceptance criteria
 
-- A profile owner can save/clear a bio of up to 300 characters.
-- Visitors can see earned badge artwork and details on an accessible profile.
-- The first profile view shows no more than four badges and exposes `View all badges` when needed.
-- Up to three badges can be featured and featured badges sort first.
-- The twelve approved initial milestone badges are automatically awarded when their criteria are met.
-- Automatic awards are idempotent and preserve the first `earnedAt`.
-- Falling below a reversible count threshold does not remove an already-earned achievement badge.
-- Admins can create automatic or manual badge types and configure supported milestone thresholds.
-- Admins can manually manage user assignments and featured badges.
-- Non-admin users cannot directly award themselves badges or mutate definitions/assignments.
-- Blocked/unavailable profiles do not leak bio or badge data through the UI.
-- Existing membership/Premium status remains separate from achievement badges.
-- No billing provider is connected or activated.
-- Existing relevant regression tests continue to pass.
+Phase A is complete only when all of the following are true:
+
+- A user can pin exactly one of their own posts and visitors see it above the profile feed when posts are visible.
+- A user can unpin or replace the pinned post.
+- Profile sharing uses the canonical AnonChat profile URL on web and Android.
+- A profile QR card encodes the same canonical profile URL and no private session data.
+- Users can independently control visibility of posts, badges, followers/following, and activity.
+- Owners can still see their own hidden sections with a clear hidden/private indicator.
+- Blocking overrides granular visibility settings.
+- Accessible profiles show earned badge artwork with featured badges first, up to four in preview, and `View all badges` when needed.
+- Badge detail views show image, name, meaning/description, and earned date.
+- Existing automatic badge awards remain idempotent and preserve the first earned date.
+- Admins retain complete badge type/assignment management and gain Phase A health/emergency controls.
+- Web and Android use the same profile/privacy/pin/badge data contracts.
+- Android exposes the same Phase A user experience.
+- Relevant regression suites pass.
+- Web deployment succeeds and the Android build/package succeeds before work starts on Phase B.
