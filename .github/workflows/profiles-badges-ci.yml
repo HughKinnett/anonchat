@@ -19,6 +19,7 @@ jobs:
           node-version: "22"
       - run: node scripts/test-profile-privacy-policy.mjs
       - run: node scripts/test-profile-pinning.mjs
+      - run: node scripts/test-profile-share-contract.mjs
       - run: node scripts/test-badge-policy.mjs
       - run: node scripts/test-badge-milestones.mjs
       - run: node scripts/test-badge-awards-contract.mjs
