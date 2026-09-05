@@ -515,7 +515,8 @@ service cloud.firestore {
 
     function validStandaloneAdminAccountControl(userId) {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
-      return isAdmin()
+      return request.auth.uid != userId
+        && isAdmin()
         && !isProtectedAdministrator(resource.data.username)
         && (
           (changed.hasOnly(['banned'])
