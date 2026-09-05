@@ -18,5 +18,6 @@ jobs:
         with:
           node-version: "22"
       - run: node scripts/test-badge-policy.mjs
+      - run: node scripts/test-badge-milestones.mjs
       - run: node scripts/test-badge-firestore-rules.mjs
       - run: node scripts/test-profile-badges-surface.mjs
