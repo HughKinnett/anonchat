@@ -1,0 +1,35 @@
+name: Apply Groups rules patch
+
+on:
+  push:
+    branches:
+      - growth-web-release
+    paths:
+      - scripts/apply-groups-rules-patch.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: growth-web-release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/apply-groups-rules-patch.mjs
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No Groups rules patch changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firestore.rules
+          git commit -m "feat: secure persistent Groups"
+          git push origin HEAD:growth-web-release
