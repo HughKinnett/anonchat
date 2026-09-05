@@ -33,7 +33,20 @@
     <section class="connections-panel" aria-labelledby="community-compose-title">
       <h2 id="community-compose-title">Post to this Community</h2>
       <form id="community-post-composer">
+        <label for="community-post-kind">Post type</label>
+        <select id="community-post-kind">
+          <option value="Question">Post</option>
+          <option value="Poll">Poll</option>
+        </select>
         <textarea id="community-post-content" maxlength="500" rows="4" placeholder="Share something with this Community" required></textarea>
+        <div id="community-poll-options" hidden>
+          <label>Poll options</label>
+          <input type="text" maxlength="120" data-community-poll-option placeholder="Option 1">
+          <input type="text" maxlength="120" data-community-poll-option placeholder="Option 2">
+          <input type="text" maxlength="120" data-community-poll-option placeholder="Option 3 (optional)">
+          <input type="text" maxlength="120" data-community-poll-option placeholder="Option 4 (optional)">
+          <p>Polls require 2–4 options.</p>
+        </div>
         <button type="submit">Post</button>
       </form>
     </section>
