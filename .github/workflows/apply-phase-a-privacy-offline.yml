@@ -1,0 +1,35 @@
+name: Apply Phase A privacy offline patch
+
+on:
+  push:
+    branches:
+      - phase-a-profiles-identity
+    paths:
+      - scripts/apply-phase-a-privacy-offline.mjs
+      - .github/workflows/apply-phase-a-privacy-offline.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-a-profiles-identity
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/apply-phase-a-privacy-offline.mjs
+      - name: Commit materialized privacy/offline changes
+        run: |
+          if git diff --quiet -- profile.html sw.js; then
+            echo "No privacy/offline changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add profile.html sw.js
+          git commit -m "fix: harden Phase A profile privacy and offline QR"
+          git push origin HEAD:phase-a-profiles-identity
