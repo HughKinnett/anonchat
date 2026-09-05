@@ -1850,7 +1850,7 @@ service cloud.firestore {
           || (request.resource.data.keys().hasAny(['groupId'])
             && !request.resource.data.keys().hasAny(['circleId', 'communityId'])
             && request.resource.data.groupId is string
-            && groupActiveAfter(request.resource.data.groupId)
+            && groupPublicAfter(request.resource.data.groupId)
             && isGroupMemberAfter(request.resource.data.groupId, request.auth.uid)))
         && request.resource.data.options is list
         && request.resource.data.options.size() <= 4

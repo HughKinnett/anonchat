@@ -397,6 +397,11 @@ const loadGroup = async () => {
   if (description) description.textContent = currentGroup.description || "";
   if (membersLabel) membersLabel.textContent = `${Number(currentGroup.memberCount || 0)} members`;
   await refreshMembership();
+  if (currentGroup?.visibility === "private") {
+    if (composer) composer.hidden = true;
+    if (postsList) postsList.hidden = true;
+    return;
+  }
   await renderStaffControls();
   await renderPosts();
 };
