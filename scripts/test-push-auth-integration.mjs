@@ -21,6 +21,7 @@ const exitPolicy = {
   "premium-profile.js": { authenticated: 0, authLoss: 0 },
   "premium-rooms.js": { authenticated: 0, authLoss: 1 },
   "premium.js": { authenticated: 0, authLoss: 1 },
+  "private-group-detail.js": { authenticated: 0, authLoss: 1 },
   "profile-style.js": { authenticated: 0, authLoss: 1 },
   "profile.js": { authenticated: 2, authLoss: 1 },
   "timeline.js": { authenticated: 2, authLoss: 1 },
