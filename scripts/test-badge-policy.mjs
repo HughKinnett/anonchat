@@ -12,6 +12,7 @@ import {
 assert.equal(MAX_FEATURED_BADGES, 3);
 assert.equal(PROFILE_BADGE_PREVIEW_LIMIT, 4);
 assert.equal(validBadgeImageUrl("https://example.com/badge.png"), true);
+assert.equal(validBadgeImageUrl("http://example.com/badge.png"), false);
 assert.equal(validBadgeImageUrl("javascript:alert(1)"), false);
 
 const badge = normalizeBadgeType({
