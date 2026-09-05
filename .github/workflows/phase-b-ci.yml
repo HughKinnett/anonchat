@@ -24,5 +24,7 @@ jobs:
       - run: node scripts/test-hashtag-discovery-policy.mjs
       - run: node scripts/test-suggested-follow-policy.mjs
       - run: node scripts/test-recent-search-policy.mjs
+      - run: node scripts/test-content-writer-policy.mjs
       - run: node scripts/test-phase-b-ui.mjs
+      - run: node --check timeline.js
       # This gate runs against the generated timeline source, not the patch script alone.
