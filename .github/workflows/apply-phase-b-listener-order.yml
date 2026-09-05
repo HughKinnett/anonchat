@@ -1,0 +1,38 @@
+name: Apply Phase B listener order fix
+
+on:
+  push:
+    branches:
+      - phase-b-content-discovery
+    paths:
+      - scripts/apply-phase-b-listener-order.mjs
+      - .github/workflows/apply-phase-b-listener-order.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-b-content-discovery
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/apply-phase-b-listener-order.mjs
+      - run: node scripts/test-phase-b-listener-order.mjs
+      - run: node --check timeline.js
+      - name: Commit listener-order fix
+        run: |
+          if git diff --quiet; then
+            echo "No listener-order changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timeline.js
+          git commit -m "fix: initialize Phase B listeners before use"
+          git push origin HEAD:phase-b-content-discovery
