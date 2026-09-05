@@ -42,7 +42,10 @@ assert.match(js, /renderModerationHistory/, "moderation history is rendered");
 assert.match(js, /Not checked here/, "unknown health is described honestly rather than reported as working");
 assert.match(js, /Spark plan|free plan/i, "Firebase usage section explains the free-plan constraint");
 
-assert.match(rules, /match \/siteSettings\/\{settingId\}[\s\S]{0,300}allow read: if isAdmin\(\);[\s\S]{0,300}allow (create|write): if isAdmin\(\)/,
-  "only administrators can read/write dashboard settings");
+assert.match(
+  rules,
+  /match \/siteSettings\/\{settingId\}[\s\S]{0,300}allow read: if settingId in \['features', 'announcement'\] \|\| isAdmin\(\);[\s\S]{0,300}allow write: if isAdmin\(\)/,
+  "feature flags and announcements are publicly readable while all dashboard settings writes remain administrator-only"
+);
 
 console.log("admin command center policy tests passed");
