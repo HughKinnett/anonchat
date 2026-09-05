@@ -17,7 +17,7 @@ import { buildInAppNotifications, notificationUiId } from "./notification-ui-pol
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
-import { rankFeedPosts } from "./feed-ranking-policy.mjs";
+import { filterFeedPosts, sortFeedPosts } from "./feed-mode-policy.mjs";
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
 import { pollVoteDocumentId as voteDocumentId } from "./poll-vote-policy.mjs";
 import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
@@ -63,6 +63,10 @@ const content = document.getElementById("post-content");
 const status = document.getElementById("timeline-status");
 const allPostsButton = document.getElementById("show-all-posts");
 const latestPostsButton = document.getElementById("show-latest-posts");
+const followingPostsButton = document.getElementById("show-following-posts");
+const topicPostsButton = document.getElementById("show-topic-posts");
+const temporaryPostsButton = document.getElementById("show-temporary-posts");
+const savedFilterPostsButton = document.getElementById("show-saved-filter-posts");
 const profilePostsButton = document.getElementById("show-profile-posts");
 let currentUser;
 let profileUsername;
@@ -1477,14 +1481,26 @@ const renderFeed = () => {
   const unexpiredPosts = visibleTimelinePosts().sort(compareNewestFirst);
   const reactionCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postReactions(post).length]));
   const commentCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postComments(post).length]));
-  const orderedPosts = feedMode === "for-you"
-    ? rankFeedPosts(unexpiredPosts, {
+  const followedUids = new Set(visibleFollows().filter(follow => follow.data().followerId === currentUser?.uid).map(follow => follow.data().followingId));
+  const filteredPosts = showingProfile
+    ? unexpiredPosts
+    : filterFeedPosts(unexpiredPosts, {
+        mode: feedMode,
         viewerUid: currentUser?.uid,
-        followedUids: new Set(visibleFollows().filter(follow => follow.data().followerId === currentUser?.uid).map(follow => follow.data().followingId)),
+        followedUids,
+        selectedTopics: new Set(),
+        savedFilter: null,
+        now: Date.now()
+      });
+  const orderedPosts = showingProfile
+    ? filteredPosts
+    : sortFeedPosts(filteredPosts, feedMode, {
+        viewerUid: currentUser?.uid,
+        followedUids,
         reactionCounts,
-        commentCounts
-      })
-    : unexpiredPosts;
+        commentCounts,
+        now: Date.now()
+      });
   const visiblePosts = showingProfile
     ? orderedPosts.filter((post) => post.data().authorId === currentUser.uid)
     : orderedPosts;
@@ -1774,13 +1790,22 @@ const setFeedView = (mode) => {
   showingProfile = mode === "profile";
   allPostsButton.setAttribute("aria-pressed", String(mode === "for-you"));
   latestPostsButton.setAttribute("aria-pressed", String(mode === "latest"));
+  followingPostsButton.setAttribute("aria-pressed", String(mode === "following"));
+  topicPostsButton.setAttribute("aria-pressed", String(mode === "topics"));
+  temporaryPostsButton.setAttribute("aria-pressed", String(mode === "temporary"));
+  savedFilterPostsButton.setAttribute("aria-pressed", String(mode === "saved"));
   profilePostsButton.setAttribute("aria-pressed", String(mode === "profile"));
-  document.getElementById("feed-title").textContent = mode === "profile" ? "My profile posts" : mode === "latest" ? "Latest posts" : "For You";
+  const feedTitles = { "for-you": "For You", latest: "Latest posts", following: "Following", topics: "Chosen Topics", temporary: "Temporary Only", saved: "Saved Filters", profile: "My profile posts" };
+  document.getElementById("feed-title").textContent = feedTitles[mode] || "For You";
   renderFeed();
 };
 
 allPostsButton.addEventListener("click", () => setFeedView("for-you"));
 latestPostsButton.addEventListener("click", () => setFeedView("latest"));
+followingPostsButton.addEventListener("click", () => { feedMode = "following"; setFeedView(feedMode); });
+topicPostsButton.addEventListener("click", () => { feedMode = "topics"; setFeedView(feedMode); });
+temporaryPostsButton.addEventListener("click", () => { feedMode = "temporary"; setFeedView(feedMode); });
+savedFilterPostsButton.addEventListener("click", () => { feedMode = "saved"; setFeedView(feedMode); });
 profilePostsButton.addEventListener("click", () => setFeedView("profile"));
 
 const stopTimelineResources = () => {
