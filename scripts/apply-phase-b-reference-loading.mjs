@@ -37,7 +37,7 @@ const visibleTimelinePosts = () => [...new Map([
   ...referencedPostDocs.values()
 ].map((post) => [post.ref.path, post])).values()]
   .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
-  .filter((post) => post.data().get?.("moderationState", "visible") !== "hidden" && post.data().moderationState !== "hidden")
+  .filter((post) => post.data().moderationState !== "hidden")
   .filter((post) => isBlockedPost(post, viewerBlocks))
   .filter((post) => reportCardStatuses.get(post.ref.path)?.hidden !== true);`,
   "visible canonical post source"
@@ -79,11 +79,16 @@ const renderFeed = () => {`,
 );
 
 replaceOnce(
-  `  savedPostPaths = new Set();
-  viewedPostPaths = [];`,
-  `  savedPostPaths = new Set();
+  `  postDocs = [];
+  communityPostDocs = [];
+  follows = [];`,
+  `  postDocs = [];
+  communityPostDocs = [];
+  savedPostPaths = new Set();
   viewedPostPaths = [];
-  referencedPostDocs = new Map();`,
+  recentSearches = [];
+  referencedPostDocs = new Map();
+  follows = [];`,
   "resource cleanup state"
 );
 
