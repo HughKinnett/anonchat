@@ -62,18 +62,23 @@ await patch("firestore.rules", rules => {
     }`;
   const suspensionFn = banFn + `\n\n    function validStandaloneAdminSuspension(userId) {\n      return isAdmin()\n        && !isProtectedAdministrator(resource.data.username)\n        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['suspendedUntil'])\n        && request.resource.data.suspendedUntil is timestamp;\n    }`;
   if (!out.includes("function validStandaloneAdminSuspension")) out = out.replace(banFn, suspensionFn);
-  out = out.replace("      allow update: if validStandaloneAdminBan(userId)\n        || validDeletionQueueProfile(userId)", "      allow update: if validStandaloneAdminBan(userId)\n        || validStandaloneAdminSuspension(userId)\n        || validDeletionQueueProfile(userId)");
+  if (!out.includes("|| validStandaloneAdminSuspension(userId)")) {
+    out = out.replace("      allow update: if validStandaloneAdminBan(userId)\n        || validDeletionQueueProfile(userId)", "      allow update: if validStandaloneAdminBan(userId)\n        || validStandaloneAdminSuspension(userId)\n        || validDeletionQueueProfile(userId)");
+  }
   return out;
 });
 
 await patch("admin.js", source => {
   const oldBlock = `  try { await setDoc(doc(db,"accountModeration",user.id), { uid:user.id, suspendedUntil:until, suspensionReason:suspended?"":"24-hour administrator suspension", updatedAt:serverTimestamp(), updatedBy:adminUid }, {merge:true}); setStatus(suspended?"Suspension ended.":"Account suspended for 24 hours."); } catch { setStatus("Could not change that suspension.",true); }`;
   const newBlock = `  try { const batch=writeBatch(db); batch.set(doc(db,"accountModeration",user.id), { uid:user.id, suspendedUntil:until, suspensionReason:suspended?"":"24-hour administrator suspension", updatedAt:serverTimestamp(), updatedBy:adminUid }, {merge:true}); batch.update(doc(db,"users",user.id), { suspendedUntil:until }); await batch.commit(); setStatus(suspended?"Suspension ended.":"Account suspended for 24 hours."); } catch { setStatus("Could not change that suspension.",true); }`;
+  if (source.includes(newBlock)) return source;
   if (!source.includes(oldBlock)) throw new Error("suspension write block not found");
   return source.replace(oldBlock, newBlock);
 });
 
-await patch("scripts/test-admin-expanded-controls.mjs", test => test
-  .replace(/assert\.match\(rules, \/function accountNotSuspended\\\(uid\\\)\/[\s\S]*?\nassert\.match\(rules, \/function activeUser\\\(\\\)\/[\s\S]*?"suspended users cannot perform normal active-user writes"\);/, `assert.match(rules, /function accountNotSuspended\\(profile\\)/, "Firestore rules define a suspension gate without another document lookup");\nassert.match(rules, /function activeUser\\(\\)[\\s\\S]{0,350}get\\(\\/databases\\/\\$\\(database\\)\\/documents\\/users\\/\\$\\(request\\.auth\\.uid\\)\\)[\\s\\S]{0,250}accountNotSuspended\\(profile\\)/, "suspended users are gated from the already-loaded user profile");`));
+await patch("scripts/test-admin-expanded-controls.mjs", test => {
+  if (test.includes("accountNotSuspended\\(profile\\)")) return test;
+  return test.replace(/assert\.match\(rules, \/function accountNotSuspended\\\(uid\\\)\/[\s\S]*?\nassert\.match\(rules, \/function activeUser\\\(\\\)\/[\s\S]*?"suspended users cannot perform normal active-user writes"\);/, `assert.match(rules, /function accountNotSuspended\\(profile\\)/, "Firestore rules define a suspension gate without another document lookup");\nassert.match(rules, /function activeUser\\(\\)[\\s\\S]{0,350}get\\(\\/databases\\/\\$\\(database\\)\\/documents\\/users\\/\\$\\(request\\.auth\\.uid\\)\\)[\\s\\S]{0,250}accountNotSuspended\\(profile\\)/, "suspended users are gated from the already-loaded user profile");`);
+});
 
 console.log("suspension rule lookup budget fix applied");
