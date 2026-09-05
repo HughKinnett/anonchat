@@ -28,6 +28,7 @@ jobs:
       - run: node scripts/test-phase-b-ui.mjs
       - run: node scripts/test-phase-b-package.mjs
       - run: node scripts/test-phase-b-listener-order.mjs
+      - run: node scripts/test-phase-b-reference-loading.mjs
       - run: node --check timeline.js
       - run: node --check profile.js
       # This gate runs against the persisted generated timeline and profile source.
