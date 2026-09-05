@@ -3,7 +3,9 @@ import {
   getCommunity,
   joinCommunity,
   listCommunityMembers,
-  listCommunityPosts
+  listCommunityPosts,
+  setCommunityModerator,
+  setCommunityPostPinned
 } from "./community-interest-firestore.mjs";
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
@@ -38,6 +40,7 @@ let currentUser = null;
 let currentUsername = "anonymous";
 let currentCommunity = null;
 let currentMembership = null;
+let communityMembers = [];
 let moderation = null;
 
 const setStatus = (message = "") => {
@@ -63,6 +66,58 @@ const canShowAuthor = async (uid) => {
   } catch {
     return false;
   }
+};
+
+const canModerate = () => currentMembership?.role === "owner" || currentMembership?.role === "moderator";
+
+const renderMemberControls = async () => {
+  let panel = document.getElementById("community-staff-controls");
+  panel?.remove();
+  if (currentMembership?.role !== "owner") return;
+
+  panel = document.createElement("section");
+  panel.id = "community-staff-controls";
+  panel.className = "connections-panel";
+  const heading = document.createElement("h2");
+  heading.textContent = "Community staff";
+  panel.append(heading);
+
+  for (const member of communityMembers) {
+    const row = document.createElement("div");
+    row.className = "connection-card";
+    const label = document.createElement("span");
+    const username = await profileLabel(member.uid || member.id);
+    const roleLabel = member.role === "owner" ? "Owner" : member.role === "moderator" ? "Moderator" : "Member";
+    label.textContent = `@${username} · ${roleLabel}`;
+    row.append(label);
+
+    if (member.role === "owner") {
+      const protectedLabel = document.createElement("span");
+      protectedLabel.textContent = "Owner role cannot be removed here.";
+      row.append(protectedLabel);
+    } else {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.textContent = member.role === "moderator" ? "Remove moderator" : "Make moderator";
+      toggle.addEventListener("click", async () => {
+        toggle.disabled = true;
+        try {
+          await setCommunityModerator(db, communityId, currentUser.uid, member.uid || member.id, member.role !== "moderator");
+          communityMembers = await listCommunityMembers(db, communityId);
+          currentMembership = communityMembers.find((entry) => entry.uid === currentUser.uid || entry.id === currentUser.uid) || null;
+          await renderMemberControls();
+          await renderPosts();
+        } catch (error) {
+          setStatus(error?.message || "Could not update moderator role.");
+          toggle.disabled = false;
+        }
+      });
+      row.append(toggle);
+    }
+    panel.append(row);
+  }
+
+  composer?.parentElement?.after(panel);
 };
 
 const loadComments = async (postId, container) => {
@@ -141,7 +196,9 @@ const renderPosts = async () => {
 
     const author = document.createElement("p");
     const authorLabel = await profileLabel(post.authorId);
-    author.textContent = `@${authorLabel}${post.pinnedAt ? " · Pinned" : ""}`;
+    const authorMembership = communityMembers.find((member) => member.uid === post.authorId || member.id === post.authorId);
+    const staffBadge = authorMembership?.role === "owner" ? " · Owner" : authorMembership?.role === "moderator" ? " · Moderator" : "";
+    author.textContent = `@${authorLabel}${staffBadge}${post.pinnedAt ? " · Pinned" : ""}`;
 
     const body = document.createElement("p");
     body.textContent = post.content || "";
@@ -166,9 +223,28 @@ const renderPosts = async () => {
       try { await reportPost(post); } catch (error) { setStatus(error?.message || "Could not submit report."); }
     });
 
+    actions.append(like, report);
+
+    if (canModerate()) {
+      const pin = document.createElement("button");
+      pin.type = "button";
+      pin.textContent = post.pinnedAt ? "Unpin" : "Pin";
+      pin.addEventListener("click", async () => {
+        pin.disabled = true;
+        try {
+          await setCommunityPostPinned(db, communityId, post.id, currentUser.uid, !post.pinnedAt);
+          await renderPosts();
+        } catch (error) {
+          setStatus(error?.message || "Could not update pin.");
+          pin.disabled = false;
+        }
+      });
+      actions.append(pin);
+    }
+
     const reactionSummary = document.createElement("span");
     await loadReactions(post.id, reactionSummary);
-    actions.append(like, report, reactionSummary);
+    actions.append(reactionSummary);
 
     const comments = document.createElement("div");
     comments.className = "post-comments";
@@ -214,11 +290,12 @@ const loadCommunity = async () => {
     rulesList.append(item);
   }
 
-  const members = await listCommunityMembers(db, communityId);
-  currentMembership = members.find((member) => member.uid === currentUser.uid || member.id === currentUser.uid) || null;
+  communityMembers = await listCommunityMembers(db, communityId);
+  currentMembership = communityMembers.find((member) => member.uid === currentUser.uid || member.id === currentUser.uid) || null;
   composer.hidden = !currentMembership;
   if (!currentMembership) setStatus("Join this Community from Discover before posting.");
 
+  await renderMemberControls();
   await renderPosts();
 };
 
