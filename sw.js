@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v121";
+const CACHE_NAME = "anonchat-v122";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -10,6 +10,7 @@ const APP_SHELL = [
   "./forgot-password.html",
   "./connections.html",
   "./community.html",
+  "./communities.html",
   "./premium.html",
   "./customize.html",
   "./premium-rooms.html",
@@ -82,6 +83,9 @@ const APP_SHELL = [
   "./connections.js",
   "./connections-target.mjs",
   "./community.js",
+  "./communities.js",
+  "./community-interest-firestore.mjs",
+  "./community-interest-policy.mjs",
   "./message-request-policy.mjs",
   "./delete-account.js",
   "./admin.js",
@@ -154,7 +158,6 @@ self.addEventListener("fetch", (event) => {
     return cached || refresh;
   }));
 });
-
 
 const PUSH_PAYLOADS = Object.freeze({
   reaction: Object.freeze({ title: "New reaction", action: "reacted to your post.", url: "/timeline.html" }),
