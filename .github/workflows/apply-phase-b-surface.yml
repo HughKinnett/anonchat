@@ -1,0 +1,36 @@
+name: Apply Phase B surface integration
+
+on:
+  push:
+    branches:
+      - phase-b-content-discovery
+    paths:
+      - scripts/apply-phase-b-surface.mjs
+      - .github/workflows/apply-phase-b-surface.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-b-content-discovery
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/apply-phase-b-surface.mjs
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No patch changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timeline.html timeline.js
+          git commit -m "feat: integrate Phase B timeline surfaces"
+          git push origin HEAD:phase-b-content-discovery
