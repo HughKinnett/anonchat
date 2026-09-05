@@ -128,6 +128,57 @@ if (!rules.includes("match /communities/{communityId}")) {
   rules = rules.replace(communityMatchAnchor, () => communityBlocks + communityMatchAnchor);
 }
 
+const communityBadgeBlocks = `    match /communities/{communityId}/badges/{badgeId} {
+      allow read: if signedIn();
+      allow create: if activeUserAfter()
+        && isInterestCommunityModerator(communityId)
+        && request.resource.data.keys().hasOnly(['name', 'description', 'active', 'createdAt', 'createdBy', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 160
+        && request.resource.data.active is bool
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
+      allow update: if activeUserAfter()
+        && isInterestCommunityModerator(communityId)
+        && request.resource.data.keys().hasOnly(['name', 'description', 'active', 'createdAt', 'createdBy', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 160
+        && request.resource.data.active is bool
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && isInterestCommunityModerator(communityId);
+    }
+
+    match /communities/{communityId}/members/{userId}/badges/{badgeId} {
+      allow read: if signedIn();
+      allow create: if activeUserAfter()
+        && isInterestCommunityModerator(communityId)
+        && request.resource.data.keys().hasOnly(['badgeId', 'assignedAt', 'assignedBy'])
+        && request.resource.data.badgeId == badgeId
+        && request.resource.data.assignedAt == request.time
+        && request.resource.data.assignedBy == request.auth.uid
+        && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(userId))
+        && exists(/databases/$(database)/documents/communities/$(communityId)/badges/$(badgeId))
+        && get(/databases/$(database)/documents/communities/$(communityId)/badges/$(badgeId)).data.active == true;
+      allow update: if false;
+      allow delete: if signedIn() && isInterestCommunityModerator(communityId);
+    }
+
+`;
+
+if (!rules.includes("match /communities/{communityId}/badges/{badgeId}")) {
+  if (!rules.includes(communityMatchAnchor)) throw new Error("Could not locate Community badge rules insertion point");
+  rules = rules.replace(communityMatchAnchor, () => communityBadgeBlocks + communityMatchAnchor);
+}
+
 const communityPostPattern = /    match \/communityPosts\/\{postId\} \{[\s\S]*?\n    \}\n\n    match \/communityVotes\//;
 const currentCommunityPostBlock = rules.match(communityPostPattern)?.[0] || "";
 if (!currentCommunityPostBlock) throw new Error("Could not locate canonical communityPosts rules block");
