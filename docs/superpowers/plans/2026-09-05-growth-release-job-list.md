@@ -8,8 +8,9 @@
 - Do not add video upload on web or Android.
 - Keep core safety controls free: reporting, blocking, essential privacy, and normal posting/replying must never require Premium.
 - Do not make Premium pay-to-win or automatically rank Premium users above free users in feeds.
-- Build, test, merge, and deploy each stable feature set to the web app first.
-- Only after the corresponding web release is deployed and verified, implement the same completed feature set in the Android app.
+- Complete and test the entire approved web feature set before deployment.
+- Deploy the completed web feature set in one web release, not in partial feature deployments.
+- Only after that complete web deployment is verified, implement the full matching feature set in the Android app.
 - Android must preserve full parity with the deployed web feature set, including admin-only surfaces on authorized admin accounts.
 
 ## Acquisition and discovery
@@ -86,14 +87,12 @@
 
 ## Release order
 
-- [ ] Finish, verify, merge, and deploy the current Profiles + Badges release to the web app first.
-- [ ] After that web deployment is verified, add Profiles + Badges parity to the Android app.
-- [ ] Design and implement Communities as its own testable web subsystem.
-- [ ] Expand Rooms/groups as its own testable web subsystem.
-- [ ] Implement Discovery/feed controls as its own testable web subsystem.
-- [ ] Implement discussion upgrades as their own testable web subsystem.
-- [ ] Implement Premium entitlements only after the corresponding free web feature is stable.
-- [ ] Run full regression, security, Firestore-cost, moderation, notification, sharing, and interaction-consistency tests before every web merge/deploy.
-- [ ] After each web subsystem is deployed and verified, port that same subsystem to Android.
-- [ ] Verify Android parity for Communities, Rooms/groups, Discovery/feed controls, discussion upgrades, Premium entitlements, profile/privacy controls, notifications, moderation, sharing, and admin-only tools.
-- [ ] Package the Android release only after all intended web features have matching Android behavior and regression checks pass.
+- [ ] Finish Profiles + Badges, Communities, Rooms/groups, Discovery/feed controls, discussion upgrades, Premium entitlements, profile/privacy controls, notification improvements, moderation improvements, sharing improvements, and all other approved web features before deploying any of them.
+- [ ] Keep each subsystem independently tested during development while holding deployment until the complete approved web feature set is ready.
+- [ ] Run the full regression, security, Firestore-cost, moderation, notification, sharing, interaction-consistency, profile, admin, Premium, and compatibility test suites across the complete web release candidate.
+- [ ] Merge the complete approved web feature set only after required checks are green.
+- [ ] Deploy the entire completed web feature set in one web deployment and verify the deployed commit matches merged `main`.
+- [ ] After the complete web deployment is verified, implement the full matching feature set in the Android app.
+- [ ] Verify Android parity for Profiles + Badges, Communities, Rooms/groups, Discovery/feed controls, discussion upgrades, Premium entitlements, profile/privacy controls, notifications, moderation, sharing, and admin-only tools.
+- [ ] Run the complete Android regression/parity suite after all approved Android features are present.
+- [ ] Package/release Android only after the full Android feature set matches the deployed web app and all required checks pass.
