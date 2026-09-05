@@ -56,7 +56,8 @@ assert.equal(prefs.mentions, true);
 assert.equal(quietHoursActive({ enabled: true, start: "22:00", end: "07:00" }, new Date("2026-09-05T23:00:00")), true);
 
 // Media and accessibility caps.
-assert.equal(normalizePostMedia(["a", "b", "c", "d", "e"]).length, 4);
+const validMedia = ["a", "b", "c", "d", "e"].map((name) => `https://example.com/${name}.png`);
+assert.equal(normalizePostMedia(validMedia).length, 4);
 assert.equal(normalizeAppearance("dark"), "dark");
 assert.equal(normalizeAppearance("unknown"), "system");
 assert.equal(normalizeTextScale(2), 1.3);
