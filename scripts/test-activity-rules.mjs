@@ -43,7 +43,8 @@ const seed = async () => testEnv.withSecurityRulesDisabled(async (context) => {
     setDoc(doc(firestore, "users", "admin-client-date"), { ...profile("admin-client-date"), username: "i_love_you_h" }),
     setDoc(doc(firestore, "usernames", "i_love_you_h"), { uid: "admin-user", username: "i_love_you_h", createdAt: new Date(0) }),
     setDoc(doc(firestore, "usernames", "cybercapone"), { uid: "banned-admin", username: "CyberCapone", createdAt: new Date(0) }),
-    setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) })
+    setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) }),
+    setDoc(doc(firestore, "siteSettings", "features"), { registrationsEnabled: true })
   ]);
 });
 

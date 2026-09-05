@@ -7,7 +7,7 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/f
 import { addDoc, collection, collectionGroup, doc, documentId, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const $ = id => document.getElementById(id);
-const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], votes: [], jobs: new Map(), moderationCases: [], moderationActions: new Map(), legacyRooms: [], processor: null, moderationProcessor: null, moderationProcessorListenerHealthy: false };
+const state = { users: [], posts: [], communityPosts: [], views: [], comments: [], reactions: [], follows: [], circles: [], members: [], rooms: [], votes: [], jobs: new Map(), moderationCases: [], moderationActions: new Map(), moderationHistory: [], accountModeration: new Map(), legacyRooms: [], processor: null, moderationProcessor: null, moderationProcessorListenerHealthy: false, notificationProcessor: null, openReportCount: 0, features: { registrationsEnabled: false, postingEnabled: true, commentsEnabled: true, privateMessagingEnabled: true, temporaryChatsEnabled: true, uploadsEnabled: true, spotifyEmbedsEnabled: true }, announcement: { text: "", active: false } };
 const unsubs = [];
 let adminUid = "", adminUser = null, userFilter = "all", reportFilter = "open", pageActive = true, listenersStarted = false, heartbeatTimer = null;
 let dialogState = { open: false, targetUid: "", submitting: false }, dialogTarget = null, dialogTrigger = null;
@@ -46,6 +46,74 @@ const evictRoomTranscript = (id) => {
   loadedRoomTranscripts.delete(id);
 };
 
+const DEFAULT_FEATURES = Object.freeze({ registrationsEnabled: false, postingEnabled: true, commentsEnabled: true, privateMessagingEnabled: true, temporaryChatsEnabled: true, uploadsEnabled: true, spotifyEmbedsEnabled: true });
+const FEATURE_INFO = [["registrationsEnabled","New registrations","Allow new people to create AnonChat accounts."],["postingEnabled","Posting","Allow users to create new timeline and community posts."],["commentsEnabled","Comments","Allow users to add new comments."],["privateMessagingEnabled","Private messaging","Allow private message requests and messages."],["temporaryChatsEnabled","Temporary chats","Allow temporary rooms and room messages."],["uploadsEnabled","Photo uploads","Allow users to attach new photos."],["spotifyEmbedsEnabled","Spotify embeds","Allow new Spotify playlist embeds."]];
+const EMERGENCY_FEATURES = new Set(["registrationsEnabled", "postingEnabled", "privateMessagingEnabled"]);
+const normalizeFeatures = value => Object.fromEntries(Object.entries(DEFAULT_FEATURES).map(([key, fallback]) => [key, typeof value?.[key] === "boolean" ? value[key] : fallback]));
+const featureInfo = key => FEATURE_INFO.find(([candidate]) => candidate === key) || [key, key, ""];
+const commandStatusChip = (label, tone) => create("span", label, "status-chip " + tone);
+
+async function saveFeatureSetting(key, enabled) {
+  const [, label] = featureInfo(key);
+  if (!enabled && EMERGENCY_FEATURES.has(key) && !window.confirm("This emergency control can stop registration, posting, or messaging for users. Continue?")) { renderCommandCenter(); return; }
+  try {
+    await setDoc(doc(db, "siteSettings", "features"), { ...state.features, [key]: enabled, updatedAt: serverTimestamp(), updatedBy: adminUid }, { merge: true });
+    setStatus(label + (enabled ? " turned on." : " paused."));
+  } catch { setStatus("Could not change " + label.toLowerCase() + ".", true); renderCommandCenter(); }
+}
+
+function renderFeatureSwitches() {
+  const host = $("feature-switches"); if (!host) return;
+  host.replaceChildren(...FEATURE_INFO.map(([key,label,description]) => {
+    const row=create("label",undefined,"feature-switch-row"), text=create("span"), toggle=create("span",undefined,"feature-toggle"), input=document.createElement("input");
+    text.append(create("strong",label),create("small",description)); input.type="checkbox"; input.checked=state.features[key]!==false; input.setAttribute("aria-label",label+(input.checked?" on":" off")); input.onchange=()=>saveFeatureSetting(key,input.checked); toggle.append(commandStatusChip(input.checked?"On":"Paused",input.checked?"good":"bad"),input); row.append(text,toggle); return row;
+  }));
+}
+
+function renderEmergencyControls() {
+  const host=$("emergency-controls"); if(!host) return;
+  host.replaceChildren(...["registrationsEnabled","postingEnabled","privateMessagingEnabled"].map(key=>{ const [,label,description]=featureInfo(key), enabled=state.features[key]!==false, row=create("div",undefined,"emergency-row"), text=create("span"), button=create("button",enabled?"Pause "+label:"Turn "+label+" back on","admin-action "+(enabled?"danger":"restore")); text.append(create("strong",label),create("small",description)); button.type="button"; button.onclick=()=>saveFeatureSetting(key,!enabled); row.append(text,button); return row; }));
+}
+
+function renderModerationHistory() {
+  const host=$("moderation-history"); if(!host) return;
+  const rows=[...state.moderationHistory].sort((a,b)=>(timestampMillis(b.updatedAt??b.requestedAt)??0)-(timestampMillis(a.updatedAt??a.requestedAt)??0)).slice(0,30).map(item=>{ const row=create("article",undefined,"admin-row"), info=create("div"), raw=String(item.action||"moderation action").replaceAll(/([A-Z])/g," $1").replaceAll("_"," ").trim(), action=raw.charAt(0).toUpperCase()+raw.slice(1); info.append(create("strong",action),create("small","Status: "+(item.status||"unknown")),create("small","Requested by: "+(item.requestedBy||"administrator")),create("small",formatDate(item.updatedAt??item.requestedAt))); row.append(info); return row; });
+  host.replaceChildren(...(rows.length?rows:[empty("No recent moderation actions are available.")]));
+}
+
+function renderCommandCenter() {
+  if(!$("site-health-list")) return;
+  const failedJobs=[...state.jobs.values()].filter(job=>job.data?.status==="failed").length, deletionHealth=processorHealth(state.processor), moderationHealth=state.moderationProcessorListenerHealthy?processorHealth(state.moderationProcessor):{kind:"not-running"}, servicesHealthy=deletionHealth.kind==="working"&&moderationHealth.kind==="working";
+  $("attention-open-reports").textContent=String(state.openReportCount||0); $("attention-failed-jobs").textContent=String(failedJobs); $("attention-service-health").textContent=servicesHealthy?"Working":"Needs attention";
+  const healthItems=[["Admin access",true,"Working"],["New registrations",state.features.registrationsEnabled,state.features.registrationsEnabled?"Available":"Paused"],["Posting",state.features.postingEnabled,state.features.postingEnabled?"Available":"Paused"],["Comments",state.features.commentsEnabled,state.features.commentsEnabled?"Available":"Paused"],["Private messaging",state.features.privateMessagingEnabled,state.features.privateMessagingEnabled?"Available":"Paused"],["Temporary chats",state.features.temporaryChatsEnabled,state.features.temporaryChatsEnabled?"Available":"Paused"],["Photo uploads",state.features.uploadsEnabled,state.features.uploadsEnabled?"Available":"Paused"],["Spotify embeds",state.features.spotifyEmbedsEnabled,state.features.spotifyEmbedsEnabled?"Available":"Paused"],["Moderation service",moderationHealth.kind==="working",moderationHealth.kind==="working"?"Working":"Needs attention"],["Account deletion service",deletionHealth.kind==="working",deletionHealth.kind==="working"?"Working":"Needs attention"]];
+  $("site-health-list").replaceChildren(...healthItems.map(([label,good,value])=>healthRow(label,value,good?"good":"bad")));
+  const notificationHealth=state.notificationProcessor?processorHealth(state.notificationProcessor):null; $("notification-health").textContent=!notificationHealth?"Not checked here — no notification-service heartbeat is available to this dashboard.":notificationHealth.kind==="working"?"Working normally. The notification service has checked in recently.":"Needs attention. The notification service is not reporting a healthy status.";
+  $("firebase-usage-note").textContent="AnonChat is staying on the Firebase Spark plan / free plan. This browser dashboard cannot read exact Firebase billing quotas, so it will not guess. Current loaded snapshot: "+state.users.length+" users, "+(state.posts.length+state.communityPosts.length)+" public posts, "+state.comments.length+" comments, and "+state.reactions.length+" reactions.";
+  renderFeatureSwitches(); renderEmergencyControls(); renderModerationHistory(); const text=$("announcement-text"), active=$("announcement-active"); if(document.activeElement!==text) text.value=state.announcement.text||""; active.checked=state.announcement.active===true;
+}
+
+async function saveAnnouncement() { const text=$("announcement-text").value.trim().slice(0,500), active=$("announcement-active").checked; try { await setDoc(doc(db,"siteSettings","announcement"),{text,active:Boolean(active&&text),updatedAt:serverTimestamp(),updatedBy:adminUid},{merge:true}); setStatus(text?"Site announcement saved.":"Announcement cleared."); } catch { setStatus("Could not save the site announcement.",true); } }
+async function clearAnnouncement() { $("announcement-text").value=""; $("announcement-active").checked=false; try { await setDoc(doc(db,"siteSettings","announcement"),{text:"",active:false,updatedAt:serverTimestamp(),updatedBy:adminUid},{merge:true}); setStatus("Site announcement cleared."); } catch { setStatus("Could not clear the site announcement.",true); } }
+function moderationForUser(uid) { return state.accountModeration.get(uid) || {}; }
+function userIsSuspended(uid) { const ms = timestampMillis(moderationForUser(uid).suspendedUntil); return ms !== null && ms > Date.now(); }
+function userPostCount(uid) { return state.posts.filter(item => item.authorId === uid).length + state.communityPosts.filter(item => item.authorId === uid).length; }
+function userFollowerCount(uid) { return state.follows.filter(item => item.followingId === uid).length; }
+function userFollowingCount(uid) { return state.follows.filter(item => item.followerId === uid).length; }
+function userReportCount(uid) { return state.moderationCases.filter(item => item.reportedUserId === uid).reduce((sum, item) => sum + Number(item.reportCount || 0), 0); }
+
+async function warnUser(user) {
+  if (!user || isProtectedAdministrator(user.username)) { setStatus("Protected administrator accounts cannot receive admin warnings.", true); return; }
+  const reason = window.prompt("Warning reason (plain language for the moderation history):", "Community guidelines warning"); if (reason === null) return;
+  const current = moderationForUser(user.id);
+  try { await setDoc(doc(db,"accountModeration",user.id), { uid:user.id, warningCount:Number(current.warningCount||0)+1, lastWarning:String(reason||"Community guidelines warning").trim().slice(0,300), lastWarningAt:serverTimestamp(), updatedAt:serverTimestamp(), updatedBy:adminUid }, {merge:true}); setStatus("Warning recorded for @"+(user.username||"user")+"."); } catch { setStatus("Could not record that warning.",true); }
+}
+async function toggleUserSuspension(user) {
+  if (!user || isProtectedAdministrator(user.username)) { setStatus("Protected administrator accounts cannot be suspended.", true); return; }
+  const suspended = userIsSuspended(user.id);
+  if (!suspended && !window.confirm("Suspend this account for 24 hours? They will be blocked from normal posting, commenting, messaging, and room actions until the suspension expires.")) return;
+  const until = suspended ? new Date(0) : new Date(Date.now()+24*60*60*1000);
+  try { const batch=writeBatch(db); batch.set(doc(db,"accountModeration",user.id), { uid:user.id, suspendedUntil:until, suspensionReason:suspended?"":"24-hour administrator suspension", updatedAt:serverTimestamp(), updatedBy:adminUid }, {merge:true}); batch.update(doc(db,"users",user.id), { suspendedUntil:until }); await batch.commit(); setStatus(suspended?"Suspension ended.":"Account suspended for 24 hours."); } catch { setStatus("Could not change that suspension.",true); }
+}
 function activityByUser() {
   const points = new Map(), add = (uid, amount = 1) => { if (uid) points.set(uid, (points.get(uid) || 0) + amount); };
   state.posts.forEach(entry => add(entry.authorId, 3)); state.communityPosts.forEach(entry => add(entry.authorId, 3));
@@ -75,12 +143,14 @@ function renderMetrics() {
   $("metric-ban-rate").textContent = `${pct(banned, state.users.length)}% of users`;
   $("metric-window-views").textContent = `${state.views.filter(entry => new Date(`${entry.id}T23:59:59`).getTime() >= cutoff).reduce((sum, entry) => sum + (entry.views || 0), 0)} in window`;
   $("last-updated").textContent = `Live data updated ${new Date().toLocaleTimeString()}`;
+  renderCommandCenter();
 }
 
 function renderUserRow(user, scope) {
   const status = statusForUser(user, userOptions()), locked = state.jobs.has(user.id) || ["adminDeletionRequestedAt", "adminDeletionRequestedBy", "adminDeletionStatus"].some(key => key in user);
   const protectedAdmin = isProtectedAdministrator(user.username), row = create("article", undefined, "admin-row"), info = create("div");
-  info.append(create("strong", `@${user.username || "Unknown user"}`), create("small", status.kind === "deletion-pending" ? jobMessage(user) : status.label, `user-status status-${status.kind}`), create("small", `Last active: ${formatDate(user.lastActiveAt)}`));
+  const moderation = moderationForUser(user.id), suspended = userIsSuspended(user.id);
+  info.append(create("strong", `@${user.username || "Unknown user"}`), create("small", suspended ? "Suspended until " + formatDate(moderation.suspendedUntil) : (status.kind === "deletion-pending" ? jobMessage(user) : status.label), `user-status status-${suspended ? "banned" : status.kind}`), create("small", `User ID: ${user.id}`), create("small", `Account created: ${formatDate(user.createdAt)}`), create("small", `Last active: ${formatDate(user.lastActiveAt)}`), create("small", `Posts: ${userPostCount(user.id)} · Followers: ${userFollowerCount(user.id)} · Following: ${userFollowingCount(user.id)}`), create("small", `Reports: ${userReportCount(user.id)} · Warnings: ${Number(moderation.warningCount || 0)}`));
   const actions = create("div", undefined, "admin-actions"), profile = create("a", "View Profile", "admin-action nav-button");
   profile.href = `profile.html?uid=${encodeURIComponent(user.id)}`; profile.dataset.focusKey = focusKey(scope, "profile", user.id);
   const ban = create("button", protectedAdmin ? "Protected administrator" : user.banned ? "Unban" : "Ban", `admin-action ${user.banned ? "restore" : "danger"}`);
@@ -91,7 +161,9 @@ function renderUserRow(user, scope) {
   remove.type = "button"; remove.dataset.focusKey = focusKey(scope, "delete", user.id);
   remove.disabled = protectedAdmin || !canQueueAdminDeletion({ targetUid: user.id, username: user.username, existingJob: locked, existingQueueState: locked });
   remove.onclick = () => openDeletionDialog(user, remove);
-  actions.append(profile, ban, remove); row.append(info, actions); return row;
+  const warn = create("button", "Warn user", "admin-action"); warn.type="button"; warn.disabled=protectedAdmin||locked; warn.onclick=()=>warnUser(user);
+  const suspend = create("button", userIsSuspended(user.id) ? "End suspension" : "Suspend 24 hours", `admin-action ${userIsSuspended(user.id) ? "restore" : "danger"}`); suspend.type="button"; suspend.disabled=protectedAdmin||locked; suspend.onclick=()=>toggleUserSuspension(user);
+  actions.append(profile, warn, suspend, ban, remove); row.append(info, actions); return row;
 }
 
 function restoreUserFocus(activeFocusKey) {
@@ -103,8 +175,9 @@ function restoreUserFocus(activeFocusKey) {
 
 function renderUsers() {
   const activeFocusKey = currentUserFocusKey();
-  const options = { ...userOptions(), filter: userFilter, search: $("admin-user-search").value.trim() };
-  const users = filterUsers(state.users, options).sort((left, right) => String(left.username || "").localeCompare(String(right.username || "")));
+  const needle = $("admin-user-search").value.trim().toLowerCase();
+  const options = { ...userOptions(), filter: userFilter, search: "" };
+  const users = filterUsers(state.users, options).filter(user => !needle || String(user.username || "").toLowerCase().includes(needle) || String(user.id || "").toLowerCase().includes(needle)).sort((left, right) => String(left.username || "").localeCompare(String(right.username || "")));
   $("admin-users").replaceChildren(...(users.length ? users.map(user => renderUserRow(user, "manage")) : [empty("No accounts match this view.")]));
   const inactive = sortInactiveUsers(state.users, userOptions());
   $("inactive-users").replaceChildren(...(inactive.length ? inactive.map(user => renderUserRow(user, "inactive")) : [empty("No eligible inactive accounts right now.")]));
@@ -341,7 +414,9 @@ function renderReportRow(item) {
   const removeProfile = create("button", "Delete user's profile", "admin-action danger");
   removeProfile.type = "button"; removeProfile.dataset.focusKey = focusKey("report", "delete-profile", item.id); removeProfile.dataset.reportId = item.id; removeProfile.disabled = actionState.deleteProfile.disabled || !accountAvailable;
   removeProfile.onclick = () => deleteReportedProfile(item, removeProfile);
-  actions.append(restore, removeMaterial, ban, removeProfile); row.append(info, actions); return row;
+  const warnUserButton=create("button","Warn user","admin-action"); warnUserButton.type="button"; warnUserButton.disabled=!accountAvailable||protectedUser; warnUserButton.onclick=()=>warnUser(user);
+  const suspendUserButton=create("button",user&&userIsSuspended(user.id)?"End suspension":"Suspend 24 hours","admin-action danger"); suspendUserButton.type="button"; suspendUserButton.disabled=!accountAvailable||protectedUser; suspendUserButton.onclick=()=>toggleUserSuspension(user);
+  actions.append(restore, removeMaterial, warnUserButton, suspendUserButton, ban, removeProfile); row.append(info, actions); return row;
 }
 
 async function queueLegacyRoomAction(item, action, control) {
@@ -389,7 +464,7 @@ function startReportQueue() {
     for (const id of loadedModerationEvidence.keys()) if (!visibleIds.has(id)) evictModerationEvidence(id);
     for (const id of loadedRoomTranscripts.keys()) if (!visibleIds.has(id)) evictRoomTranscript(id);
     reportPageLast = snapshot.docs.at(-1) ?? null;
-    syncReportActionListeners(); renderReports();
+    syncReportActionListeners(); renderReports(); renderCommandCenter();
     $("admin-reports-load-more").hidden = snapshot.size < reportPageSize;
     $("admin-reports-previous").hidden = reportPageCursors.length === 0;
   }, () => setStatus("Could not load the reported-material queue.", true));
@@ -502,7 +577,7 @@ function renderProcessorHealth() {
   $("moderation-processor-health").className = `status-${moderationHealth.kind}`;
 }
 
-function renderAll() { renderMetrics(); renderUsers(); renderReports(); renderContent(); renderAnalytics(); }
+function renderAll() { renderMetrics(); renderUsers(); renderReports(); renderContent(); renderAnalytics(); renderCommandCenter(); }
 function updateDialogConfirmation() { $("delete-account-confirm").disabled = !canConfirmDeletion({ typedUsername: $("delete-account-confirmation").value, targetUsername: dialogTarget?.username, blocked: !dialogState.open || dialogState.submitting || state.jobs.has(dialogTarget?.id) }); }
 function openDeletionDialog(user, trigger) {
   if (state.jobs.has(user.id)) { setStatus("That account is already locked for permanent deletion.", true); return; }
@@ -559,17 +634,23 @@ function startLiveData() {
   observe(query(collection(db, "rooms"), limit(100)), "rooms", renderAnalytics); observe(query(collection(db, "communityVotes"), limit(100)), "votes", () => { renderMetrics(); renderAnalytics(); });
   startReportQueue();
   startLegacyRoomQueue();
+  unsubs.push(onSnapshot(query(collection(db, "moderationCases"), where("status", "in", ["open", "deleteQueued"]), limit(100)), snapshot => { state.openReportCount = snapshot.size; renderCommandCenter(); }, () => { state.openReportCount = 0; renderCommandCenter(); }));
+  unsubs.push(onSnapshot(query(collection(db, "moderationActions"), limit(50)), snapshot => { state.moderationHistory = records(snapshot); renderModerationHistory(); }, () => { state.moderationHistory = []; renderModerationHistory(); }));
+  unsubs.push(onSnapshot(doc(db, "siteSettings", "features"), snapshot => { state.features = normalizeFeatures(snapshot.exists() ? snapshot.data() : {}); renderCommandCenter(); }, () => { state.features = normalizeFeatures({}); setStatus("Could not load feature switches.", true); renderCommandCenter(); }));
+  unsubs.push(onSnapshot(doc(db, "siteSettings", "announcement"), snapshot => { state.announcement = snapshot.exists() ? { text: String(snapshot.data().text || "").slice(0, 500), active: snapshot.data().active === true } : { text: "", active: false }; renderCommandCenter(); }, () => { state.announcement = { text: "", active: false }; setStatus("Could not load the site announcement.", true); renderCommandCenter(); }));
+  unsubs.push(onSnapshot(doc(db, "system", "notificationProcessor"), snapshot => { state.notificationProcessor = snapshot.exists() ? snapshot.data() : null; renderCommandCenter(); }, () => { state.notificationProcessor = null; renderCommandCenter(); }));
+  observe(query(collection(db, "accountModeration"), limit(100)), "accountModeration", () => { renderUsers(); renderReports(); }, snapshot => new Map(snapshot.docs.map(entry => [entry.id, entry.data()])));
   unsubs.push(onSnapshot(query(collection(db, "adminDeletionJobs"), limit(100)), handleJobSnapshot, () => setStatus("Could not load live deletion status.", true)));
   unsubs.push(onSnapshot(doc(db, "system", "deletionProcessor"), snapshot => { state.processor = snapshot.exists() ? snapshot.data() : null; renderProcessorHealth(); }, () => { state.processor = null; renderProcessorHealth(); }));
   unsubs.push(onSnapshot(doc(db, "system", "moderationProcessor"), { includeMetadataChanges: true }, snapshot => {
     state.moderationProcessorListenerHealthy = snapshot.metadata.fromCache !== true;
     state.moderationProcessor = snapshot.exists() ? snapshot.data() : null;
-    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms();
+    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); renderCommandCenter();
   }, () => {
     state.moderationProcessorListenerHealthy = false; state.moderationProcessor = null;
-    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms();
+    renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); renderCommandCenter();
   }));
-  heartbeatTimer = window.setInterval(() => { renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); }, 60 * 1000);
+  heartbeatTimer = window.setInterval(() => { renderProcessorHealth(); renderReports(); renderContent(); renderLegacyRooms(); renderCommandCenter(); }, 60 * 1000);
 }
 function stopLiveData() { while (unsubs.length) unsubs.pop()(); reportCasesUnsub?.(); reportCasesUnsub = null; legacyRoomsUnsub?.(); legacyRoomsUnsub = null; for (const unsubscribe of reportActionUnsubs.values()) unsubscribe(); reportActionUnsubs.clear(); for (const id of loadedModerationEvidence.keys()) evictModerationEvidence(id); for (const id of loadedRoomTranscripts.keys()) evictRoomTranscript(id); if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer); heartbeatTimer = null; state.moderationProcessorListenerHealthy = false; listenersStarted = false; }
 
@@ -584,6 +665,7 @@ $("refresh-admin").onclick = () => { renderAll(); setStatus("Dashboard recalcula
     redirect: () => location.replace("index.html")
   });
 };
+$("save-announcement").onclick = saveAnnouncement; $("clear-announcement").onclick = clearAnnouncement;
 $("delete-account-confirmation").oninput = updateDialogConfirmation; $("delete-account-confirm").onclick = queueDeletion;
 $("delete-account-dialog").addEventListener("close", () => { const fallback = dialogTrigger?.focusKey?.startsWith("report-") ? $("admin-report-status") : $("admin-user-search"), trigger = dialogTrigger?.node?.isConnected ? dialogTrigger.node : controlByFocusKey(dialogTrigger?.focusKey); (trigger || fallback).focus(); dialogTrigger = null; });
 window.addEventListener("pagehide", () => { pageActive = false; stopLiveData(); }); window.addEventListener("pageshow", () => { pageActive = true; startLiveData(); });

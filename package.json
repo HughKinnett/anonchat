@@ -34,7 +34,7 @@
     "test:admin-deletion-indexes": "node scripts/test-admin-deletion-indexes.mjs",
     "admin-deletion:process": "node scripts/admin-deletion-processor.mjs",
     "test:legacy-migration": "node scripts/test-legacy-migration-policy.mjs && firebase emulators:exec --only firestore \"node scripts/test-legacy-migration-firestore-integration.mjs\"",
-    "test:admin-dashboard": "node scripts/test-admin-dashboard-policy.mjs",
+    "test:admin-dashboard": "node scripts/test-admin-dashboard-policy.mjs && node scripts/test-admin-command-center.mjs && node scripts/test-admin-expanded-controls.mjs && node scripts/test-admin-site-control-enforcement.mjs",
     "test:notification-policy": "node scripts/test-notification-policy.mjs",
     "test:notification-processor": "node scripts/test-notification-processor.mjs",
     "test:notification-cli": "node scripts/test-notification-cli.mjs",

@@ -5,7 +5,17 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/f
 import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const form = document.getElementById("playlist-form"), input = document.getElementById("playlist-url"), remove = document.getElementById("playlist-remove"), status = document.getElementById("playlist-status"), player = document.getElementById("playlist-player");
-let currentUser, settings;
+let currentUser, settings, spotifyEmbedsEnabled = true;
+const refreshSpotifyAvailability = async () => {
+  try {
+    const snapshot = await getDoc(doc(db, "siteSettings", "features"));
+    spotifyEmbedsEnabled = !snapshot.exists() || snapshot.data().spotifyEmbedsEnabled !== false;
+  } catch { spotifyEmbedsEnabled = true; }
+  form.querySelector("button[type=submit]").disabled = !spotifyEmbedsEnabled;
+  input.disabled = !spotifyEmbedsEnabled;
+  if (!spotifyEmbedsEnabled) status.textContent = "Spotify playlist embeds are temporarily paused by AnonChat administration.";
+  return spotifyEmbedsEnabled;
+};
 const playlistId = (value) => {
   try { const url = new URL(String(value || "").trim()); if (!/(^|\.)spotify\.com$/i.test(url.hostname)) return ""; return url.pathname.match(/^\/playlist\/([A-Za-z0-9]+)(?:\/|$)/)?.[1] || ""; } catch { return ""; }
 };
@@ -22,10 +32,11 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) { await exitAfterAuthLoss(); location.replace("index.html"); return; }
   currentUser = user;
   const [accessSnapshot, settingsSnapshot, profileSnapshot] = await Promise.all([getDoc(doc(db, "premiumAccess", user.uid)), getDoc(doc(db, "premiumSettings", user.uid)), getDoc(doc(db, "users", user.uid))]);
+  await refreshSpotifyAvailability();
   if (!accessSnapshot.exists() || !hasPremiumAccess(accessSnapshot.data())) { location.replace("premium.html"); return; }
   settings = { ...premiumDefaults(user.uid), ...(settingsSnapshot.exists() ? settingsSnapshot.data() : {}) };
   settings.spotifyPlaylistUrl = profileSnapshot.data()?.spotifyPlaylistUrl || settings.spotifyPlaylistUrl || "";
   render(settings.spotifyPlaylistUrl); status.textContent = settings.spotifyPlaylistUrl ? "Your Premium playlist is live on your profile." : "Paste a Spotify playlist link to add it to your profile.";
 });
-form.addEventListener("submit", async (event) => { event.preventDefault(); const id = playlistId(input.value); if (!id) { status.textContent = "Paste a valid Spotify playlist link."; return; } const button = form.querySelector("button[type=submit]"); button.disabled = true; try { await save(`https://open.spotify.com/playlist/${id}`); status.textContent = "Your Premium playlist is live on your profile."; } catch { status.textContent = "Could not save that playlist. Please try again."; } finally { button.disabled = false; } });
+form.addEventListener("submit", async (event) => { event.preventDefault(); if (!(await refreshSpotifyAvailability())) { status.textContent = "Spotify playlist embeds are temporarily paused by AnonChat administration."; return; } const id = playlistId(input.value); if (!id) { status.textContent = "Paste a valid Spotify playlist link."; return; } const button = form.querySelector("button[type=submit]"); button.disabled = true; try { await save(`https://open.spotify.com/playlist/${id}`); status.textContent = "Your Premium playlist is live on your profile."; } catch { status.textContent = "Could not save that playlist. Please try again."; } finally { button.disabled = false; } });
 remove.addEventListener("click", async () => { remove.disabled = true; try { await save(""); status.textContent = "Playlist removed from your profile."; } catch { status.textContent = "Could not remove that playlist."; } finally { remove.disabled = false; } });

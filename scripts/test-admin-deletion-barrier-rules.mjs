@@ -23,6 +23,7 @@ const seed = async ({ targetJob = null, targetProfile = profile("target"), princ
     setDoc(doc(firestore, "usernames", "member"), { uid: "member", username: "member", createdAt: new Date(0) }),
     setDoc(doc(firestore, "usernames", "other"), { uid: "other", username: "other", createdAt: new Date(0) }),
     setDoc(doc(firestore, "system", "accountStats"), { count: 5, limit: 500, updatedAt: new Date(0) }),
+    setDoc(doc(firestore, "siteSettings", "features"), { registrationsEnabled: true }),
     setDoc(doc(firestore, "posts", "target-post"), { type: "original", authorId: "target", username: "target", content: "target post", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(firestore, "posts", "other-post"), { type: "original", authorId: "other", username: "other", content: "other post", imageData: "", category: "Post", options: [], moderationState: "visible", createdAt: new Date(0) }),
     setDoc(doc(firestore, "posts", "other-repost-target"), { type: "repost", authorId: "other", username: "other", sourceCollection: "posts", originalPostId: "target-post", originalAuthorId: "target", originalUsername: "target", content: "target post", imageData: "", moderationState: "visible", createdAt: new Date(0) }),

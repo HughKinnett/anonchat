@@ -18,15 +18,32 @@ service cloud.firestore {
         && !existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(uid));
     }
 
+    function featureEnabled(featureName) {
+      let settingsPath = /databases/$(database)/documents/siteSettings/features;
+      return (featureName == 'registrationsEnabled'
+          && exists(settingsPath)
+          && get(settingsPath).data.get(featureName, false) == true)
+        || (featureName != 'registrationsEnabled'
+          && (!exists(settingsPath)
+            || get(settingsPath).data.get(featureName, true) == true));
+    }
+
+    function accountNotSuspended(profile) {
+      return !profile.keys().hasAny(['suspendedUntil'])
+        || profile.suspendedUntil <= request.time;
+    }
+
     function hasNoDeletionBarrierAfter(uid) {
       return uid is string
         && !existsAfter(/databases/$(database)/documents/adminDeletionJobs/$(uid));
     }
 
     function activeUserAfter() {
+      let profile = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       return signedIn()
         && accountAvailableAfter(request.auth.uid)
-        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true;
+        && profile.get('banned', false) != true
+        && accountNotSuspended(profile);
     }
 
     function contentAvailableAfter(documentPath) {
@@ -438,19 +455,13 @@ service cloud.firestore {
     }
 
     function hasMatchingAdminReservation(profile) {
-      return (
-          profile.username is string
-          && profile.username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*i_love_you_h[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$')
-          && exists(/databases/$(database)/documents/usernames/i_love_you_h)
-          && get(/databases/$(database)/documents/usernames/i_love_you_h).data.uid == request.auth.uid
-          && get(/databases/$(database)/documents/usernames/i_love_you_h).data.username == profile.username
-        ) || (
-          profile.username is string
-          && profile.username.lower().matches('^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*cybercapone[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$')
-          && exists(/databases/$(database)/documents/usernames/cybercapone)
-          && get(/databases/$(database)/documents/usernames/cybercapone).data.uid == request.auth.uid
-          && get(/databases/$(database)/documents/usernames/cybercapone).data.username == profile.username
-        );
+      let normalizedUsername = profile.username.lower();
+      let reservationPath = /databases/$(database)/documents/usernames/$(normalizedUsername);
+      return profile.username is string
+        && normalizedUsername in ['i_love_you_h', 'cybercapone']
+        && exists(reservationPath)
+        && get(reservationPath).data.uid == request.auth.uid
+        && get(reservationPath).data.username == profile.username;
     }
 
     function hasNoDeletionQueueState(profile) {
@@ -496,20 +507,29 @@ service cloud.firestore {
         );
     }
 
-    function validStandaloneAdminBan(userId) {
-      return isAdmin()
+    function validStandaloneAdminAccountControl(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return request.auth.uid != userId
+        && isAdmin()
         && !isProtectedAdministrator(resource.data.username)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['banned'])
-        && request.resource.data.banned is bool
-        && (request.resource.data.banned == true
-          || (hasNoDeletionQueueState(resource.data)
-            && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId))));
+        && (
+          (changed.hasOnly(['banned'])
+            && request.resource.data.banned is bool
+            && (request.resource.data.banned == true
+              || (hasNoDeletionQueueState(resource.data)
+                && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId)))))
+          ||
+          (changed.hasOnly(['suspendedUntil'])
+            && request.resource.data.suspendedUntil is timestamp)
+        );
     }
 
     function activeUser() {
+      let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       return signedIn()
         && accountAvailable(request.auth.uid)
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false) != true;
+        && profile.get('banned', false) != true
+        && accountNotSuspended(profile);
     }
 
     function isPremiumUid(uid) {
@@ -655,6 +675,18 @@ service cloud.firestore {
         && request.resource.data.get('imageData', '') == original.data.get('imageData', '')
         && request.resource.data.moderationState == 'visible'
         && request.resource.data.createdAt == request.time;
+    }
+
+    match /siteSettings/{settingId} {
+      allow read: if settingId in ['features', 'announcement'] || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /accountModeration/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow write: if isAdmin()
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && !isProtectedAdministrator(get(/databases/$(database)/documents/users/$(uid)).data.username);
     }
 
     match /admins/{adminId} {
@@ -935,6 +967,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if signedIn();
       allow create: if signedIn()
+        && featureEnabled('registrationsEnabled')
         && request.auth.uid == userId
         && accountAvailableAfter(userId)
         && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'lastActiveAt'])
@@ -954,7 +987,7 @@ service cloud.firestore {
             == get(/databases/$(database)/documents/system/accountStats).data.count + 1)
           || (!exists(/databases/$(database)/documents/system/accountStats)
             && getAfter(/databases/$(database)/documents/system/accountStats).data.count == 6));
-      allow update: if validStandaloneAdminBan(userId)
+      allow update: if validStandaloneAdminAccountControl(userId)
         || validDeletionQueueProfile(userId)
         || (activeUserAfter()
           && request.auth.uid == userId
@@ -967,6 +1000,7 @@ service cloud.firestore {
             ||
             (request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['profileImage', 'coverImage'])
+              && featureEnabled('uploadsEnabled')
               && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['profileImage'])
                 || request.resource.data.get('profileImage', '').size() <= 160000)
               && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['coverImage'])
@@ -991,6 +1025,7 @@ service cloud.firestore {
                 == request.auth.uid)
             ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['spotifyTrackUrl'])
+              && featureEnabled('spotifyEmbedsEnabled')
               && request.resource.data.get('spotifyTrackUrl', '') is string
               && request.resource.data.get('spotifyTrackUrl', '').size() <= 200
               && (request.resource.data.get('spotifyTrackUrl', '') == ''
@@ -998,6 +1033,7 @@ service cloud.firestore {
                   .matches('https://open[.]spotify[.]com/track/[A-Za-z0-9]{22}')))
             ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['spotifyPlaylistUrl'])
+              && featureEnabled('spotifyEmbedsEnabled')
               && isPremiumUidAfter(userId)
               && request.resource.data.get('spotifyPlaylistUrl', '') is string
               && request.resource.data.get('spotifyPlaylistUrl', '').size() <= 220
@@ -1207,6 +1243,7 @@ service cloud.firestore {
     match /{documentPath=**}/comments/{commentId} {
       allow read: if signedIn() && visibleContentOrAdmin(documentPath);
       allow create: if activeUserAfter()
+        && featureEnabled('commentsEnabled')
         && contentAvailableAfter(documentPath)
         && request.resource.data.keys().hasOnly(['uid', 'username', 'text', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
@@ -1344,6 +1381,7 @@ service cloud.firestore {
     match /communityPosts/{postId} {
       allow read: if signedIn() && visibleOrAdmin();
       allow create: if activeUserAfter()
+        && featureEnabled('postingEnabled')
         && request.resource.data.keys().hasOnly(['authorId', 'username', 'content', 'category', 'circleId', 'options', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
@@ -1469,7 +1507,7 @@ service cloud.firestore {
 
     match /rooms/{roomId} {
       allow read: if signedIn() && visibleOrAdmin();
-      allow create: if activeUserAfter()
+      allow create: if activeUserAfter() && featureEnabled('temporaryChatsEnabled')
         && request.resource.data.keys().hasOnly(['name', 'topic', 'ownerId', 'createdAt', 'expiresAt', 'moderationState', 'encrypted', 'cipherVersion'])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
@@ -1523,6 +1561,7 @@ service cloud.firestore {
         && resource.data.get('moderationState', 'visible') != 'hidden'
         && linkedRoomAvailable(resource.data.roomId));
       allow create: if activeUserAfter()
+        && featureEnabled('temporaryChatsEnabled')
         && request.resource.data.keys().hasOnly(['roomId', 'senderId', 'tempName', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.senderId == request.auth.uid
         && roomAvailableAfter(request.resource.data.roomId)
@@ -1559,6 +1598,7 @@ service cloud.firestore {
       allow read: if signedIn()
         && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
       allow create: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
         && accountAvailableAfter(request.resource.data.toId)
         && request.resource.data.keys().hasOnly(['fromId', 'toId', 'status', 'createdAt', 'respondedAt'])
         && request.resource.data.fromId == request.auth.uid
@@ -1574,6 +1614,7 @@ service cloud.firestore {
         && (request.resource.data.status == 'accepted'
           || !request.resource.data.keys().hasAny(['respondedAt']));
       allow update: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
         && accountAvailableAfter(request.resource.data.fromId)
         && accountAvailableAfter(request.resource.data.toId)
         && !pairIsBlocked(request.resource.data.fromId, request.resource.data.toId)
@@ -1608,6 +1649,7 @@ service cloud.firestore {
       allow read: if activeUser()
         && acceptedConversation(requestId);
       allow create: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
         && request.resource.data.keys().hasOnly([
           'participants', 'senderId', 'text', 'imageData', 'encrypted', 'cipherVersion',
           'bodyCipher', 'imageCipher', 'createdAt', 'expiresAt'
@@ -1709,7 +1751,9 @@ service cloud.firestore {
 
     match /posts/{postId} {
       allow read: if signedIn() && visibleOrAdmin();
-      allow create: if activeUserAfter() && (validOriginalPost() || validRepost(postId));
+      allow create: if activeUserAfter() && featureEnabled('postingEnabled')
+        && (featureEnabled('uploadsEnabled') || request.resource.data.get('imageData', '') == '')
+        && (validOriginalPost() || validRepost(postId));
       allow update: if validModerationHoldUpdate('post', postId, resource.data.authorId)
         || validAdminMaterialRestore();
       allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);
