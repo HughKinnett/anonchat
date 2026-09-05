@@ -58,6 +58,7 @@ let targetPremiumAccess;
 let targetPremiumSettings;
 let targetPosts = [];
 let targetCommunityPosts = [];
+let phaseAFeatures = { profilePinsEnabled: true };
 let users = [];
 let moderationClient;
 let targetBlocked = false;
@@ -678,11 +679,15 @@ const renderPosts = () => {
       updateBookmark();
     });
     postActions.append(bookmark);
-    if (post.authorId === currentUser.uid) {
+    if (post.authorId === currentUser.uid && phaseAFeatures.profilePinsEnabled !== false) {
       const pinPost = document.createElement("button");
       pinPost.type = "button";
       pinPost.textContent = isPinned ? "Unpin from profile" : "Pin to profile";
       pinPost.addEventListener("click", async () => {
+        if (phaseAFeatures.profilePinsEnabled === false) {
+          setStatus("Profile pinning is temporarily paused.");
+          return;
+        }
         pinPost.disabled = true;
         try {
           const featureSnapshot = await getDoc(doc(db, "siteSettings", "features"));
@@ -1051,6 +1056,11 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   currentUser = user;
+  sessionListeners.push(onSnapshot(doc(db, "siteSettings", "features"), (snapshot) => {
+    const features = snapshot.exists() ? snapshot.data() : {};
+    phaseAFeatures = { profilePinsEnabled: features.profilePinsEnabled !== false };
+    schedulePostsRender();
+  }, () => { phaseAFeatures = { profilePinsEnabled: true }; }));
   blockTracker = createViewerBlockTracker(user.uid);
   viewerBlocks = blockTracker.current();
   const currentProfileRef = doc(db, "users", user.uid);
