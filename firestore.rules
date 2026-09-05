@@ -662,6 +662,15 @@ service cloud.firestore {
                 && getAfter(/databases/$(database)/documents/communityPosts/$(request.resource.data.pinnedPostId)).data.get('moderationState', 'visible') != 'hidden'))));
     }
 
+    function profileBadgesReadable(userId) {
+      let profilePath = /databases/$(database)/documents/users/$(userId);
+      return signedIn()
+        && exists(profilePath)
+        && (request.auth.uid == userId
+          || isAdmin()
+          || get(profilePath).data.get('profilePrivacy', {}).get('showBadges', true) == true);
+    }
+
     function activeUser() {
       let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       return signedIn()
@@ -1291,7 +1300,7 @@ service cloud.firestore {
     }
 
     match /users/{userId}/badges/{badgeId} {
-      allow read: if signedIn();
+      allow read: if profileBadgesReadable(userId);
       allow create, update, delete: if isAdmin();
     }
 
