@@ -1026,10 +1026,11 @@ service cloud.firestore {
     match /e2eeRoomKeyEnvelopes/{envelopeId} {
       allow read: if activeUser() && (resource.data.recipientUid == request.auth.uid
         || (resource.data.kind == 'temporary' && temporaryRoomMember(resource.data.roomId, request.auth.uid))
-        || (resource.data.kind == 'premium' && premiumRoomMember(resource.data.roomId, request.auth.uid)));
+        || (resource.data.kind == 'premium' && premiumRoomMember(resource.data.roomId, request.auth.uid))
+        || (resource.data.kind == 'privateGroup' && isGroupMember(resource.data.roomId, request.auth.uid)));
       allow create: if activeUserAfter()
         && request.resource.data.keys().hasOnly(['kind', 'roomId', 'recipientUid', 'senderUid', 'envelope', 'version', 'createdAt'])
-        && request.resource.data.kind in ['temporary', 'premium']
+        && request.resource.data.kind in ['temporary', 'premium', 'privateGroup']
         && request.resource.data.roomId is string
         && request.resource.data.roomId.size() > 0
         && request.resource.data.recipientUid is string
@@ -1044,10 +1045,17 @@ service cloud.firestore {
             && temporaryRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid))
           || (request.resource.data.kind == 'premium'
             && premiumRoomMemberAfter(request.resource.data.roomId, request.auth.uid)
-            && premiumRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid)))
+            && premiumRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid))
+          || (request.resource.data.kind == 'privateGroup'
+            && isGroupMemberAfter(request.resource.data.roomId, request.auth.uid)
+            && isGroupMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid)
+            && getAfter(/databases/$(database)/documents/groups/$(request.resource.data.roomId)).data.visibility == 'private'
+            && getAfter(/databases/$(database)/documents/groups/$(request.resource.data.roomId)).data.encrypted == true))
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if signedIn() && resource.data.recipientUid == request.auth.uid;
+      allow delete: if signedIn()
+        && (resource.data.recipientUid == request.auth.uid
+          || (resource.data.kind == 'privateGroup' && isGroupModerator(resource.data.roomId)));
     }
 
     match /pushSubscriptions/{subscriptionId} {
@@ -1589,7 +1597,7 @@ service cloud.firestore {
       allow read: if signedIn()
         && (resource.data.visibility == 'public' || isGroupMember(groupId, request.auth.uid) || isAdmin());
       allow create: if activeUserAfter()
-        && request.resource.data.keys().hasOnly(['name', 'slug', 'description', 'topic', 'ownerId', 'visibility', 'premiumRequired', 'status', 'memberCount', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['name', 'slug', 'description', 'topic', 'ownerId', 'visibility', 'premiumRequired', 'encrypted', 'cipherVersion', 'status', 'memberCount', 'createdAt', 'updatedAt'])
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 3
         && request.resource.data.name.size() <= 60
@@ -1602,9 +1610,13 @@ service cloud.firestore {
         && request.resource.data.topic.size() <= 60
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.visibility in ['public', 'private']
-        && ((request.resource.data.visibility == 'public' && request.resource.data.premiumRequired == false)
+        && ((request.resource.data.visibility == 'public'
+            && request.resource.data.premiumRequired == false
+            && !request.resource.data.keys().hasAny(['encrypted', 'cipherVersion']))
           || (request.resource.data.visibility == 'private'
             && request.resource.data.premiumRequired == true
+            && request.resource.data.encrypted == true
+            && request.resource.data.cipherVersion == 1
             && isPremiumUidAfter(request.auth.uid)))
         && request.resource.data.status == 'active'
         && request.resource.data.memberCount == 1
@@ -1615,10 +1627,12 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner'
         && getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.joinedAt == request.time;
       allow update: if (isGroupOwner(groupId)
-          && request.resource.data.keys().hasOnly(['name', 'slug', 'description', 'topic', 'ownerId', 'visibility', 'premiumRequired', 'status', 'memberCount', 'createdAt', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['name', 'slug', 'description', 'topic', 'ownerId', 'visibility', 'premiumRequired', 'encrypted', 'cipherVersion', 'status', 'memberCount', 'createdAt', 'updatedAt'])
           && request.resource.data.ownerId == resource.data.ownerId
           && request.resource.data.visibility == resource.data.visibility
           && request.resource.data.premiumRequired == resource.data.premiumRequired
+          && request.resource.data.get('encrypted', false) == resource.data.get('encrypted', false)
+          && request.resource.data.get('cipherVersion', 0) == resource.data.get('cipherVersion', 0)
           && request.resource.data.memberCount == resource.data.memberCount
           && request.resource.data.createdAt == resource.data.createdAt
           && request.resource.data.status in ['active', 'archived']
@@ -1665,6 +1679,34 @@ service cloud.firestore {
         && ((userId == request.auth.uid)
           || (isGroupOwner(groupId))
           || (isGroupModerator(groupId) && resource.data.role == 'member'));
+    }
+
+    match /groups/{groupId}/privateGroupMessages/{messageId} {
+      allow read: if activeUser() && isGroupMember(groupId, request.auth.uid);
+      allow create: if activeUserAfter()
+        && isGroupMemberAfter(groupId, request.auth.uid)
+        && existsAfter(/databases/$(database)/documents/groups/$(groupId))
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.visibility == 'private'
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.premiumRequired == true
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.encrypted == true
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.status == 'active'
+        && request.resource.data.keys().hasOnly(['senderId', 'encrypted', 'cipherVersion', 'bodyCipher', 'createdAt'])
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && request.resource.data.bodyCipher is map
+        && request.resource.data.bodyCipher.keys().hasOnly(['version', 'algorithm', 'iv', 'ciphertext'])
+        && request.resource.data.bodyCipher.version == 1
+        && request.resource.data.bodyCipher.algorithm == 'A256GCM'
+        && request.resource.data.bodyCipher.iv is string
+        && request.resource.data.bodyCipher.iv.size() <= 32
+        && request.resource.data.bodyCipher.ciphertext is string
+        && request.resource.data.bodyCipher.ciphertext.size() <= 12000
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn()
+        && isGroupMember(groupId, request.auth.uid)
+        && (resource.data.senderId == request.auth.uid || isGroupModerator(groupId));
     }
 
     match /communities/{communityId} {
