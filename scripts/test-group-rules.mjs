@@ -16,6 +16,8 @@ assert.match(rules, /isGroupModerator\(groupId\)/, "moderation stays scoped to G
 assert.match(rules, /groupPublicAfter\(groupId\)/, "public self-join checks the Group visibility/status boundary");
 assert.match(rules, /invitedBy/, "private membership requires invitation metadata");
 assert.match(rules, /resource\.data\.role\s*!=\s*['"]owner['"]/, "owner membership cannot be self-deleted or demoted through member rules");
+assert.match(rules, /function\s+groupPostReadable\(\)/, "Group post reads use a Group-aware visibility guard");
+assert.match(rules, /isGroupMember\(resource\.data\.groupId,\s*request\.auth\.uid\)/, "private Group posts are readable by members rather than every signed-in user");
 assert.match(rules, /request\.resource\.data\.keys\(\)\.hasAny\(\[['"]groupId['"]\]\)/, "canonical communityPosts support Group scoping");
 assert.match(rules, /validGroupPinUpdate\(\)/, "canonical Group pin updates have their own scoped validator");
 
