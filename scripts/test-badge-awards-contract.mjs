@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [awardSource, firestoreSource, processorSource, adapterSource, routingSource] = await Promise.all([
+const [awardSource, firestoreSource, processorSource, adapterSource, routingSource, reconciliationSource, reconciliationWorkflow, packageSource] = await Promise.all([
   readFile(new URL("../badge-awards.mjs", import.meta.url), "utf8").catch(() => ""),
   readFile(new URL("../badge-firestore.mjs", import.meta.url), "utf8"),
   readFile(new URL("../badge-award-processor.mjs", import.meta.url), "utf8").catch(() => ""),
   readFile(new URL("../badge-award-firestore-adapter.mjs", import.meta.url), "utf8").catch(() => ""),
-  readFile(new URL("../badge-activity-routing.mjs", import.meta.url), "utf8").catch(() => "")
+  readFile(new URL("../badge-activity-routing.mjs", import.meta.url), "utf8").catch(() => ""),
+  readFile(new URL("../badge-account-age-reconciliation.mjs", import.meta.url), "utf8").catch(() => ""),
+  readFile(new URL("../.github/workflows/process-badge-account-age.yml", import.meta.url), "utf8").catch(() => ""),
+  readFile(new URL("../package.json", import.meta.url), "utf8")
 ]);
 
 assert.match(awardSource, /evaluateBadgeMilestones/, "automatic badge award service exports evaluateBadgeMilestones");
@@ -44,6 +47,16 @@ assert.match(routingSource, /followers_count/, "follow changes route to follower
 assert.match(routingSource, /premium_active/, "premium reconciliation routes to premium_active");
 assert.match(routingSource, /early_member/, "profile initialization routes to early_member");
 assert.match(routingSource, /account_age_days/, "profile initialization routes to account_age_days");
+
+assert.match(reconciliationSource, /ACCOUNT_AGE_BATCH_SIZE/, "account-age reconciliation declares a bounded batch size");
+assert.match(reconciliationSource, /\.limit\s*\(/, "account-age reconciliation uses a bounded Firestore query");
+assert.match(reconciliationSource, /startAfter/, "account-age reconciliation supports cursor pagination");
+assert.match(reconciliationSource, /account_age_days/, "account-age reconciliation evaluates account age");
+assert.doesNotMatch(reconciliationSource, /posts_created|followers_count|premium_active/, "account-age reconciliation does not evaluate unrelated metrics");
+assert.match(reconciliationSource, /processBadgeAwards/, "account-age reconciliation uses the trusted award processor");
+assert.match(reconciliationWorkflow, /schedule:/, "account-age reconciliation is scheduled");
+assert.match(reconciliationWorkflow, /badge-account-age:process/, "account-age workflow invokes the bounded processor command");
+assert.match(packageSource, /"badge-account-age:process"/, "package exposes account-age reconciliation command");
 
 assert.match(firestoreSource, /awardSource/, "badge Firestore helper preserves assignment source metadata");
 
