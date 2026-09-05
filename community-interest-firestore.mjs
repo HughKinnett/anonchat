@@ -17,9 +17,16 @@ import {
   normalizeCommunity,
   sortCommunityPosts
 } from "./community-interest-policy.mjs";
+import {
+  canManageCommunityBadges,
+  normalizeCommunityBadge
+} from "./community-badge-policy.mjs";
 
 const communityRef = (db, communityId) => doc(db, "communities", communityId);
 const memberRef = (db, communityId, uid) => doc(db, "communities", communityId, "members", uid);
+const communityBadgeRef = (db, communityId, badgeId) => doc(db, "communities", communityId, "badges", badgeId);
+const communityMemberBadgeRef = (db, communityId, uid, badgeId) =>
+  doc(db, "communities", communityId, "members", uid, "badges", badgeId);
 
 const communityFrom = (entry) => ({ id: entry.id, ...entry.data() });
 
@@ -126,4 +133,61 @@ export const setCommunityPostPinned = async (db, communityId, postId, actorUid, 
     pinnedAt: pinned ? serverTimestamp() : deleteField(),
     pinnedBy: pinned ? String(actorUid) : deleteField()
   });
+};
+
+export const listCommunityBadgeTypes = async (db, communityId) => {
+  if (!communityId) return [];
+  const snapshot = await getDocs(collection(db, "communities", communityId, "badges"));
+  return snapshot.docs
+    .map((entry) => ({ id: entry.id, ...entry.data() }))
+    .filter((entry) => entry.active !== false)
+    .sort((left, right) => String(left.name || "").localeCompare(String(right.name || "")));
+};
+
+export const saveCommunityBadgeType = async (db, communityId, actorUid, badgeId, input = {}) => {
+  const id = String(badgeId || "").trim();
+  if (!communityId || !actorUid || !id || id.includes("/")) throw new Error("Community, moderator, and badge id are required.");
+  const actor = await getDoc(memberRef(db, communityId, actorUid));
+  if (!actor.exists() || !canManageCommunityBadges(actor.data())) throw new Error("Only Community staff can manage badges.");
+  const normalized = normalizeCommunityBadge(input);
+  if (!normalized.name) throw new Error("Badge name is required.");
+  const ref = communityBadgeRef(db, communityId, id);
+  const existing = await getDoc(ref);
+  await setDoc(ref, {
+    ...normalized,
+    createdAt: existing.exists() ? existing.data().createdAt : serverTimestamp(),
+    createdBy: existing.exists() ? existing.data().createdBy : actorUid,
+    updatedAt: serverTimestamp()
+  });
+};
+
+export const listCommunityMemberBadges = async (db, communityId, uid) => {
+  if (!communityId || !uid) return [];
+  const snapshot = await getDocs(collection(db, "communities", communityId, "members", uid, "badges"));
+  return snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+};
+
+export const setCommunityMemberBadge = async (db, communityId, actorUid, targetUid, badgeId) => {
+  if (!communityId || !actorUid || !targetUid || !badgeId) throw new Error("Community, moderator, member, and badge are required.");
+  const actor = await getDoc(memberRef(db, communityId, actorUid));
+  if (!actor.exists() || !canManageCommunityBadges(actor.data())) throw new Error("Only Community staff can assign badges.");
+  const target = await getDoc(memberRef(db, communityId, targetUid));
+  if (!target.exists()) throw new Error("That user is not a Community member.");
+  const badge = await getDoc(communityBadgeRef(db, communityId, badgeId));
+  if (!badge.exists() || badge.data().active === false) throw new Error("That Community badge is not available.");
+  const assignment = communityMemberBadgeRef(db, communityId, targetUid, badgeId);
+  const existing = await getDoc(assignment);
+  if (existing.exists()) return;
+  await setDoc(assignment, {
+    badgeId,
+    assignedAt: serverTimestamp(),
+    assignedBy: actorUid
+  });
+};
+
+export const removeCommunityMemberBadge = async (db, communityId, actorUid, targetUid, badgeId) => {
+  if (!communityId || !actorUid || !targetUid || !badgeId) return;
+  const actor = await getDoc(memberRef(db, communityId, actorUid));
+  if (!actor.exists() || !canManageCommunityBadges(actor.data())) throw new Error("Only Community staff can remove badges.");
+  await deleteDoc(communityMemberBadgeRef(db, communityId, targetUid, badgeId));
 };
