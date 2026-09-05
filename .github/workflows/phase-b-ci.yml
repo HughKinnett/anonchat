@@ -27,4 +27,5 @@ jobs:
       - run: node scripts/test-content-writer-policy.mjs
       - run: node scripts/test-phase-b-ui.mjs
       - run: node --check timeline.js
-      # This gate runs against the persisted generated timeline source.
+      - run: node --check profile.js
+      # This gate runs against the persisted generated timeline and profile source.
