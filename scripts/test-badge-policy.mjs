@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  BADGE_AWARD_MODES,
+  BADGE_MILESTONE_METRICS,
   MAX_FEATURED_BADGES,
   PROFILE_BADGE_PREVIEW_LIMIT,
   normalizeBadgeType,
+  normalizeBadgeAssignment,
   sortEarnedBadges,
   previewEarnedBadges,
   canFeatureBadge,
@@ -12,6 +15,9 @@ import {
 
 assert.equal(MAX_FEATURED_BADGES, 3);
 assert.equal(PROFILE_BADGE_PREVIEW_LIMIT, 4);
+assert.deepEqual(BADGE_AWARD_MODES, ["automatic", "manual"]);
+assert.ok(BADGE_MILESTONE_METRICS.includes("posts_created"));
+assert.ok(BADGE_MILESTONE_METRICS.includes("premium_active"));
 assert.equal(validBadgeImageUrl("https://example.com/badge.png"), true);
 assert.equal(validBadgeImageUrl("http://example.com/badge.png"), false);
 assert.equal(validBadgeImageUrl("javascript:alert(1)"), false);
@@ -21,10 +27,39 @@ const badge = normalizeBadgeType({
   description: " Joined during launch. ",
   imageUrl: "https://example.com/early.png",
   category: "early_supporter",
+  awardMode: "automatic",
+  milestoneMetric: "posts_created",
+  milestoneThreshold: 10,
   active: true
 });
 assert.equal(badge.name, "Early Supporter");
 assert.equal(badge.description, "Joined during launch.");
+assert.equal(badge.awardMode, "automatic");
+assert.equal(badge.milestoneMetric, "posts_created");
+assert.equal(badge.milestoneThreshold, 10);
+
+const manualBadge = normalizeBadgeType({
+  name: " Staff ",
+  description: " Team member. ",
+  awardMode: "manual",
+  milestoneMetric: "posts_created",
+  milestoneThreshold: 100
+});
+assert.equal(manualBadge.awardMode, "manual");
+assert.equal(manualBadge.milestoneMetric, null);
+assert.equal(manualBadge.milestoneThreshold, null);
+
+const premiumBadge = normalizeBadgeType({
+  name: " Premium Member ",
+  description: " Premium activated. ",
+  awardMode: "automatic",
+  milestoneMetric: "premium_active",
+  milestoneThreshold: 100
+});
+assert.equal(premiumBadge.milestoneThreshold, null);
+
+const assignment = normalizeBadgeAssignment({ awardSource: "automatic" }, "first-post");
+assert.equal(assignment.awardSource, "automatic");
 
 const earned = [
   { badgeId: "old", featured: false, earnedAtMs: 100 },
