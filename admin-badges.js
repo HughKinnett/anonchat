@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
-import { listBadgeTypes, saveBadgeType } from "./badge-firestore.mjs";
+import { listBadgeTypes, listUserBadges, removeUserBadge, saveBadgeType, setBadgeFeatured, setUserBadge } from "./badge-firestore.mjs";
 import { BADGE_CATEGORIES, BADGE_MILESTONE_METRICS } from "./badge-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -21,7 +21,7 @@ export const createBadgeAdminSection = () => {
   section.id = "badge-admin-section";
   section.className = "admin-panel badge-admin-panel";
   section.innerHTML = `
-    <div class="admin-panel-heading"><div><h2>Achievement badges</h2><p class="admin-note">Create, edit, activate, or pause the badges members can earn.</p></div></div>
+    <div class="admin-panel-heading"><div><h2>Achievement badges</h2><p class="admin-note">Create, edit, activate, assign, remove, and feature member badges.</p></div></div>
     <div class="badge-admin-form">
       <label>Badge name<input id="badge-name" maxlength="60" autocomplete="off"></label>
       <label>Description<textarea id="badge-description" maxlength="280" rows="3"></textarea></label>
@@ -34,7 +34,15 @@ export const createBadgeAdminSection = () => {
     </div>
     <p id="badge-admin-status" class="admin-note" role="status" aria-live="polite"></p>
     <div class="admin-actions"><button id="badge-save" class="admin-action" type="button">Save badge</button><button id="badge-cancel-edit" class="admin-action" type="button" hidden>Cancel edit</button></div>
-    <div id="badge-definition-list" class="admin-list compact-list" aria-live="polite"></div>`;
+    <div id="badge-definition-list" class="admin-list compact-list" aria-live="polite"></div>
+    <hr>
+    <div class="admin-panel-heading"><div><h3>Member badge controls</h3><p class="admin-note">Enter a user ID, choose a badge, then assign it or manage badges already earned.</p></div></div>
+    <div class="badge-admin-form">
+      <label>User ID<input id="badge-user-id" autocomplete="off" placeholder="Firebase user ID"></label>
+      <label>Badge<select id="badge-user-select"></select></label>
+    </div>
+    <div class="admin-actions"><button id="badge-user-refresh" class="admin-action" type="button">Load member badges</button><button id="badge-user-assign" class="admin-action" type="button">Assign selected badge</button></div>
+    <div id="badge-user-assignments" class="admin-list compact-list" aria-live="polite"></div>`;
   document.querySelector(".analytics-section")?.before(section);
   return section;
 };
@@ -42,6 +50,7 @@ export const createBadgeAdminSection = () => {
 export const initAdminBadges = ({ db, adminUid, setStatus = () => {} }) => {
   createBadgeAdminSection();
   let editingId = "";
+  let definitions = [];
   const mode = $("badge-award-mode"), metric = $("badge-milestone-metric"), threshold = $("badge-milestone-threshold");
   const localStatus = (message, error = false) => {
     $("badge-admin-status").textContent = message;
@@ -71,9 +80,37 @@ export const initAdminBadges = ({ db, adminUid, setStatus = () => {} }) => {
     $("badge-save").textContent = "Update badge"; $("badge-cancel-edit").hidden = false; syncMilestoneInputs();
     $("badge-name").focus();
   };
+  const populateUserSelect = () => {
+    $("badge-user-select").replaceChildren(...definitions.filter(badge => badge.active !== false).map((badge) => {
+      const option = document.createElement("option"); option.value = badge.id; option.textContent = badge.name; return option;
+    }));
+  };
+  const renderUserAssignments = async () => {
+    const uid = $("badge-user-id").value.trim();
+    if (!uid) { $("badge-user-assignments").replaceChildren(); return; }
+    try {
+      const assignments = await listUserBadges(db, uid);
+      const rows = assignments.map((assignment) => {
+        const definition = definitions.find((badge) => badge.id === assignment.badgeId);
+        const row = document.createElement("article"); row.className = "admin-row";
+        const info = document.createElement("div");
+        const title = document.createElement("strong"); title.textContent = definition?.name || assignment.badgeId;
+        const detail = document.createElement("small"); detail.textContent = `${assignment.awardSource || "manual"}${assignment.featured ? " · Featured" : ""}`;
+        info.append(title, detail);
+        const actions = document.createElement("div"); actions.className = "admin-actions";
+        const feature = document.createElement("button"); feature.type = "button"; feature.className = "admin-action"; feature.textContent = assignment.featured ? "Unfeature" : "Feature";
+        feature.onclick = async () => { try { await setBadgeFeatured(db, uid, assignment.badgeId, !assignment.featured, adminUid); await renderUserAssignments(); localStatus("Featured badge setting updated."); } catch (error) { localStatus(error?.message || "Could not update featured badge.", true); } };
+        const remove = document.createElement("button"); remove.type = "button"; remove.className = "admin-action danger"; remove.textContent = "Remove badge";
+        remove.onclick = async () => { if (!window.confirm("Remove this badge from the member?")) return; try { await removeUserBadge(db, uid, assignment.badgeId); await renderUserAssignments(); localStatus("Badge removed from member."); } catch { localStatus("Could not remove that badge.", true); } };
+        actions.append(feature, remove); row.append(info, actions); return row;
+      });
+      $("badge-user-assignments").replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement("p"), { className: "admin-note", textContent: "This member has no badges yet." })]));
+    } catch { localStatus("Could not load this member's badges.", true); }
+  };
   const render = async () => {
-    const badges = await listBadgeTypes(db, { includeInactive: true });
-    const rows = badges.sort((a, b) => a.name.localeCompare(b.name)).map((badge) => {
+    definitions = await listBadgeTypes(db, { includeInactive: true });
+    populateUserSelect();
+    const rows = definitions.sort((a, b) => a.name.localeCompare(b.name)).map((badge) => {
       const row = document.createElement("article"); row.className = "admin-row";
       const info = document.createElement("div");
       const title = document.createElement("strong"); title.textContent = badge.name;
@@ -92,6 +129,13 @@ export const initAdminBadges = ({ db, adminUid, setStatus = () => {} }) => {
   mode.onchange = syncMilestoneInputs;
   metric.onchange = syncMilestoneInputs;
   $("badge-cancel-edit").onclick = reset;
+  $("badge-user-refresh").onclick = renderUserAssignments;
+  $("badge-user-assign").onclick = async () => {
+    const uid = $("badge-user-id").value.trim(), badgeId = $("badge-user-select").value;
+    if (!uid || !badgeId) { localStatus("Enter a user ID and choose a badge.", true); return; }
+    try { await setUserBadge(db, uid, badgeId, adminUid, { featured: false, awardSource: "manual" }); await renderUserAssignments(); localStatus("Badge assigned to member."); }
+    catch (error) { localStatus(error?.message || "Could not assign that badge.", true); }
+  };
   $("badge-save").onclick = async () => {
     const name = $("badge-name").value.trim(), description = $("badge-description").value.trim();
     if (!name || !description) { localStatus("Badge name and description are required.", true); return; }
@@ -109,7 +153,7 @@ export const initAdminBadges = ({ db, adminUid, setStatus = () => {} }) => {
   };
   syncMilestoneInputs();
   void render().catch(() => localStatus("Could not load badge definitions.", true));
-  return { refresh: render };
+  return { refresh: render, refreshUserBadges: renderUserAssignments };
 };
 
 onAuthStateChanged(auth, async (user) => {
