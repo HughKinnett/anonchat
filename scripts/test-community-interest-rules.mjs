@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+// Verifies the corrected literal Communities Firestore patch on the release branch.
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 
 assert.match(rules, /match \/communities\/\{communityId\}/, "interest Communities have an explicit rules block");
