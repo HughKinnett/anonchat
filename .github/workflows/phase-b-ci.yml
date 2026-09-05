@@ -19,3 +19,4 @@ jobs:
           node-version: "22"
       - run: node scripts/test-content-edit-policy.mjs
       - run: node scripts/test-threaded-reply-policy.mjs
+      - run: node scripts/test-post-media-policy.mjs
