@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 const timeline = fs.readFileSync(new URL("../timeline.js", import.meta.url), "utf8");
 const html = fs.readFileSync(new URL("../timeline.html", import.meta.url), "utf8");
+const profile = fs.readFileSync(new URL("../profile.js", import.meta.url), "utf8");
 
 for (const moduleName of [
   "content-edit-policy.mjs",
@@ -39,4 +40,15 @@ assert.match(timeline, /interactionParentForPost\(postDoc\)/, "Phase B preserves
 assert.match(timeline, /visiblePosts\.map\(renderPost\)|map\(renderPost\)/, "feed surfaces continue to reuse the canonical post renderer");
 assert.doesNotMatch(timeline, /collection\(db,\s*["'](?:phaseBPosts|savedPosts|historyPosts|trendingPosts|popularPosts)["']/, "Phase B does not create alternate post-body collections");
 
-console.log("Phase B timeline surface contract passed");
+assert.match(profile, /from ["']\.\/post-media-policy\.mjs["']/, "profile uses the shared Phase B media policy");
+assert.match(profile, /from ["']\.\/content-edit-policy\.mjs["']/, "profile uses the shared Phase B edit policy");
+assert.match(profile, /from ["']\.\/threaded-reply-policy\.mjs["']/, "profile uses the shared one-level reply policy");
+assert.match(profile, /from ["']\.\/saved-history-policy\.mjs["']/, "profile uses the shared Saved path policy");
+assert.match(profile, /Edited/, "profile and pinned rendering show Edited state");
+assert.match(profile, /post-media-grid/, "profile and pinned rendering show the canonical media set");
+assert.match(profile, /groupCommentThreads\(/, "profile comment rendering uses one-level thread grouping");
+assert.match(profile, /Edit post|Edit comment/, "profile owners receive the same edit actions");
+assert.match(profile, /doc\(db,\s*["']users["'],\s*currentUser\.uid,\s*["']saved["']/, "profile Save action uses private Firestore Saved data");
+assert.doesNotMatch(profile, /\bisBookmarked\b|\btoggleBookmark\b/, "profile no longer uses browser-local bookmarks as the Saved source of truth");
+
+console.log("Phase B timeline/profile surface contract passed");
