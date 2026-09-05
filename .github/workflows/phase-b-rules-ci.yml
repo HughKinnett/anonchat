@@ -24,4 +24,4 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
-      - run: firebase emulators:exec --only firestore "node scripts/test-phase-b-rules.mjs"
+      - run: npx firebase emulators:exec --only firestore "node scripts/test-phase-b-rules.mjs"
