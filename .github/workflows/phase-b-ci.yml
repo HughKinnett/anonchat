@@ -22,3 +22,4 @@ jobs:
       - run: node scripts/test-post-media-policy.mjs
       - run: node scripts/test-saved-history-policy.mjs
       - run: node scripts/test-hashtag-discovery-policy.mjs
+      - run: node scripts/test-suggested-follow-policy.mjs
