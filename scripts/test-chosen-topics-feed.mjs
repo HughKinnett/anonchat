@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
 
+// Verification touch: run this contract on the generated chosen-topics production head.
 const html = fs.readFileSync("timeline.html", "utf8");
 const js = fs.readFileSync("timeline.js", "utf8");
 
