@@ -40,6 +40,21 @@ if (!rules.includes("function validProfilePrivacyUpdate(userId)")) {
   rules = rules.replace(helperAnchor, helpers + helperAnchor);
 }
 
+const badgeHelper = `    function profileBadgesReadable(userId) {
+      let profilePath = /databases/$(database)/documents/users/$(userId);
+      return signedIn()
+        && exists(profilePath)
+        && (request.auth.uid == userId
+          || isAdmin()
+          || get(profilePath).data.get('profilePrivacy', {}).get('showBadges', true) == true);
+    }
+
+`;
+if (!rules.includes("function profileBadgesReadable(userId)")) {
+  if (!rules.includes(helperAnchor)) throw new Error("Could not find badge privacy helper anchor");
+  rules = rules.replace(helperAnchor, badgeHelper + helperAnchor);
+}
+
 const updateAnchor = `            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bio'])
               && request.resource.data.get('bio', '') is string
               && request.resource.data.get('bio', '').size() <= 300)`;
@@ -55,6 +70,16 @@ if (!rules.includes("validProfilePrivacyUpdate(userId)\n            ||\n        
   if (!rules.includes(updateAnchor)) throw new Error("Could not find user update anchor");
   rules = rules.replace(updateAnchor, updateReplacement);
 }
+
+const badgeReadAnchor = `    match /users/{userId}/badges/{badgeId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }`;
+const badgeReadReplacement = `    match /users/{userId}/badges/{badgeId} {
+      allow read: if profileBadgesReadable(userId);
+      allow create, update, delete: if isAdmin();
+    }`;
+if (rules.includes(badgeReadAnchor)) rules = rules.replace(badgeReadAnchor, badgeReadReplacement);
 
 await writeFile(path, rules);
 console.log("Phase A Firestore rules patch applied");
