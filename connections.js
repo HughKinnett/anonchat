@@ -31,6 +31,7 @@ const userProfileCache = new Map();
 let follows = [];
 let exactFollowerCount = null;
 let exactFollowingCount = null;
+let targetConnectionsVisible = true;
 const followGroups = new Map();
 let blockTracker = createViewerBlockTracker();
 let viewerBlocks = blockTracker.current();
@@ -115,6 +116,20 @@ const personCard = (uid) => {
   return row;
 };
 
+const renderPrivateConnections = (target) => {
+  const username = target?.data()?.username || "anonymous";
+  document.getElementById("connections-title").textContent = `@${username}’s connections`;
+  document.getElementById("followers-count").textContent = "Private";
+  document.getElementById("following-count").textContent = "Private";
+  const privateMessage = () => Object.assign(document.createElement("p"), {
+    className: "connections-empty",
+    textContent: "Connections private"
+  });
+  followersList.replaceChildren(privateMessage());
+  followingList.replaceChildren(privateMessage());
+  setStatus("This user has chosen to keep their followers and following private.");
+};
+
 const render = () => {
   if (!currentUser || !targetUserId) return;
   if (!viewerBlocks.ready) {
@@ -132,6 +147,10 @@ const render = () => {
     return;
   }
   const target = profileFor(targetUserId);
+  if (targetUserId !== currentUser.uid && targetConnectionsVisible === false) {
+    renderPrivateConnections(target);
+    return;
+  }
   if (target) {
     document.getElementById("connections-title").textContent =
       `@${target.data().username || "anonymous"}’s connections`;
@@ -171,6 +190,7 @@ const stopConnectionsListeners = () => {
   follows = [];
   exactFollowerCount = null;
   exactFollowingCount = null;
+  targetConnectionsVisible = true;
   followGroups.clear();
   blockTracker.reset(currentUser?.uid);
   viewerBlocks = blockTracker.current();
@@ -203,6 +223,7 @@ onAuthStateChanged(auth, async (user) => {
   viewerBlocks = blockTracker.current();
   const profile = await getDoc(doc(db, "users", user.uid));
   if (!sessionIsCurrent()) return;
+  if (profile.exists()) userProfileCache.set(profile.id, profile);
   void recordPageActivity({
     surface: "connections",
     profile: profile.exists() ? profile.data() : null,
@@ -210,6 +231,22 @@ onAuthStateChanged(auth, async (user) => {
     db,
     firestore: { doc, updateDoc, serverTimestamp }
   });
+
+  let targetProfileSnapshot = profile;
+  if (targetUserId !== user.uid) {
+    targetProfileSnapshot = await getDoc(doc(db, "users", targetUserId));
+    if (!sessionIsCurrent()) return;
+    if (!targetProfileSnapshot.exists()) {
+      document.getElementById("connections-title").textContent = "Connections unavailable";
+      setStatus("This profile does not exist.", true);
+      return;
+    }
+    userProfileCache.set(targetProfileSnapshot.id, targetProfileSnapshot);
+    targetConnectionsVisible = targetProfileSnapshot.data().profilePrivacy?.showFollowersFollowing !== false;
+  } else {
+    targetConnectionsVisible = true;
+  }
+  users = [...userProfileCache.values()];
   document.getElementById("back-to-profile").href =
     `profile.html?uid=${encodeURIComponent(targetUserId)}`;
   const listenForSession = (reference, next, failed) => listeners.push(onSnapshot(
@@ -217,25 +254,29 @@ onAuthStateChanged(auth, async (user) => {
     (snapshot) => { if (sessionIsCurrent()) next(snapshot); },
     (error) => { if (sessionIsCurrent()) failed?.(error); }
   ));
-  const followQueries = [
-    ["target-followers", query(collection(db, "follows"), where("followingId", "==", targetUserId), limit(50))],
-    ["target-following", query(collection(db, "follows"), where("followerId", "==", targetUserId), limit(50))]
-  ];
-  if (targetUserId !== user.uid) followQueries.push(["viewer-following", query(collection(db, "follows"), where("followerId", "==", user.uid), limit(100))]);
-  followQueries.forEach(([key, reference]) => listenForSession(reference, (snapshot) => {
-    followGroups.set(key, snapshot.docs);
-    follows = [...new Map([...followGroups.values()].flat().map((entry) => [entry.id, entry])).values()];
-    void hydrateProfiles();
-  }, () => setStatus("Could not load connections.", true)));
-  Promise.all([
-    getCountFromServer(query(collection(db, "follows"), where("followingId", "==", targetUserId))),
-    getCountFromServer(query(collection(db, "follows"), where("followerId", "==", targetUserId)))
-  ]).then(([followers, following]) => {
-    if (!sessionIsCurrent()) return;
-    exactFollowerCount = followers.data().count;
-    exactFollowingCount = following.data().count;
-    render();
-  }).catch(() => {});
+
+  if (targetConnectionsVisible || targetUserId === user.uid) {
+    const followQueries = [
+      ["target-followers", query(collection(db, "follows"), where("followingId", "==", targetUserId), limit(50))],
+      ["target-following", query(collection(db, "follows"), where("followerId", "==", targetUserId), limit(50))]
+    ];
+    if (targetUserId !== user.uid) followQueries.push(["viewer-following", query(collection(db, "follows"), where("followerId", "==", user.uid), limit(100))]);
+    followQueries.forEach(([key, reference]) => listenForSession(reference, (snapshot) => {
+      followGroups.set(key, snapshot.docs);
+      follows = [...new Map([...followGroups.values()].flat().map((entry) => [entry.id, entry])).values()];
+      void hydrateProfiles();
+    }, () => setStatus("Could not load connections.", true)));
+    Promise.all([
+      getCountFromServer(query(collection(db, "follows"), where("followingId", "==", targetUserId))),
+      getCountFromServer(query(collection(db, "follows"), where("followerId", "==", targetUserId)))
+    ]).then(([followers, following]) => {
+      if (!sessionIsCurrent()) return;
+      exactFollowerCount = followers.data().count;
+      exactFollowingCount = following.data().count;
+      render();
+    }).catch(() => {});
+  }
+
   await hydrateProfiles();
   const refreshBlocks = () => {
     viewerBlocks = blockTracker.current();
@@ -258,5 +299,3 @@ onAuthStateChanged(auth, async (user) => {
     setStatus("Could not load block preferences.", true);
   });
 });
-
-addEventListener("pagehide", invalidateConnectionsSession);
