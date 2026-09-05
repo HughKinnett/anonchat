@@ -4,6 +4,7 @@ on:
     branches: [feature/user-experience-expansion]
     paths:
       - scripts/apply-user-experience-integration.mjs
+      - .github/workflows/apply-user-experience-integration.yml
 permissions:
   contents: write
 jobs:
