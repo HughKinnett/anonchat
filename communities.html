@@ -11,7 +11,10 @@
   <header class="topbar">
     <a class="brand" href="timeline.html">AnonChat</a>
     <div class="topbar-actions">
-      <a class="secondary-button" href="timeline.html">Timeline</a>
+      <div class="main-menu">
+        <button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button>
+        <nav id="main-menu-panel" class="main-menu-panel" hidden><a href="timeline.html">Timeline</a></nav>
+      </div>
       <button id="communities-sign-out" class="secondary-button" type="button">Sign Out</button>
     </div>
   </header>
@@ -38,6 +41,7 @@
     </section>
   </main>
 
+  <script src="nav-menu.js" defer></script>
   <script type="module" src="communities.js"></script>
 </body>
 </html>
