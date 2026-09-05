@@ -5,7 +5,7 @@ let rules = fs.readFileSync(path, "utf8");
 
 const replaceOnce = (needle, replacement, label) => {
   if (!rules.includes(needle)) throw new Error(`Could not locate ${label}`);
-  rules = rules.replace(needle, replacement);
+  rules = rules.replace(needle, () => replacement);
 };
 
 const replaceBetween = (startNeedle, endNeedle, replacement, label) => {
