@@ -513,21 +513,20 @@ service cloud.firestore {
         );
     }
 
-    function validStandaloneAdminBan(userId) {
+    function validStandaloneAdminAccountControl(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
       return isAdmin()
         && !isProtectedAdministrator(resource.data.username)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['banned'])
-        && request.resource.data.banned is bool
-        && (request.resource.data.banned == true
-          || (hasNoDeletionQueueState(resource.data)
-            && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId))));
-    }
-
-    function validStandaloneAdminSuspension(userId) {
-      return isAdmin()
-        && !isProtectedAdministrator(resource.data.username)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['suspendedUntil'])
-        && request.resource.data.suspendedUntil is timestamp;
+        && (
+          (changed.hasOnly(['banned'])
+            && request.resource.data.banned is bool
+            && (request.resource.data.banned == true
+              || (hasNoDeletionQueueState(resource.data)
+                && !exists(/databases/$(database)/documents/adminDeletionJobs/$(userId)))))
+          ||
+          (changed.hasOnly(['suspendedUntil'])
+            && request.resource.data.suspendedUntil is timestamp)
+        );
     }
 
     function activeUser() {
@@ -993,8 +992,7 @@ service cloud.firestore {
             == get(/databases/$(database)/documents/system/accountStats).data.count + 1)
           || (!exists(/databases/$(database)/documents/system/accountStats)
             && getAfter(/databases/$(database)/documents/system/accountStats).data.count == 6));
-      allow update: if validStandaloneAdminBan(userId)
-        || validStandaloneAdminSuspension(userId)
+      allow update: if validStandaloneAdminAccountControl(userId)
         || validDeletionQueueProfile(userId)
         || (activeUserAfter()
           && request.auth.uid == userId
