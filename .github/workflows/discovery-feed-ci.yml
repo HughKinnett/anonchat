@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - growth-web-release
+      - mobile-topics-hotfix-tests
+      - mobile-topics-hotfix
   workflow_dispatch:
 
 permissions:
@@ -23,3 +25,4 @@ jobs:
       - run: node scripts/test-topic-policy.mjs
       - run: node scripts/test-content-writer-topics.mjs
       - run: node scripts/test-chosen-topics-feed.mjs
+      - run: node scripts/test-mobile-hashtag-topic-surface.mjs
