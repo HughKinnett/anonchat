@@ -5,6 +5,13 @@ import { applyPremiumAvatar, applyPremiumTheme, resolvedPremiumSettings } from "
 import { applyFreeAvatar } from "./free-profile-theme.mjs";
 import { isBookmarked, recordContribution, toggleBookmark } from "./experience-preferences.mjs";
 import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
+import { buildEditHistorySnapshot, canEditOwnedContent, nextEditMetadata } from "./content-edit-policy.mjs";
+import { groupCommentThreads, threadRootId } from "./threaded-reply-policy.mjs";
+import { normalizePostMedia, validatePostMedia } from "./post-media-policy.mjs";
+import { historyEntryId, savedPostEntryId } from "./saved-history-policy.mjs";
+import { applicationDayBounds, popularTodayScore, trendingScore } from "./hashtag-discovery-policy.mjs";
+import { suggestFollowCandidates } from "./suggested-follow-policy.mjs";
+import { mergeRecentSearches, normalizeRecentSearch, removeRecentSearch } from "./recent-search-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { shouldRecordDailyPageView } from "./page-view-budget.mjs";
@@ -69,6 +76,19 @@ const topicPostsButton = document.getElementById("show-topic-posts");
 const temporaryPostsButton = document.getElementById("show-temporary-posts");
 const savedFilterPostsButton = document.getElementById("show-saved-filter-posts");
 const profilePostsButton = document.getElementById("show-profile-posts");
+const trendingPostsButton = document.getElementById("show-trending-posts");
+const popularTodayPostsButton = document.getElementById("show-popular-today-posts");
+const savedPostsButton = document.getElementById("show-saved-posts");
+const historyPostsButton = document.getElementById("show-history-posts");
+const postGifUrl = document.getElementById("post-gif-url");
+const suggestedFollowsList = document.getElementById("suggested-follows-list");
+const recentSearchList = document.getElementById("recent-search-list");
+const clearRecentSearchesButton = document.getElementById("clear-recent-searches");
+let pendingPostMedia = [];
+let activeReplyTarget = null;
+let recentSearches = [];
+let savedPostPaths = new Set();
+let viewedPostPaths = [];
 const chosenTopicInput = document.getElementById("chosen-topic-input");
 const addChosenTopicButton = document.getElementById("add-chosen-topic");
 const chosenTopicList = document.getElementById("chosen-topic-list");
@@ -377,24 +397,32 @@ postImageLabel?.addEventListener("keydown", (event) => {
 });
 
 postImageInput.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  setStatus("Preparing your post photo…");
+  const files = [...(event.target.files || [])].slice(0, 4);
+  if (!files.length) return;
+  setStatus("Preparing your post photos…");
   try {
-    pendingPostImage = await compressPostImage(file);
+    if (files.some((file) => file.type === "image/gif")) throw new Error("Use the GIF URL field for GIFs so animation is preserved.");
+    const urls = await Promise.all(files.map(compressPostImage));
+    pendingPostMedia = urls.map((url) => ({ type: "image", url }));
+    const validation = validatePostMedia(pendingPostMedia);
+    if (!validation.ok) throw new Error("Choose up to four photos, or one GIF.");
+    pendingPostImage = pendingPostMedia[0]?.url || "";
     postImagePreview.src = pendingPostImage;
     postImagePreviewWrap.hidden = false;
     setPhotoSelected(true);
-    setStatus("Photo ready.");
+    setStatus(`${pendingPostMedia.length} photo${pendingPostMedia.length === 1 ? "" : "s"} ready.`);
   } catch (error) {
     pendingPostImage = "";
+    pendingPostMedia = [];
     setPhotoSelected(false);
-    setStatus(error.message || "Could not prepare that photo.", true);
+    setStatus(error.message || "Could not prepare those photos.", true);
   }
 });
 
 document.getElementById("remove-post-image").addEventListener("click", () => {
   pendingPostImage = "";
+  pendingPostMedia = [];
+  if (postGifUrl) postGifUrl.value = "";
   postImageInput.value = "";
   postImagePreviewWrap.hidden = true;
   setPhotoSelected(false);
@@ -1150,20 +1178,19 @@ const renderPost = (postDoc) => {
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
   appendLinkedText(text, post.content);
-  const postImage = post.imageData ? document.createElement("img") : null;
-  if (postImage) {
-    postImage.className = "post-image";
-    postImage.loading = "lazy";
-    postImage.decoding = "async";
-    postImage.src = post.imageData;
-    postImage.alt = "Photo attached to this post";
-    postImage.tabIndex = 0;
-    postImage.title = "Tap to reveal this photograph in Data Saver mode";
-    postImage.addEventListener("click", () => postImage.classList.add("data-saver-revealed"));
-    postImage.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") postImage.classList.add("data-saver-revealed");
-    });
-  }
+  if (post.editedAt || Number(post.editVersion) > 0) { const edited = document.createElement("small"); edited.className = "edited-label"; edited.textContent = "Edited"; text.append(document.createTextNode(" "), edited); }
+  const mediaItems = normalizePostMedia(Array.isArray(post.media) && post.media.length ? post.media : (post.imageData ? [{ type: "image", url: post.imageData }] : []));
+  const mediaGrid = document.createElement("div");
+  mediaGrid.className = `post-media-grid media-count-${mediaItems.length}`;
+  mediaItems.forEach((media) => {
+    const image = document.createElement("img");
+    image.className = media.type === "gif" ? "post-image post-gif" : "post-image";
+    image.loading = "lazy"; image.decoding = "async"; image.src = media.url; image.alt = media.type === "gif" ? "GIF attached to this post" : "Photo attached to this post";
+    image.tabIndex = 0; image.title = "Tap to reveal this media in Data Saver mode";
+    image.addEventListener("click", () => image.classList.add("data-saver-revealed"));
+    image.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") image.classList.add("data-saver-revealed"); });
+    mediaGrid.append(image);
+  });
   const time = document.createElement("small");
   const expiresAt = post.expiresAt?.toMillis?.();
   time.textContent = (post.createdAt?.toDate
@@ -1284,10 +1311,13 @@ const renderPost = (postDoc) => {
   const commentsList = document.createElement("ul");
   commentsList.className = "comments-list";
 
-  commentDocs.forEach((commentDoc) => {
+  const threadedCommentDocs = groupCommentThreads(commentDocs.map((commentDoc) => ({ id: commentDoc.id, ...commentDoc.data(), __doc: commentDoc })))
+    .flatMap(({ root, replies }) => [root, ...replies]);
+  threadedCommentDocs.forEach((threadedComment) => {
+    const commentDoc = threadedComment.__doc;
     const comment = commentDoc.data();
     const commentItem = document.createElement("li");
-    commentItem.className = "comment-item";
+    commentItem.className = comment.parentCommentId ? "comment-item comment-reply" : "comment-item";
     const commenter = document.createElement("a");
     commenter.className = "comment-author";
     commenter.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
@@ -1295,21 +1325,38 @@ const renderPost = (postDoc) => {
     const commentText = document.createElement("p");
     appendLinkedText(commentText, comment.text);
     const commentTime = document.createElement("time");
-    commentTime.textContent = comment.createdAt?.toDate
-      ? comment.createdAt.toDate().toLocaleString()
-      : "Posting…";
+    commentTime.textContent = (comment.createdAt?.toDate ? comment.createdAt.toDate().toLocaleString() : "Posting…") + (comment.editedAt || Number(comment.editVersion) > 0 ? " · Edited" : "");
     const commentActions = document.createElement("div");
     commentActions.className = "comment-actions";
     const reply = document.createElement("button");
     reply.type = "button";
     reply.textContent = "Reply";
     reply.addEventListener("click", () => {
+      activeReplyTarget = { id: commentDoc.id, threadRootId: threadRootId({ id: commentDoc.id, ...comment }) };
       commentInput.value = `@${comment.username || "anonymous"} `;
       commentsSection.open = true;
       commentInput.focus();
       commentInput.setSelectionRange(commentInput.value.length, commentInput.value.length);
     });
     commentActions.append(reply);
+    if (comment.uid === currentUser.uid) {
+      const editComment = document.createElement("button");
+      editComment.type = "button"; editComment.textContent = "Edit comment";
+      editComment.addEventListener("click", async () => {
+        const nextText = window.prompt("Edit comment", comment.text)?.trim();
+        if (!nextText || nextText === comment.text) return;
+        try {
+          await runTransaction(db, async (transaction) => {
+            const snapshot = await transaction.get(commentDoc.ref);
+            if (!snapshot.exists() || !canEditOwnedContent(snapshot.data(), currentUser.uid)) throw new Error("not-authorized");
+            const meta = nextEditMetadata(snapshot.data(), Date.now());
+            transaction.set(doc(commentDoc.ref, "editHistory", `v${meta.editVersion}`), { ...buildEditHistorySnapshot(snapshot.data(), currentUser.uid, Date.now()), archivedAt: serverTimestamp() });
+            transaction.update(commentDoc.ref, { text: nextText, editedAt: serverTimestamp(), editVersion: meta.editVersion });
+          });
+        } catch { setStatus("Could not edit that comment.", true); }
+      });
+      commentActions.append(editComment);
+    }
     if (comment.uid === currentUser.uid || displayedAuthorId === currentUser.uid) {
       const removeComment = document.createElement("button");
       removeComment.type = "button";
@@ -1353,6 +1400,7 @@ const renderPost = (postDoc) => {
         uid: currentUser.uid,
         username: profileUsername,
         text,
+        ...(activeReplyTarget ? { parentCommentId: activeReplyTarget.id, threadRootId: activeReplyTarget.threadRootId } : {}),
         createdAt: serverTimestamp()
       });
       const entry = interactionSubscriptions.get(parent.path);
@@ -1363,6 +1411,7 @@ const renderPost = (postDoc) => {
         queueInteractionRender();
       }
       commentInput.value = "";
+      activeReplyTarget = null;
       commentsSection.open = true;
     } catch {
       setStatus("Could not post your comment.", true);
@@ -1385,6 +1434,28 @@ const renderPost = (postDoc) => {
     updateBookmarkLabel();
   });
   actions.append(bookmark);
+  if (post.content) {
+    const copyText = document.createElement("button"); copyText.type = "button"; copyText.textContent = "Copy text";
+    copyText.addEventListener("click", async () => { try { await navigator.clipboard.writeText(post.content); setStatus("Post text copied."); } catch { setStatus("Could not copy post text.", true); } });
+    actions.append(copyText);
+  }
+  if (post.authorId === currentUser.uid && post.type !== "repost") {
+    const editPost = document.createElement("button"); editPost.type = "button"; editPost.textContent = "Edit post";
+    editPost.addEventListener("click", async () => {
+      const nextContent = window.prompt("Edit post", post.content)?.trim();
+      if (!nextContent || nextContent === post.content) return;
+      try {
+        await runTransaction(db, async (transaction) => {
+          const snapshot = await transaction.get(postDoc.ref);
+          if (!snapshot.exists() || !canEditOwnedContent(snapshot.data(), currentUser.uid)) throw new Error("not-authorized");
+          const meta = nextEditMetadata(snapshot.data(), Date.now());
+          transaction.set(doc(postDoc.ref, "editHistory", `v${meta.editVersion}`), { ...buildEditHistorySnapshot(snapshot.data(), currentUser.uid, Date.now()), archivedAt: serverTimestamp() });
+          transaction.update(postDoc.ref, { content: nextContent, topics: normalizeTopic(nextContent) ? snapshot.data().topics : snapshot.data().topics, editedAt: serverTimestamp(), editVersion: meta.editVersion });
+        });
+      } catch { setStatus("Could not edit that post.", true); }
+    });
+    actions.append(editPost);
+  }
   const repostId = `repost_${currentUser.uid}_${sourceId}`;
   const alreadyShared = postDocs.some((candidate) => candidate.id === repostId);
 
@@ -1468,7 +1539,7 @@ const renderPost = (postDoc) => {
   }
 
   item.append(authorRow, text);
-  if (postImage) item.append(postImage);
+  if (mediaGrid.childElementCount) item.append(mediaGrid);
   item.append(time);
   if (poll.childElementCount) item.append(poll);
   if (reactionsBar.childElementCount) item.append(reactionsBar);
@@ -1498,9 +1569,18 @@ const renderFeed = () => {
         savedFilter: null,
         now: Date.now()
       });
+  let phaseBPosts = filteredPosts;
+  if (feedMode === "trending") {
+    phaseBPosts = [...filteredPosts].filter((post) => trendingScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).filter((c) => !c.data().parentCommentId).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()) > -Infinity)
+      .sort((a, b) => trendingScore({ createdAtMs: b.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(b).length, commentCount: postComments(b).length, replyCount: postComments(b).filter((c) => c.data().parentCommentId).length }, Date.now()) - trendingScore({ createdAtMs: a.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(a).length, commentCount: postComments(a).length, replyCount: postComments(a).filter((c) => c.data().parentCommentId).length }, Date.now()));
+  } else if (feedMode === "popular-today") {
+    phaseBPosts = [...filteredPosts].filter((post) => { const data = post.data(); const score = popularTodayScore({ createdAtMs: data.createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()); return score > -Infinity; })
+      .sort((a, b) => popularTodayScore({ createdAtMs: b.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(b).length, commentCount: postComments(b).length, replyCount: postComments(b).filter((c) => c.data().parentCommentId).length }, Date.now()) - popularTodayScore({ createdAtMs: a.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(a).length, commentCount: postComments(a).length, replyCount: postComments(a).filter((c) => c.data().parentCommentId).length }, Date.now()));
+  } else if (feedMode === "saved-posts") phaseBPosts = filteredPosts.filter((post) => savedPostPaths.has(interactionParentForPost(post).path));
+  else if (feedMode === "history") phaseBPosts = viewedPostPaths.map((path) => filteredPosts.find((post) => interactionParentForPost(post).path === path)).filter(Boolean);
   const orderedPosts = showingProfile
-    ? filteredPosts
-    : sortFeedPosts(filteredPosts, feedMode, {
+    ? phaseBPosts
+    : ["trending", "popular-today", "saved-posts", "history"].includes(feedMode) ? phaseBPosts : sortFeedPosts(phaseBPosts, feedMode, {
         viewerUid: currentUser?.uid,
         followedUids,
         reactionCounts,
@@ -1512,6 +1592,13 @@ const renderFeed = () => {
     : orderedPosts;
 
   feed.replaceChildren(...visiblePosts.map(renderPost));
+  visiblePosts.forEach((post) => { const path = interactionParentForPost(post).path; viewedPostPaths = [path, ...viewedPostPaths.filter((item) => item !== path)].slice(0, 100); });
+  if (suggestedFollowsList) {
+    const followedUidsForSuggestions = new Set(visibleFollows().filter((follow) => follow.data().followerId === currentUser?.uid).map((follow) => follow.data().followingId));
+    const candidates = visibleUsers().map((profile) => ({ uid: profile.id, mutuals: visibleFollows().filter((f) => f.data().followingId === profile.id).length, sharedTopics: 0, publicInteractions: 0, username: profile.data().username }));
+    const suggestions = suggestFollowCandidates(candidates, { viewerUid: currentUser?.uid, followedUids: followedUidsForSuggestions, blockedUids: new Set(viewerBlocks.blockedUids) }, 5);
+    suggestedFollowsList.replaceChildren(...suggestions.map((suggestion) => { const row = document.createElement("div"); const link = document.createElement("a"); link.href = `profile.html?uid=${encodeURIComponent(suggestion.uid)}`; link.textContent = `@${suggestion.username || "anonymous"}`; row.append(link, createFollowControl(suggestion.uid)); return row; }));
+  }
   interactionVisibilityObserver?.disconnect();
   feed.querySelectorAll("[data-interaction-path]").forEach((item) => interactionVisibilityObserver?.observe(item));
   renderNotifications();
@@ -1839,7 +1926,11 @@ const setFeedView = (mode) => {
   temporaryPostsButton.setAttribute("aria-pressed", String(mode === "temporary"));
   savedFilterPostsButton.setAttribute("aria-pressed", String(mode === "saved"));
   profilePostsButton.setAttribute("aria-pressed", String(mode === "profile"));
-  const feedTitles = { "for-you": "For You", latest: "Latest posts", following: "Following", topics: "Chosen Topics", temporary: "Temporary Only", saved: "Saved Filters", profile: "My profile posts" };
+  trendingPostsButton?.setAttribute("aria-pressed", String(mode === "trending"));
+  popularTodayPostsButton?.setAttribute("aria-pressed", String(mode === "popular-today"));
+  savedPostsButton?.setAttribute("aria-pressed", String(mode === "saved-posts"));
+  historyPostsButton?.setAttribute("aria-pressed", String(mode === "history"));
+  const feedTitles = { "for-you": "For You", latest: "Latest posts", following: "Following", topics: "Chosen Topics", temporary: "Temporary Only", saved: "Saved Filters", trending: "Trending", "popular-today": "Popular Today", "saved-posts": "Saved posts", history: "Viewed history", profile: "My profile posts" };
   document.getElementById("feed-title").textContent = feedTitles[mode] || "For You";
   renderFeed();
 };
@@ -1851,6 +1942,11 @@ topicPostsButton.addEventListener("click", () => { feedMode = "topics"; setFeedV
 temporaryPostsButton.addEventListener("click", () => { feedMode = "temporary"; setFeedView(feedMode); });
 savedFilterPostsButton.addEventListener("click", () => { feedMode = "saved"; setFeedView(feedMode); });
 profilePostsButton.addEventListener("click", () => setFeedView("profile"));
+trendingPostsButton?.addEventListener("click", () => setFeedView("trending"));
+popularTodayPostsButton?.addEventListener("click", () => setFeedView("popular-today"));
+savedPostsButton?.addEventListener("click", () => setFeedView("saved-posts"));
+historyPostsButton?.addEventListener("click", () => setFeedView("history"));
+clearRecentSearchesButton?.addEventListener("click", () => { recentSearches = []; if (recentSearchList) recentSearchList.replaceChildren(); });
 
 const stopTimelineResources = () => {
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
