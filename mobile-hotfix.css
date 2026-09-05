@@ -1,0 +1,58 @@
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.page-shell,
+.content-grid,
+.content-grid > *,
+.feed-header,
+.feed-tabs,
+.feed,
+.feed-item,
+.composer-card,
+.profile-banner,
+.view-profile-banner,
+.spotify-profile-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.content-grid > * {
+  min-width: 0;
+}
+
+.feed-tabs {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+img,
+iframe,
+video,
+canvas {
+  max-width: 100%;
+}
+
+@media (max-width: 560px) {
+  .topbar-actions {
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .content-grid,
+  .profile-page {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .feed-tabs {
+    width: 100%;
+  }
+
+  .feed-tab {
+    max-width: 100%;
+  }
+}

@@ -19,6 +19,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="timeline.css">
   <link rel="stylesheet" href="premium.css">
+  <link rel="stylesheet" href="mobile-hotfix.css">
   <title>AnonChat — Profile</title>
 </head>
 <body>
@@ -53,11 +54,6 @@
       </div>
     </section>
 
-    <section id="profile-bio-section" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-bio-title" hidden>
-      <div class="spotify-card-heading"><div><p class="eyebrow">About</p><h2 id="profile-bio-title">Bio</h2></div></div>
-      <p id="profile-bio"></p>
-    </section>
-
     <section id="profile-badges-section" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-badges-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Achievements</p><h2 id="profile-badges-title">Badges</h2></div></div>
       <div id="profile-badges-list" class="profile-badges-list"></div>
@@ -90,7 +86,6 @@
   </dialog>
 
   <script type="module" src="profile.js"></script>
-  <script type="module" src="profile-bio.js"></script>
   <script type="module" src="profile-badges.js"></script>
   <script type="module" src="post-sharing.js"></script>
   <script src="nav-menu.js" defer></script>
