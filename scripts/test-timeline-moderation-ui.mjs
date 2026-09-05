@@ -82,7 +82,8 @@ assert.match(timeline, /clearInteractionListeners/,
   "interaction listeners have an explicit lifecycle cleanup");
 assert.match(timeline, /limit\(MAX_INTERACTION_ITEMS_PER_PARENT\)/,
   "every parent-scoped interaction query has a hard result limit");
-assert.doesNotMatch(timeline, /const startInteractionChildren = \(entry\) => \{[\s\S]*?orderBy\("createdAt"/,
+const interactionListenerSource = timeline.match(/const startInteractionChildren = \(entry\) => \{([\s\S]*?)\n\};\n\nconst syncInteractionListeners/)?.[1] || "";
+assert.doesNotMatch(interactionListenerSource, /orderBy\("createdAt"/,
   "parent-scoped interaction listeners include legacy records that do not have createdAt");
 assert.match(timeline, /collection\(db, entry\.parent\.collection, entry\.parent\.id, kind\),\s*limit\(MAX_INTERACTION_ITEMS_PER_PARENT\)/,
   "parent-scoped interaction listeners remain bounded while including legacy records");
