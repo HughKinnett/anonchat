@@ -2,8 +2,13 @@ import { auth, db } from "./firebase-config.js";
 import {
   getCommunity,
   joinCommunity,
+  listCommunityBadgeTypes,
+  listCommunityMemberBadges,
   listCommunityMembers,
   listCommunityPosts,
+  removeCommunityMemberBadge,
+  saveCommunityBadgeType,
+  setCommunityMemberBadge,
   setCommunityModerator,
   setCommunityPostPinned
 } from "./community-interest-firestore.mjs";
@@ -47,6 +52,8 @@ let currentUsername = "anonymous";
 let currentCommunity = null;
 let currentMembership = null;
 let communityMembers = [];
+let communityBadgeTypes = [];
+let communityBadgesByMember = new Map();
 let moderation = null;
 
 const setStatus = (message = "") => {
@@ -74,6 +81,145 @@ const canShowAuthor = async (uid) => {
 };
 
 const canModerate = () => currentMembership?.role === "owner" || currentMembership?.role === "moderator";
+
+const badgeTypeFor = (badgeId) => communityBadgeTypes.find((badge) => badge.id === badgeId);
+const memberBadgeNames = (uid) => (communityBadgesByMember.get(uid) || [])
+  .map((assignment) => badgeTypeFor(assignment.badgeId)?.name)
+  .filter(Boolean);
+
+const refreshCommunityBadges = async () => {
+  communityBadgeTypes = await listCommunityBadgeTypes(db, communityId);
+  communityBadgesByMember = new Map();
+  await Promise.all(communityMembers.map(async (member) => {
+    const uid = member.uid || member.id;
+    communityBadgesByMember.set(uid, await listCommunityMemberBadges(db, communityId, uid));
+  }));
+};
+
+const badgeIdFromName = (name) => String(name || "")
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, "-")
+  .replace(/^-+|-+$/g, "")
+  .slice(0, 40);
+
+const renderBadgeControls = async () => {
+  document.getElementById("community-badge-controls")?.remove();
+  if (!canModerate()) return;
+
+  const panel = document.createElement("section");
+  panel.id = "community-badge-controls";
+  panel.className = "connections-panel";
+  const heading = document.createElement("h2");
+  heading.textContent = "Community badges";
+  const note = document.createElement("p");
+  note.textContent = "These labels apply only inside this Community and do not grant site-wide privileges.";
+  panel.append(heading, note);
+
+  const form = document.createElement("form");
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.maxLength = 40;
+  nameInput.placeholder = "Badge name";
+  nameInput.required = true;
+  const descriptionInput = document.createElement("input");
+  descriptionInput.type = "text";
+  descriptionInput.maxLength = 160;
+  descriptionInput.placeholder = "Badge description";
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.textContent = "Save badge";
+  form.append(nameInput, descriptionInput, save);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const badgeId = badgeIdFromName(nameInput.value);
+    if (!badgeId) return;
+    save.disabled = true;
+    try {
+      await saveCommunityBadgeType(db, communityId, currentUser.uid, badgeId, {
+        name: nameInput.value,
+        description: descriptionInput.value,
+        active: true
+      });
+      nameInput.value = "";
+      descriptionInput.value = "";
+      await refreshCommunityBadges();
+      await renderBadgeControls();
+      await renderPosts();
+    } catch (error) {
+      setStatus(error?.message || "Could not save Community badge.");
+      save.disabled = false;
+    }
+  });
+  panel.append(form);
+
+  for (const member of communityMembers) {
+    const uid = member.uid || member.id;
+    const row = document.createElement("div");
+    row.className = "connection-card";
+    const username = await profileLabel(uid);
+    const assigned = communityBadgesByMember.get(uid) || [];
+    const assignedNames = memberBadgeNames(uid);
+    const label = document.createElement("span");
+    label.textContent = `@${username}${assignedNames.length ? ` · ${assignedNames.join(", ")}` : ""}`;
+    row.append(label);
+
+    const select = document.createElement("select");
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Choose badge";
+    select.append(placeholder);
+    for (const badge of communityBadgeTypes) {
+      if (assigned.some((entry) => entry.badgeId === badge.id)) continue;
+      const option = document.createElement("option");
+      option.value = badge.id;
+      option.textContent = badge.name;
+      select.append(option);
+    }
+    const assign = document.createElement("button");
+    assign.type = "button";
+    assign.textContent = "Assign";
+    assign.addEventListener("click", async () => {
+      if (!select.value) return;
+      assign.disabled = true;
+      try {
+        await setCommunityMemberBadge(db, communityId, currentUser.uid, uid, select.value);
+        await refreshCommunityBadges();
+        await renderBadgeControls();
+        await renderPosts();
+      } catch (error) {
+        setStatus(error?.message || "Could not assign Community badge.");
+        assign.disabled = false;
+      }
+    });
+    row.append(select, assign);
+
+    for (const assignment of assigned) {
+      const badge = badgeTypeFor(assignment.badgeId);
+      if (!badge) continue;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = `Remove ${badge.name}`;
+      remove.addEventListener("click", async () => {
+        remove.disabled = true;
+        try {
+          await removeCommunityMemberBadge(db, communityId, currentUser.uid, uid, assignment.badgeId);
+          await refreshCommunityBadges();
+          await renderBadgeControls();
+          await renderPosts();
+        } catch (error) {
+          setStatus(error?.message || "Could not remove Community badge.");
+          remove.disabled = false;
+        }
+      });
+      row.append(remove);
+    }
+    panel.append(row);
+  }
+
+  document.getElementById("community-staff-controls")?.after(panel);
+  if (!document.getElementById("community-staff-controls")) composer?.parentElement?.after(panel);
+};
 
 const renderMemberControls = async () => {
   let panel = document.getElementById("community-staff-controls");
@@ -110,7 +256,9 @@ const renderMemberControls = async () => {
           await setCommunityModerator(db, communityId, currentUser.uid, member.uid || member.id, member.role !== "moderator");
           communityMembers = await listCommunityMembers(db, communityId);
           currentMembership = communityMembers.find((entry) => entry.uid === currentUser.uid || entry.id === currentUser.uid) || null;
+          await refreshCommunityBadges();
           await renderMemberControls();
+          await renderBadgeControls();
           await renderPosts();
         } catch (error) {
           setStatus(error?.message || "Could not update moderator role.");
@@ -249,7 +397,9 @@ const renderPosts = async () => {
     const authorLabel = await profileLabel(post.authorId);
     const authorMembership = communityMembers.find((member) => member.uid === post.authorId || member.id === post.authorId);
     const staffBadge = authorMembership?.role === "owner" ? " · Owner" : authorMembership?.role === "moderator" ? " · Moderator" : "";
-    author.textContent = `@${authorLabel}${staffBadge}${post.pinnedAt ? " · Pinned" : ""}`;
+    const scopedBadges = memberBadgeNames(post.authorId);
+    const scopedBadgeLabel = scopedBadges.length ? ` · ${scopedBadges.join(" · ")}` : "";
+    author.textContent = `@${authorLabel}${staffBadge}${scopedBadgeLabel}${post.pinnedAt ? " · Pinned" : ""}`;
 
     const body = document.createElement("p");
     body.textContent = post.content || "";
@@ -352,7 +502,9 @@ const loadCommunity = async () => {
   composer.hidden = !currentMembership;
   if (!currentMembership) setStatus("Join this Community from Discover before posting.");
 
+  await refreshCommunityBadges();
   await renderMemberControls();
+  await renderBadgeControls();
   await renderPosts();
 };
 
