@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const html = await readFile(new URL("../group-detail.html", import.meta.url), "utf8");
 const js = await readFile(new URL("../private-group-detail.js", import.meta.url), "utf8");
+const publicJs = await readFile(new URL("../group-detail.js", import.meta.url), "utf8");
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 const sw = await readFile(new URL("../sw.js", import.meta.url), "utf8");
 
@@ -37,6 +38,8 @@ assert.match(rules, /privateGroupMessages[\s\S]*request\.resource\.data\.encrypt
 assert.match(rules, /privateGroupMessages[\s\S]*request\.resource\.data\.keys\(\)\.hasOnly\(\['senderId', 'encrypted', 'cipherVersion', 'bodyCipher', 'createdAt'\]\)/, "private Group messages cannot store plaintext fields");
 assert.match(rules, /resource\.data\.kind == 'privateGroup'[\s\S]*isGroupMember\(resource\.data\.roomId, request\.auth\.uid\)/, "private Group key envelopes are readable only by Group members");
 assert.match(rules, /request\.resource\.data\.kind in \['temporary', 'premium', 'privateGroup'\]/, "privateGroup is an allowed E2EE room-key scope");
+assert.match(rules, /request\.resource\.data\.groupId is string[\s\S]{0,250}groupPublicAfter\(request\.resource\.data\.groupId\)/, "canonical Group posts are limited to public Groups so private discussions cannot fall back to plaintext");
+assert.match(publicJs, /currentGroup\?\.visibility\s*===\s*["']private["'][\s\S]{0,250}(?:return|composer\.hidden\s*=\s*true)/, "public Group controller explicitly refuses the plaintext composer for private Groups");
 
 assert.match(sw, /group-detail\.html/, "Group detail remains available in the offline graph");
 assert.match(sw, /group-detail\.js/, "public Group detail remains available in the offline graph");
