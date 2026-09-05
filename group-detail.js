@@ -5,6 +5,8 @@ import {
   leaveGroup,
   listGroupMembers,
   listGroupPosts,
+  removeGroupMember,
+  setGroupModerator,
   setGroupPostPinned
 } from "./group-firestore.mjs";
 import { canonicalPollVote, pollVoteDocumentId } from "./poll-vote-policy.mjs";
@@ -86,6 +88,82 @@ const refreshMembership = async () => {
     membershipButton.disabled = currentMembership?.role === "owner";
     membershipButton.textContent = currentMembership ? "Leave Group" : "Join Group";
   }
+};
+
+const renderStaffControls = async () => {
+  document.getElementById("group-staff-controls")?.remove();
+  if (!currentMembership) return;
+
+  const panel = document.createElement("section");
+  panel.id = "group-staff-controls";
+  panel.className = "connections-panel";
+
+  const heading = document.createElement("h2");
+  heading.textContent = "Group members";
+  panel.append(heading);
+
+  for (const member of groupMembers) {
+    const uid = member.uid || member.id;
+    const row = document.createElement("div");
+    row.className = "connection-card";
+
+    const roleName = member.role === "owner" ? "Owner" : member.role === "moderator" ? "Moderator" : "Member";
+    const label = document.createElement("span");
+    label.textContent = `@${await profileLabel(uid)} · ${roleName}`;
+    row.append(label);
+
+    if (member.role === "owner") {
+      const protectedLabel = document.createElement("span");
+      protectedLabel.textContent = "Owner role cannot be removed.";
+      row.append(protectedLabel);
+    } else {
+      if (currentMembership?.role === "owner") {
+        const moderatorToggle = document.createElement("button");
+        moderatorToggle.type = "button";
+        moderatorToggle.textContent = member.role === "moderator" ? "Remove moderator" : "Make moderator";
+        moderatorToggle.addEventListener("click", async () => {
+          moderatorToggle.disabled = true;
+          try {
+            await setGroupModerator(db, groupId, currentUser.uid, uid, member.role !== "moderator");
+            await refreshMembership();
+            await renderStaffControls();
+            await renderPosts();
+          } catch (error) {
+            setStatus(error?.message || "Could not update moderator role.");
+            moderatorToggle.disabled = false;
+          }
+        });
+        row.append(moderatorToggle);
+      }
+
+      const canRemove = currentMembership?.role === "owner"
+        || (currentMembership?.role === "moderator" && member.role === "member");
+      if (canRemove && uid !== currentUser.uid) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Remove member";
+        remove.addEventListener("click", async () => {
+          remove.disabled = true;
+          try {
+            await removeGroupMember(db, groupId, currentUser.uid, uid);
+            currentGroup = await getGroup(db, groupId);
+            if (membersLabel) membersLabel.textContent = `${Number(currentGroup?.memberCount || 0)} members`;
+            await refreshMembership();
+            await renderStaffControls();
+            await renderPosts();
+          } catch (error) {
+            setStatus(error?.message || "Could not remove Group member.");
+            remove.disabled = false;
+          }
+        });
+        row.append(remove);
+      }
+    }
+
+    panel.append(row);
+  }
+
+  composer?.parentElement?.after(panel);
 };
 
 const loadComments = async (postId, container) => {
@@ -319,6 +397,7 @@ const loadGroup = async () => {
   if (description) description.textContent = currentGroup.description || "";
   if (membersLabel) membersLabel.textContent = `${Number(currentGroup.memberCount || 0)} members`;
   await refreshMembership();
+  await renderStaffControls();
   await renderPosts();
 };
 
@@ -331,6 +410,7 @@ membershipButton?.addEventListener("click", async () => {
     currentGroup = await getGroup(db, groupId);
     if (membersLabel) membersLabel.textContent = `${Number(currentGroup?.memberCount || 0)} members`;
     await refreshMembership();
+    await renderStaffControls();
     await renderPosts();
   } catch (error) {
     setStatus(error?.message || "Could not update Group membership.");
