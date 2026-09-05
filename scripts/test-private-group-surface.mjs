@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+// Task 8 final verification runs this contract on the secured branch head.
 const html = await readFile(new URL("../group-detail.html", import.meta.url), "utf8");
 const js = await readFile(new URL("../private-group-detail.js", import.meta.url), "utf8");
 const publicJs = await readFile(new URL("../group-detail.js", import.meta.url), "utf8");
