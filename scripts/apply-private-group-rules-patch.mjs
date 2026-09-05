@@ -1,8 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 
-// Task 8 trigger: keep this patch idempotent so reruns are safe.
-const path = new URL("../firestore.rules", import.meta.url);
-let rules = await readFile(path, "utf8");
+// Task 8: keep this patch idempotent so reruns are safe.
+const rulesPath = new URL("../firestore.rules", import.meta.url);
+const detailPath = new URL("../group-detail.js", import.meta.url);
+let rules = await readFile(rulesPath, "utf8");
+let detail = await readFile(detailPath, "utf8");
 
 const groupPattern = /    match \/groups\/\{groupId\} \{[\s\S]*?\n    \}\n\n    match \/groups\/\{groupId\}\/members\/\{userId\} \{/;
 const groupMatch = rules.match(groupPattern)?.[0] || "";
@@ -80,5 +82,22 @@ const oldDelete = `      allow delete: if signedIn() && resource.data.recipientU
 const newDelete = `      allow delete: if signedIn()\n        && (resource.data.recipientUid == request.auth.uid\n          || (resource.data.kind == 'privateGroup' && isGroupModerator(resource.data.roomId)));`;
 if (rules.includes(oldDelete)) rules = rules.replace(oldDelete, newDelete);
 
-await writeFile(path, rules);
-console.log("Private Group Firestore security patch applied");
+// Private Group conversations must never fall back to canonical plaintext Group posts.
+rules = rules.replace(
+  `            && request.resource.data.groupId is string\n            && groupActiveAfter(request.resource.data.groupId)\n            && isGroupMemberAfter(request.resource.data.groupId, request.auth.uid)))`,
+  `            && request.resource.data.groupId is string\n            && groupPublicAfter(request.resource.data.groupId)\n            && isGroupMemberAfter(request.resource.data.groupId, request.auth.uid)))`
+);
+
+// The public Group controller must hand private Groups to the encrypted controller.
+const detailAnchor = `  await refreshMembership();\n  await renderStaffControls();\n  await renderPosts();`;
+const detailGuard = `  await refreshMembership();\n  if (currentGroup?.visibility === "private") {\n    if (composer) composer.hidden = true;\n    if (postsList) postsList.hidden = true;\n    return;\n  }\n  await renderStaffControls();\n  await renderPosts();`;
+if (!detail.includes(`currentGroup?.visibility === "private"`)) {
+  if (!detail.includes(detailAnchor)) throw new Error("Could not locate Group detail private-visibility guard point");
+  detail = detail.replace(detailAnchor, detailGuard);
+}
+
+await Promise.all([
+  writeFile(rulesPath, rules),
+  writeFile(detailPath, detail)
+]);
+console.log("Private Group Firestore and plaintext-fallback security patch applied");
