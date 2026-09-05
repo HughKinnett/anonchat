@@ -581,6 +581,12 @@ const renderRoomMessages = () => {
       item.append(photo);
     }
     attachRoomMessageHold(item, message);
+    if (data.senderId !== state.user.uid) {
+      const report = document.createElement("button");
+      report.type = "button"; report.className = `${REPORT_BUTTON_CLASS} room-visible-report`; report.textContent = "Report";
+      report.addEventListener("click", () => showRoomMessageActions(message));
+      item.append(report);
+    }
     return item;
   }));
   $("room-messages").scrollTop = $("room-messages").scrollHeight;
@@ -896,6 +902,10 @@ const renderDirectMessages = () => {
     const decrypted = data.encrypted ? decryptedDirectMessages.get(message.id) : data;
     const item = document.createElement("div");
     item.className = `message private-chat-bubble${data.senderId === state.user.uid ? " mine" : ""}`;
+    item.dataset.messageId = message.id;
+    item.dataset.conversationId = message.ref.parent.parent.id;
+    item.dataset.senderId = data.senderId;
+    item.dataset.createdAt = String(data.createdAt?.toMillis?.() || 0);
     const sender = document.createElement("small");
     sender.textContent = `@${userName(data.senderId)}`;
     const text = document.createElement("span");
@@ -1024,6 +1034,8 @@ $("direct-message-form").addEventListener("submit", async (event) => {
     const imageCipher = pendingDirectImage
       ? await encryptPayload(key, { imageData: pendingDirectImage }, `${context}:image`)
       : null;
+    const replyToMessageId = $("direct-message").dataset.replyToMessageId || "";
+    const replyToSenderId = $("direct-message").dataset.replyToSenderId || "";
     await setDoc(messageRef, {
       participants: [state.user.uid, other].sort(),
       senderId: state.user.uid,
@@ -1034,6 +1046,11 @@ $("direct-message-form").addEventListener("submit", async (event) => {
       createdAt: serverTimestamp(),
       ...(disappear ? { expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) } : {})
     });
+    if (replyToMessageId) {
+      await setDoc(doc(db, "messageReplyLinks", `${acceptedRequest.id}__${messageRef.id}`), { conversationId: acceptedRequest.id, messageId: messageRef.id, senderId: state.user.uid, replyToMessageId, replyToSenderId, createdAt: serverTimestamp() });
+    }
+    $("direct-message").removeAttribute("data-reply-to-message-id"); $("direct-message").removeAttribute("data-reply-to-sender-id");
+    if ($("direct-reply-preview")) $("direct-reply-preview").hidden = true;
     event.target.reset();
     clearDirectPhoto();
   } catch {

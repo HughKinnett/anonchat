@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v119";
+const CACHE_NAME = "anonchat-v120";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -106,6 +106,30 @@ const APP_SHELL = [
   "./site-announcement.js",
   "./manifest.webmanifest",
   "./anonchat-background-mobile.jpg",
+  "./discover.html",
+  "./discover.js",
+  "./saved.html",
+  "./saved.js",
+  "./user-experience.css",
+  "./user-experience-policy.mjs",
+  "./badge-policy.mjs",
+  "./discovery-policy.mjs",
+  "./messaging-extras-policy.mjs",
+  "./accessibility-policy.mjs",
+  "./accessibility.js",
+  "./user-experience-gate.js",
+  "./profile-extras.js",
+  "./content-extras.js",
+  "./community-extras.js",
+  "./admin-experience.js",
+  "./badge-founding-member.svg",
+  "./badge-community-helper.svg",
+  "./badge-top-contributor.svg",
+  "./badge-popular-post.svg",
+  "./badge-long-time-member.svg",
+  "./badge-premium-member.svg",
+  "./badge-moderator.svg",
+  "./badge-administrator.svg",
   "./anonchat-anonymous.png"
 ];
 

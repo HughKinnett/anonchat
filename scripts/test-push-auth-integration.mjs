@@ -3,11 +3,15 @@ import { readdir, readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 const exitPolicy = {
+  "admin-experience.js": { authenticated: 0, authLoss: 0 },
   "admin.js": { authenticated: 1, authLoss: 1 },
+  "community-extras.js": { authenticated: 0, authLoss: 0 },
   "community.js": { authenticated: 2, authLoss: 1 },
   "connections.js": { authenticated: 1, authLoss: 1 },
+  "content-extras.js": { authenticated: 0, authLoss: 0 },
   "customize.js": { authenticated: 0, authLoss: 1 },
   "delete-account.js": { authenticated: 2, authLoss: 1 },
+  "discover.js": { authenticated: 0, authLoss: 0 },
   "experience.js": { authenticated: 0, authLoss: 1 },
   "loginfirebase.js": { authenticated: 2, authLoss: 1 },
   "online-followers.js": { authenticated: 0, authLoss: 0 },
@@ -16,10 +20,13 @@ const exitPolicy = {
   "premium-profile.js": { authenticated: 0, authLoss: 0 },
   "premium-rooms.js": { authenticated: 0, authLoss: 1 },
   "premium.js": { authenticated: 0, authLoss: 1 },
+  "profile-extras.js": { authenticated: 0, authLoss: 0 },
   "profile-style.js": { authenticated: 0, authLoss: 1 },
   "profile.js": { authenticated: 2, authLoss: 1 },
+  "saved.js": { authenticated: 0, authLoss: 0 },
   "timeline.js": { authenticated: 2, authLoss: 1 },
-  "upload.js": { authenticated: 0, authLoss: 1 }
+  "upload.js": { authenticated: 0, authLoss: 1 },
+  "user-experience-gate.js": { authenticated: 0, authLoss: 0 }
 };
 
 const runtimeNames = (await readdir(root, { withFileTypes: true }))
