@@ -126,6 +126,115 @@ service cloud.firestore {
         );
     }
 
+    function interestCommunityActiveAfter(communityId) {
+      return existsAfter(/databases/$(database)/documents/communities/$(communityId))
+        && getAfter(/databases/$(database)/documents/communities/$(communityId)).data.visibility == 'public'
+        && getAfter(/databases/$(database)/documents/communities/$(communityId)).data.status == 'active';
+    }
+
+    function isInterestCommunityMemberAfter(communityId, uid) {
+      return uid is string
+        && existsAfter(/databases/$(database)/documents/communities/$(communityId)/members/$(uid))
+        && getAfter(/databases/$(database)/documents/communities/$(communityId)/members/$(uid)).data.role
+          in ['owner', 'moderator', 'member'];
+    }
+
+    function isInterestCommunityOwner(communityId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    function isInterestCommunityModerator(communityId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid)).data.role
+          in ['owner', 'moderator'];
+    }
+
+    function validInterestCommunityPinUpdate() {
+      return resource.data.keys().hasAny(['communityId'])
+        && isInterestCommunityModerator(resource.data.communityId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinnedAt', 'pinnedBy'])
+        && ((request.resource.data.keys().hasAll(['pinnedAt', 'pinnedBy'])
+            && request.resource.data.pinnedAt == request.time
+            && request.resource.data.pinnedBy == request.auth.uid)
+          || !request.resource.data.keys().hasAny(['pinnedAt', 'pinnedBy']));
+    }
+
+    function groupPublicAfter(groupId) {
+      return existsAfter(/databases/$(database)/documents/groups/$(groupId))
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.visibility == 'public'
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.premiumRequired == false
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.status == 'active';
+    }
+
+    function groupActiveAfter(groupId) {
+      return existsAfter(/databases/$(database)/documents/groups/$(groupId))
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.status == 'active';
+    }
+
+    function isGroupMemberAfter(groupId, uid) {
+      return uid is string
+        && existsAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(uid))
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(uid)).data.role
+          in ['owner', 'moderator', 'member'];
+    }
+
+    function isGroupMember(groupId, uid) {
+      return uid is string
+        && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(uid))
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(uid)).data.role
+          in ['owner', 'moderator', 'member'];
+    }
+
+    function isGroupOwner(groupId) {
+      return signedIn()
+        && isGroupMember(groupId, request.auth.uid)
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    function isGroupModerator(groupId) {
+      return signedIn()
+        && isGroupMember(groupId, request.auth.uid)
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role
+          in ['owner', 'moderator'];
+    }
+
+    function groupPostReadable() {
+      return !resource.data.keys().hasAny(['groupId'])
+        || (exists(/databases/$(database)/documents/groups/$(resource.data.groupId))
+          && get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.visibility == 'public')
+        || isGroupMember(resource.data.groupId, request.auth.uid)
+        || isAdmin();
+    }
+
+    function validGroupPinUpdate() {
+      return resource.data.keys().hasAny(['groupId'])
+        && isGroupModerator(resource.data.groupId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinnedAt', 'pinnedBy'])
+        && ((request.resource.data.keys().hasAll(['pinnedAt', 'pinnedBy'])
+            && request.resource.data.pinnedAt == request.time
+            && request.resource.data.pinnedBy == request.auth.uid)
+          || !request.resource.data.keys().hasAny(['pinnedAt', 'pinnedBy']));
+    }
+
+    function validGroupMemberCountUpdate(groupId) {
+      let delta = request.resource.data.memberCount - resource.data.memberCount;
+      return signedIn()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberCount', 'updatedAt'])
+        && ((delta == 1
+            && ((!exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
+                && existsAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)))
+              || isGroupModerator(groupId)))
+          || (delta == -1 && isGroupModerator(groupId))
+          || (delta == -1
+            && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
+            && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role != 'owner'
+            && !existsAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))));
+    }
+
     function blockPath(left, right) {
       return /databases/$(database)/documents/blocks/$(left + '_' + right);
     }
@@ -917,10 +1026,11 @@ service cloud.firestore {
     match /e2eeRoomKeyEnvelopes/{envelopeId} {
       allow read: if activeUser() && (resource.data.recipientUid == request.auth.uid
         || (resource.data.kind == 'temporary' && temporaryRoomMember(resource.data.roomId, request.auth.uid))
-        || (resource.data.kind == 'premium' && premiumRoomMember(resource.data.roomId, request.auth.uid)));
+        || (resource.data.kind == 'premium' && premiumRoomMember(resource.data.roomId, request.auth.uid))
+        || (resource.data.kind == 'privateGroup' && isGroupMember(resource.data.roomId, request.auth.uid)));
       allow create: if activeUserAfter()
         && request.resource.data.keys().hasOnly(['kind', 'roomId', 'recipientUid', 'senderUid', 'envelope', 'version', 'createdAt'])
-        && request.resource.data.kind in ['temporary', 'premium']
+        && request.resource.data.kind in ['temporary', 'premium', 'privateGroup']
         && request.resource.data.roomId is string
         && request.resource.data.roomId.size() > 0
         && request.resource.data.recipientUid is string
@@ -935,10 +1045,17 @@ service cloud.firestore {
             && temporaryRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid))
           || (request.resource.data.kind == 'premium'
             && premiumRoomMemberAfter(request.resource.data.roomId, request.auth.uid)
-            && premiumRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid)))
+            && premiumRoomMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid))
+          || (request.resource.data.kind == 'privateGroup'
+            && isGroupMemberAfter(request.resource.data.roomId, request.auth.uid)
+            && isGroupMemberAfter(request.resource.data.roomId, request.resource.data.recipientUid)
+            && getAfter(/databases/$(database)/documents/groups/$(request.resource.data.roomId)).data.visibility == 'private'
+            && getAfter(/databases/$(database)/documents/groups/$(request.resource.data.roomId)).data.encrypted == true))
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if signedIn() && resource.data.recipientUid == request.auth.uid;
+      allow delete: if signedIn()
+        && (resource.data.recipientUid == request.auth.uid
+          || (resource.data.kind == 'privateGroup' && isGroupModerator(resource.data.roomId)));
     }
 
     match /pushSubscriptions/{subscriptionId} {
@@ -1040,11 +1157,109 @@ service cloud.firestore {
               && (request.resource.data.get('spotifyPlaylistUrl', '') == ''
                 || request.resource.data.get('spotifyPlaylistUrl', '')
                   .matches('https://open[.]spotify[.]com/playlist/[A-Za-z0-9]+')))
+            ||
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bio'])
+              && request.resource.data.get('bio', '') is string
+              && request.resource.data.get('bio', '').size() <= 300)
           ));
       allow delete: if activeUser()
           && request.auth.uid == userId
           && exists(/databases/$(database)/documents/accountDeletionRequests/$(request.auth.uid))
           && !isProtectedAdministrator(resource.data.username);
+    }
+
+    match /badgeTypes/{badgeId} {
+      allow read: if signedIn();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'name', 'description', 'imageUrl', 'category', 'awardMode',
+          'milestoneMetric', 'milestoneThreshold', 'active',
+          'createdAt', 'createdBy', 'updatedAt'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 280
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imageUrl.size() <= 500
+        && (request.resource.data.imageUrl == ''
+          || request.resource.data.imageUrl.matches('https://.+'))
+        && request.resource.data.category in [
+          'early_supporter', 'staff', 'contributor', 'popular_post',
+          'community_helper', 'long_time_member', 'premium', 'event',
+          'milestone', 'special'
+        ]
+        && request.resource.data.awardMode in ['automatic', 'manual']
+        && request.resource.data.active is bool
+        && ((request.resource.data.awardMode == 'manual'
+            && request.resource.data.milestoneMetric == null
+            && request.resource.data.milestoneThreshold == null)
+          || (request.resource.data.awardMode == 'automatic'
+            && request.resource.data.milestoneMetric in [
+              'posts_created', 'single_post_interactions',
+              'total_interactions_received', 'comments_received',
+              'comments_or_replies_created', 'followers_count',
+              'account_age_days', 'early_member', 'premium_active'
+            ]
+            && (((request.resource.data.milestoneMetric == 'early_member'
+                || request.resource.data.milestoneMetric == 'premium_active')
+                && request.resource.data.milestoneThreshold == null)
+              || (!(request.resource.data.milestoneMetric in ['early_member', 'premium_active'])
+                && request.resource.data.milestoneThreshold is int
+                && request.resource.data.milestoneThreshold > 0))))
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'name', 'description', 'imageUrl', 'category', 'awardMode',
+          'milestoneMetric', 'milestoneThreshold', 'active',
+          'createdAt', 'createdBy', 'updatedAt'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 280
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imageUrl.size() <= 500
+        && (request.resource.data.imageUrl == ''
+          || request.resource.data.imageUrl.matches('https://.+'))
+        && request.resource.data.category in [
+          'early_supporter', 'staff', 'contributor', 'popular_post',
+          'community_helper', 'long_time_member', 'premium', 'event',
+          'milestone', 'special'
+        ]
+        && request.resource.data.awardMode in ['automatic', 'manual']
+        && request.resource.data.active is bool
+        && ((request.resource.data.awardMode == 'manual'
+            && request.resource.data.milestoneMetric == null
+            && request.resource.data.milestoneThreshold == null)
+          || (request.resource.data.awardMode == 'automatic'
+            && request.resource.data.milestoneMetric in [
+              'posts_created', 'single_post_interactions',
+              'total_interactions_received', 'comments_received',
+              'comments_or_replies_created', 'followers_count',
+              'account_age_days', 'early_member', 'premium_active'
+            ]
+            && (((request.resource.data.milestoneMetric == 'early_member'
+                || request.resource.data.milestoneMetric == 'premium_active')
+                && request.resource.data.milestoneThreshold == null)
+              || (!(request.resource.data.milestoneMetric in ['early_member', 'premium_active'])
+                && request.resource.data.milestoneThreshold is int
+                && request.resource.data.milestoneThreshold > 0))))
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId}/badges/{badgeId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
     }
 
     match /adminDeletionJobs/{targetUid} {
@@ -1378,11 +1593,244 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
+    match /groups/{groupId} {
+      allow read: if signedIn()
+        && (resource.data.visibility == 'public' || isGroupMember(groupId, request.auth.uid) || isAdmin());
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['name', 'slug', 'description', 'topic', 'ownerId', 'visibility', 'premiumRequired', 'encrypted', 'cipherVersion', 'status', 'memberCount', 'createdAt', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 3
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.slug is string
+        && request.resource.data.slug.matches('^[a-z0-9-]{3,60}$')
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 500
+        && request.resource.data.topic is string
+        && request.resource.data.topic.size() >= 1
+        && request.resource.data.topic.size() <= 60
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.visibility in ['public', 'private']
+        && ((request.resource.data.visibility == 'public'
+            && request.resource.data.premiumRequired == false
+            && !request.resource.data.keys().hasAny(['encrypted', 'cipherVersion']))
+          || (request.resource.data.visibility == 'private'
+            && request.resource.data.premiumRequired == true
+            && request.resource.data.encrypted == true
+            && request.resource.data.cipherVersion == 1
+            && isPremiumUidAfter(request.auth.uid)))
+        && request.resource.data.status == 'active'
+        && request.resource.data.memberCount == 1
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner'
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.joinedAt == request.time;
+      allow update: if (isGroupOwner(groupId)
+          && request.resource.data.keys().hasOnly(['name', 'slug', 'description', 'topic', 'ownerId', 'visibility', 'premiumRequired', 'encrypted', 'cipherVersion', 'status', 'memberCount', 'createdAt', 'updatedAt'])
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.visibility == resource.data.visibility
+          && request.resource.data.premiumRequired == resource.data.premiumRequired
+          && request.resource.data.get('encrypted', false) == resource.data.get('encrypted', false)
+          && request.resource.data.get('cipherVersion', 0) == resource.data.get('cipherVersion', 0)
+          && request.resource.data.memberCount == resource.data.memberCount
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.status in ['active', 'archived']
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'description', 'topic', 'status', 'updatedAt']))
+        || validGroupMemberCountUpdate(groupId);
+      allow delete: if false;
+    }
+
+    match /groups/{groupId}/members/{userId} {
+      allow read: if signedIn()
+        && (get(/databases/$(database)/documents/groups/$(groupId)).data.visibility == 'public'
+          || isGroupMember(groupId, request.auth.uid)
+          || isAdmin());
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['uid', 'role', 'joinedAt', 'invitedBy'])
+        && request.resource.data.uid == userId
+        && request.resource.data.role in ['owner', 'moderator', 'member']
+        && request.resource.data.joinedAt == request.time
+        && ((userId == request.auth.uid
+            && request.resource.data.role == 'owner'
+            && existsAfter(/databases/$(database)/documents/groups/$(groupId))
+            && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == request.auth.uid)
+          || (userId == request.auth.uid
+            && request.resource.data.role == 'member'
+            && groupPublicAfter(groupId)
+            && !request.resource.data.keys().hasAny(['invitedBy']))
+          || (userId != request.auth.uid
+            && request.resource.data.role == 'member'
+            && groupActiveAfter(groupId)
+            && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.visibility == 'private'
+            && isGroupModerator(groupId)
+            && request.resource.data.invitedBy == request.auth.uid));
+      allow update: if activeUserAfter()
+        && isGroupOwner(groupId)
+        && resource.data.role != 'owner'
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.joinedAt == resource.data.joinedAt
+        && request.resource.data.get('invitedBy', '') == resource.data.get('invitedBy', '')
+        && request.resource.data.role in ['moderator', 'member']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role']);
+      allow delete: if signedIn()
+        && resource.data.role != 'owner'
+        && ((userId == request.auth.uid)
+          || (isGroupOwner(groupId))
+          || (isGroupModerator(groupId) && resource.data.role == 'member'));
+    }
+
+    match /groups/{groupId}/privateGroupMessages/{messageId} {
+      allow read: if activeUser() && isGroupMember(groupId, request.auth.uid);
+      allow create: if activeUserAfter()
+        && isGroupMemberAfter(groupId, request.auth.uid)
+        && existsAfter(/databases/$(database)/documents/groups/$(groupId))
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.visibility == 'private'
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.premiumRequired == true
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.encrypted == true
+        && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.status == 'active'
+        && request.resource.data.keys().hasOnly(['senderId', 'encrypted', 'cipherVersion', 'bodyCipher', 'createdAt'])
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.encrypted == true
+        && request.resource.data.cipherVersion == 1
+        && request.resource.data.bodyCipher is map
+        && request.resource.data.bodyCipher.keys().hasOnly(['version', 'algorithm', 'iv', 'ciphertext'])
+        && request.resource.data.bodyCipher.version == 1
+        && request.resource.data.bodyCipher.algorithm == 'A256GCM'
+        && request.resource.data.bodyCipher.iv is string
+        && request.resource.data.bodyCipher.iv.size() <= 32
+        && request.resource.data.bodyCipher.ciphertext is string
+        && request.resource.data.bodyCipher.ciphertext.size() <= 12000
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if signedIn()
+        && isGroupMember(groupId, request.auth.uid)
+        && (resource.data.senderId == request.auth.uid || isGroupModerator(groupId));
+    }
+
+    match /communities/{communityId} {
+      allow read: if signedIn() && resource.data.visibility == 'public';
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['name', 'slug', 'description', 'topic', 'rules', 'ownerId', 'visibility', 'status', 'memberCount', 'createdAt', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 3
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.slug is string
+        && request.resource.data.slug.matches('^[a-z0-9-]{3,60}$')
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 500
+        && request.resource.data.topic is string
+        && request.resource.data.topic.size() >= 1
+        && request.resource.data.topic.size() <= 60
+        && request.resource.data.rules is list
+        && request.resource.data.rules.size() <= 10
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.visibility == 'public'
+        && request.resource.data.status == 'active'
+        && request.resource.data.memberCount == 1
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid))
+        && getAfter(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid)).data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid)).data.role == 'owner'
+        && getAfter(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid)).data.joinedAt == request.time;
+      allow update: if isInterestCommunityOwner(communityId)
+        && request.resource.data.keys().hasOnly(['name', 'slug', 'description', 'topic', 'rules', 'ownerId', 'visibility', 'status', 'memberCount', 'createdAt', 'updatedAt'])
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.visibility == 'public'
+        && request.resource.data.memberCount == resource.data.memberCount
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.status in ['active', 'archived']
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 3
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 500
+        && request.resource.data.topic is string
+        && request.resource.data.topic.size() >= 1
+        && request.resource.data.topic.size() <= 60
+        && request.resource.data.rules is list
+        && request.resource.data.rules.size() <= 10
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'description', 'topic', 'rules', 'status', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /communities/{communityId}/members/{userId} {
+      allow read: if signedIn();
+      allow create: if activeUserAfter()
+        && request.resource.data.keys().hasOnly(['uid', 'role', 'joinedAt'])
+        && request.resource.data.uid == userId
+        && request.resource.data.role in ['owner', 'moderator', 'member']
+        && request.resource.data.joinedAt == request.time
+        && userId == request.auth.uid
+        && ((request.resource.data.role == 'member'
+            && interestCommunityActiveAfter(communityId))
+          || (request.resource.data.role == 'owner'
+            && existsAfter(/databases/$(database)/documents/communities/$(communityId))
+            && getAfter(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid));
+      allow update: if activeUserAfter()
+        && isInterestCommunityOwner(communityId)
+        && resource.data.role != 'owner'
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.joinedAt == resource.data.joinedAt
+        && request.resource.data.role in ['moderator', 'member']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role']);
+      allow delete: if signedIn()
+        && userId == request.auth.uid
+        && resource.data.role != 'owner';
+    }
+
+    match /communities/{communityId}/badges/{badgeId} {
+      allow read: if signedIn();
+      allow create: if activeUserAfter()
+        && isInterestCommunityModerator(communityId)
+        && request.resource.data.keys().hasOnly(['name', 'description', 'active', 'createdAt', 'createdBy', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 160
+        && request.resource.data.active is bool
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
+      allow update: if activeUserAfter()
+        && isInterestCommunityModerator(communityId)
+        && request.resource.data.keys().hasOnly(['name', 'description', 'active', 'createdAt', 'createdBy', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 160
+        && request.resource.data.active is bool
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && isInterestCommunityModerator(communityId);
+    }
+
+    match /communities/{communityId}/members/{userId}/badges/{badgeId} {
+      allow read: if signedIn();
+      allow create: if activeUserAfter()
+        && isInterestCommunityModerator(communityId)
+        && request.resource.data.keys().hasOnly(['badgeId', 'assignedAt', 'assignedBy'])
+        && request.resource.data.badgeId == badgeId
+        && request.resource.data.assignedAt == request.time
+        && request.resource.data.assignedBy == request.auth.uid
+        && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(userId))
+        && exists(/databases/$(database)/documents/communities/$(communityId)/badges/$(badgeId))
+        && get(/databases/$(database)/documents/communities/$(communityId)/badges/$(badgeId)).data.active == true;
+      allow update: if false;
+      allow delete: if signedIn() && isInterestCommunityModerator(communityId);
+    }
+
     match /communityPosts/{postId} {
-      allow read: if signedIn() && visibleOrAdmin();
+      allow read: if signedIn() && visibleOrAdmin() && groupPostReadable();
       allow create: if activeUserAfter()
         && featureEnabled('postingEnabled')
-        && request.resource.data.keys().hasOnly(['authorId', 'username', 'content', 'category', 'circleId', 'options', 'expiresAt', 'moderationState', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['authorId', 'username', 'content', 'category', 'circleId', 'communityId', 'groupId', 'options', 'expiresAt', 'moderationState', 'createdAt'])
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.username == currentUsername()
         && request.resource.data.content is string
@@ -1390,14 +1838,28 @@ service cloud.firestore {
         && (request.resource.data.content.size() <= 500
           || (isPremiumUidAfter(request.auth.uid) && request.resource.data.content.size() <= 20000))
         && request.resource.data.category in ['Question', 'Confession', 'Advice', 'Rant', 'Good News', 'Poll']
-        && request.resource.data.circleId is string
-        && circleAvailableAfter(request.resource.data.circleId)
+        && ((request.resource.data.keys().hasAny(['circleId'])
+            && !request.resource.data.keys().hasAny(['communityId', 'groupId'])
+            && request.resource.data.circleId is string
+            && circleAvailableAfter(request.resource.data.circleId))
+          || (request.resource.data.keys().hasAny(['communityId'])
+            && !request.resource.data.keys().hasAny(['circleId', 'groupId'])
+            && request.resource.data.communityId is string
+            && interestCommunityActiveAfter(request.resource.data.communityId)
+            && isInterestCommunityMemberAfter(request.resource.data.communityId, request.auth.uid))
+          || (request.resource.data.keys().hasAny(['groupId'])
+            && !request.resource.data.keys().hasAny(['circleId', 'communityId'])
+            && request.resource.data.groupId is string
+            && groupPublicAfter(request.resource.data.groupId)
+            && isGroupMemberAfter(request.resource.data.groupId, request.auth.uid)))
         && request.resource.data.options is list
         && request.resource.data.options.size() <= 4
         && request.resource.data.moderationState == 'visible'
         && request.resource.data.createdAt == request.time;
       allow update: if validModerationHoldUpdate('communityPost', postId, resource.data.authorId)
-        || validAdminMaterialRestore();
+        || validAdminMaterialRestore()
+        || validInterestCommunityPinUpdate()
+        || validGroupPinUpdate();
       allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);
     }
 

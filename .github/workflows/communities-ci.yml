@@ -1,0 +1,35 @@
+name: Communities focused CI
+
+on:
+  push:
+    branches:
+      - growth-web-release
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/test-community-interest-policy.mjs
+      - run: node scripts/test-community-interest-firestore-contract.mjs
+      - run: node scripts/test-community-interest-rules.mjs
+      - run: node scripts/test-communities-surface.mjs
+      - run: node scripts/test-community-detail-surface.mjs
+      - run: node scripts/test-community-moderator-controls.mjs
+      - run: node scripts/test-community-polls.mjs
+      - run: node scripts/test-community-badges.mjs
+      - run: node scripts/test-community-navigation.mjs
+      - run: node scripts/test-badge-policy.mjs
+      - run: node scripts/test-badge-milestones.mjs
+      - run: node scripts/test-badge-awards-contract.mjs
+      - run: node scripts/test-badge-firestore-rules.mjs
+      - run: node scripts/test-profile-badges-surface.mjs
+      - run: node scripts/test-profile-badge-gallery.mjs
+      - run: node scripts/test-admin-badges-surface.mjs

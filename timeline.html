@@ -49,7 +49,7 @@
       <div class="main-menu">
         <button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button>
         <nav id="main-menu-panel" class="main-menu-panel" hidden>
-          <a href="timeline.html">Timeline</a><a href="community.html">Community</a>
+          <a href="timeline.html">Timeline</a><a href="community.html">Community</a><a href="communities.html">Communities</a>
           <a id="menu-profile-link" href="profile.html">My profile</a><a href="connections.html">Followers & following</a>
           <button class="install-app menu-install" type="button">Install AnonChat</button><a class="menu-danger" href="delete-account.html">Delete account</a>
         </nav>
@@ -79,6 +79,11 @@
             <a id="admin-link" class="my-profile-link admin-link" href="admin.html" hidden>Admin dashboard</a>
           </div>
           <span id="membership-badge" class="my-profile-link membership-badge">Founding Member</span>
+          <div class="profile-bio-editor">
+            <label for="profile-bio-input">About</label>
+            <textarea id="profile-bio-input" maxlength="300" rows="3" placeholder="Tell people a little about you"></textarea>
+            <button id="save-profile-bio" class="secondary-button" type="button">Save bio</button>
+          </div>
         </div>
       </div>
     </section>
@@ -149,8 +154,22 @@
           <div class="feed-tabs" aria-label="Choose posts to show">
             <button id="show-all-posts" class="feed-tab" type="button" aria-pressed="true">For You</button>
             <button id="show-latest-posts" class="feed-tab" type="button" aria-pressed="false">Latest</button>
+            <button id="show-following-posts" class="feed-tab" type="button" aria-pressed="false">Following</button>
+            <button id="show-topic-posts" class="feed-tab" type="button" aria-pressed="false">Chosen Topics</button>
+            <button id="show-temporary-posts" class="feed-tab" type="button" aria-pressed="false">Temporary Only</button>
+            <button id="show-saved-filter-posts" class="feed-tab" type="button" aria-pressed="false">Saved Filters</button>
             <button id="show-profile-posts" class="feed-tab" type="button" aria-pressed="false">My profile</button>
           </div>
+          <section class="chosen-topics" aria-labelledby="chosen-topics-title">
+            <h3 id="chosen-topics-title">Choose topics</h3>
+            <div class="chosen-topic-entry">
+              <label class="sr-only" for="chosen-topic-input">Add a topic</label>
+              <input id="chosen-topic-input" type="text" maxlength="40" placeholder="Add a topic or #hashtag" autocomplete="off">
+              <button id="add-chosen-topic" class="secondary-button" type="button">Add topic</button>
+            </div>
+            <div id="chosen-topic-list" class="chosen-topic-list" aria-label="Selected topics"></div>
+            <p id="chosen-topic-status" role="status" aria-live="polite"></p>
+          </section>
         </div>
         <ul class="feed" id="feed"></ul>
       </section>

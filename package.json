@@ -33,6 +33,7 @@
     "test:admin-deletion-cli": "node scripts/test-admin-deletion-cli.mjs",
     "test:admin-deletion-indexes": "node scripts/test-admin-deletion-indexes.mjs",
     "admin-deletion:process": "node scripts/admin-deletion-processor.mjs",
+    "badge-account-age:process": "node scripts/badge-account-age-processor.mjs",
     "test:legacy-migration": "node scripts/test-legacy-migration-policy.mjs && firebase emulators:exec --only firestore \"node scripts/test-legacy-migration-firestore-integration.mjs\"",
     "test:admin-dashboard": "node scripts/test-admin-dashboard-policy.mjs && node scripts/test-admin-command-center.mjs && node scripts/test-admin-expanded-controls.mjs && node scripts/test-admin-site-control-enforcement.mjs",
     "test:notification-policy": "node scripts/test-notification-policy.mjs",

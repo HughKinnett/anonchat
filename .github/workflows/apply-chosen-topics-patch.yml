@@ -1,0 +1,35 @@
+name: Apply chosen topics surface patch
+
+on:
+  push:
+    branches:
+      - growth-web-release
+    paths:
+      - scripts/patch-chosen-topics-surface.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: growth-web-release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/patch-chosen-topics-surface.mjs
+      - name: Commit chosen topics surface
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add timeline.html timeline.js
+          if git diff --cached --quiet; then
+            echo "No chosen-topics changes needed"
+            exit 0
+          fi
+          git commit -m "feat: add chosen topics feed"
+          git push origin HEAD:growth-web-release

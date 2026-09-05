@@ -3,12 +3,17 @@ import { readdir, readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 const exitPolicy = {
+  "admin-badges.js": { authenticated: 0, authLoss: 1 },
   "admin.js": { authenticated: 1, authLoss: 1 },
+  "communities.js": { authenticated: 1, authLoss: 1 },
+  "community-detail.js": { authenticated: 1, authLoss: 1 },
   "community.js": { authenticated: 2, authLoss: 1 },
   "connections.js": { authenticated: 1, authLoss: 1 },
   "customize.js": { authenticated: 0, authLoss: 1 },
   "delete-account.js": { authenticated: 2, authLoss: 1 },
   "experience.js": { authenticated: 0, authLoss: 1 },
+  "group-detail.js": { authenticated: 1, authLoss: 1 },
+  "groups.js": { authenticated: 1, authLoss: 1 },
   "loginfirebase.js": { authenticated: 2, authLoss: 1 },
   "online-followers.js": { authenticated: 0, authLoss: 0 },
   "premium-menu.js": { authenticated: 0, authLoss: 0 },
@@ -16,6 +21,7 @@ const exitPolicy = {
   "premium-profile.js": { authenticated: 0, authLoss: 0 },
   "premium-rooms.js": { authenticated: 0, authLoss: 1 },
   "premium.js": { authenticated: 0, authLoss: 1 },
+  "private-group-detail.js": { authenticated: 0, authLoss: 1 },
   "profile-style.js": { authenticated: 0, authLoss: 1 },
   "profile.js": { authenticated: 2, authLoss: 1 },
   "timeline.js": { authenticated: 2, authLoss: 1 },

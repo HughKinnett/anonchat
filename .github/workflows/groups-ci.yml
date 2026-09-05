@@ -1,0 +1,28 @@
+name: Groups focused CI
+
+on:
+  push:
+    branches:
+      - growth-web-release
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/test-group-policy.mjs
+      - run: node scripts/test-group-firestore-contract.mjs
+      - run: node scripts/test-group-rules.mjs
+      - run: node scripts/test-groups-surface.mjs
+      - run: node scripts/test-group-detail-surface.mjs
+      - run: node scripts/test-group-moderator-controls.mjs
+      - run: node scripts/test-private-group-contract.mjs
+      - run: node scripts/test-private-group-surface.mjs
+      - run: node scripts/test-group-navigation.mjs

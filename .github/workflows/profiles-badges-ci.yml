@@ -1,0 +1,26 @@
+name: Profiles and badges focused CI
+
+on:
+  push:
+    branches:
+      - profiles-badges-inline
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/test-badge-policy.mjs
+      - run: node scripts/test-badge-milestones.mjs
+      - run: node scripts/test-badge-awards-contract.mjs
+      - run: node scripts/test-badge-firestore-rules.mjs
+      - run: node scripts/test-profile-badges-surface.mjs
+      - run: node scripts/test-profile-badge-gallery.mjs
+      - run: node scripts/test-admin-badges-surface.mjs

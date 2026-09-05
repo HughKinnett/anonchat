@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v119";
+const CACHE_NAME = "anonchat-v128";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -10,6 +10,10 @@ const APP_SHELL = [
   "./forgot-password.html",
   "./connections.html",
   "./community.html",
+  "./communities.html",
+  "./community-detail.html",
+  "./groups.html",
+  "./group-detail.html",
   "./premium.html",
   "./customize.html",
   "./premium-rooms.html",
@@ -74,17 +78,35 @@ const APP_SHELL = [
   "./premium-playlist.js",
   "./premium-rooms.js",
   "./profile.js",
+  "./profile-bio.js",
+  "./profile-badges.js",
+  "./badge-policy.mjs",
+  "./badge-firestore.mjs",
   "./forgot-password.js",
   "./connections.js",
   "./connections-target.mjs",
   "./community.js",
+  "./communities.js",
+  "./community-detail.js",
+  "./community-interest-firestore.mjs",
+  "./community-interest-policy.mjs",
+  "./community-badge-policy.mjs",
+  "./groups.js",
+  "./group-detail.js",
+  "./private-group-detail.js",
+  "./group-firestore.mjs",
+  "./private-group-firestore.mjs",
+  "./group-policy.mjs",
   "./message-request-policy.mjs",
   "./delete-account.js",
   "./admin.js",
+  "./admin-badges.js",
   "./admin-dashboard-policy.mjs",
   "./admin-deletion-policy.mjs",
   "./content-ordering.mjs",
   "./feed-ranking-policy.mjs",
+  "./feed-mode-policy.mjs",
+  "./topic-policy.mjs",
   "./e2ee-crypto.mjs",
   "./e2ee-pin.mjs",
   "./e2ee-device-store.mjs",
@@ -149,7 +171,6 @@ self.addEventListener("fetch", (event) => {
     return cached || refresh;
   }));
 });
-
 
 const PUSH_PAYLOADS = Object.freeze({
   reaction: Object.freeze({ title: "New reaction", action: "reacted to your post.", url: "/timeline.html" }),

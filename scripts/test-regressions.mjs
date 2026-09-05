@@ -74,3 +74,4 @@ await import("./test-comment-surface-regression.mjs");
 await import("./test-interaction-details.mjs");
 await import("./test-follow-privacy-surface.mjs");
 await import("./test-payment-preparation-ui.mjs");
+await import("./test-badge-policy.mjs");

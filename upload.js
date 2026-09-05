@@ -11,6 +11,7 @@ document.getElementById("banner-upload-button")?.addEventListener("click", () =>
 document.getElementById("profile-upload-button")?.addEventListener("click", () => document.getElementById("profile-upload")?.click());
 const setStatus = (message, isError = false) => {
   if (!status) return;
+  status.hidden = false;
   status.textContent = message;
   status.style.color = isError ? "#fca5a5" : "inherit";
 };
@@ -66,6 +67,27 @@ onAuthStateChanged(auth, async (user) => {
     getDoc(doc(db, "premiumSettings", user.uid))
   ]);
   const profile = snapshot.exists() ? snapshot.data() : {};
+  const bioInput = document.getElementById("profile-bio-input");
+  if (bioInput) bioInput.value = typeof profile.bio === "string" ? profile.bio : "";
+  const saveBioButton = document.getElementById("save-profile-bio");
+  saveBioButton?.addEventListener("click", async () => {
+    const bio = String(bioInput?.value || "").trim();
+    if (bio.length > 300) {
+      setStatus("Bio must be 300 characters or fewer.", true);
+      return;
+    }
+    saveBioButton.disabled = true;
+    try {
+      await setDoc(profileRef, { bio }, { merge: true });
+      if (bioInput) bioInput.value = bio;
+      setStatus(bio ? "Bio saved." : "Bio cleared.");
+    } catch {
+      setStatus("Could not save your bio.", true);
+    } finally {
+      saveBioButton.disabled = false;
+    }
+  });
+
   await replaceDisplayedImage(
     "profile-pic",
     profile.profileImage || "anonchat-anonymous.png",
