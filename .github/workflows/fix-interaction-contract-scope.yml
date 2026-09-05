@@ -1,0 +1,29 @@
+name: Fix interaction contract scope
+
+on:
+  push:
+    branches:
+      - fix/timeline-interaction-consistency-heart
+    paths:
+      - .interaction-contract-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/timeline-interaction-consistency-heart
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/fix-interaction-contract-scope.mjs
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/test-timeline-moderation-ui.mjs
+          git commit -m "test: scope legacy interaction assertion to listener"
+          git push origin HEAD:fix/timeline-interaction-consistency-heart
