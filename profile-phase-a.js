@@ -27,7 +27,7 @@ const setStatus = (message, error = false) => {
 
 const markPrivate = (node, hidden) => {
   if (!node) return;
-  node.dataset.profilePrivateHidden = hidden ? "true" : "false";
+  node.setAttribute("data-profile-private-hidden", hidden ? "true" : "false");
 };
 
 const applyVisibility = () => {
