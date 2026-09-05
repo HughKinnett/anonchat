@@ -2,6 +2,7 @@ import { auth, db } from "./firebase-config.js";
 import { isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
 import { listBadgeTypes, listUserBadges, removeUserBadge, saveBadgeType, setBadgeFeatured, setUserBadge } from "./badge-firestore.mjs";
 import { BADGE_CATEGORIES, BADGE_MILESTONE_METRICS } from "./badge-policy.mjs";
+import { exitAfterAuthLoss } from "./push-exit.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -157,7 +158,8 @@ export const initAdminBadges = ({ db, adminUid, setStatus = () => {} }) => {
 };
 
 onAuthStateChanged(auth, async (user) => {
-  if (!user || $("badge-admin-section")) return;
+  if (!user) { await exitAfterAuthLoss({ redirect: () => {} }); return; }
+  if ($("badge-admin-section")) return;
   try {
     const profile = await getDoc(doc(db, "users", user.uid));
     const username = profile.exists() ? String(profile.data().username || "") : "";
