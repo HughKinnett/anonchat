@@ -30,6 +30,8 @@ jobs:
       - run: node scripts/test-phase-b-listener-order.mjs
       - run: node scripts/test-phase-b-reference-loading.mjs
       - run: node scripts/test-phase-b-discovery-integration.mjs
+      - run: node scripts/test-phase-b-admin-edit-history.mjs
       - run: node --check timeline.js
       - run: node --check profile.js
-      # This gate verifies persisted Phase B source, private reference loading, and discovery behavior.
+      - run: node --check admin.js
+      # This gate verifies persisted Phase B source, private reference loading, discovery, and admin auditability.
