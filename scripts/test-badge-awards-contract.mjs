@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [awardSource, firestoreSource, processorSource, adapterSource] = await Promise.all([
+const [awardSource, firestoreSource, processorSource, adapterSource, routingSource] = await Promise.all([
   readFile(new URL("../badge-awards.mjs", import.meta.url), "utf8").catch(() => ""),
   readFile(new URL("../badge-firestore.mjs", import.meta.url), "utf8"),
   readFile(new URL("../badge-award-processor.mjs", import.meta.url), "utf8").catch(() => ""),
-  readFile(new URL("../badge-award-firestore-adapter.mjs", import.meta.url), "utf8").catch(() => "")
+  readFile(new URL("../badge-award-firestore-adapter.mjs", import.meta.url), "utf8").catch(() => ""),
+  readFile(new URL("../badge-activity-routing.mjs", import.meta.url), "utf8").catch(() => "")
 ]);
 
 assert.match(awardSource, /evaluateBadgeMilestones/, "automatic badge award service exports evaluateBadgeMilestones");
@@ -23,6 +24,16 @@ assert.match(adapterSource, /runTransaction/, "trusted adapter performs idempote
 assert.match(adapterSource, /badgeTypes/, "trusted adapter reads badge definitions");
 assert.match(adapterSource, /assignedBy\s*:\s*["']system["']/, "trusted adapter records system as the assigning actor");
 assert.match(adapterSource, /awardSource\s*:\s*["']automatic["']/, "trusted adapter records automatic award source");
+
+assert.match(routingSource, /posts_created/, "post creation routes to posts_created");
+assert.match(routingSource, /single_post_interactions/, "post interaction routes to single_post_interactions");
+assert.match(routingSource, /total_interactions_received/, "post interaction routes to total_interactions_received");
+assert.match(routingSource, /comments_received/, "comment receipt routes to comments_received");
+assert.match(routingSource, /comments_or_replies_created/, "comment or reply creation routes to comments_or_replies_created");
+assert.match(routingSource, /followers_count/, "follow changes route to followers_count");
+assert.match(routingSource, /premium_active/, "premium reconciliation routes to premium_active");
+assert.match(routingSource, /early_member/, "profile initialization routes to early_member");
+assert.match(routingSource, /account_age_days/, "profile initialization routes to account_age_days");
 
 assert.match(firestoreSource, /awardSource/, "badge Firestore helper preserves assignment source metadata");
 
