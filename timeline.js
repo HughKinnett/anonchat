@@ -18,6 +18,7 @@ import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
 import { filterFeedPosts, sortFeedPosts } from "./feed-mode-policy.mjs";
+import { normalizeTopic } from "./topic-policy.mjs";
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
 import { pollVoteDocumentId as voteDocumentId } from "./poll-vote-policy.mjs";
 import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
@@ -68,6 +69,10 @@ const topicPostsButton = document.getElementById("show-topic-posts");
 const temporaryPostsButton = document.getElementById("show-temporary-posts");
 const savedFilterPostsButton = document.getElementById("show-saved-filter-posts");
 const profilePostsButton = document.getElementById("show-profile-posts");
+const chosenTopicInput = document.getElementById("chosen-topic-input");
+const addChosenTopicButton = document.getElementById("add-chosen-topic");
+const chosenTopicList = document.getElementById("chosen-topic-list");
+const chosenTopicStatus = document.getElementById("chosen-topic-status");
 let currentUser;
 let profileUsername;
 let postDocs = [];
@@ -106,6 +111,7 @@ let activeTimelineSession = 0;
 let clearNotificationExpiryTimer = () => {};
 let showingProfile = false;
 let feedMode = "for-you";
+let selectedTopics = new Set();
 const TIMELINE_POST_LIMIT = 20;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -1488,7 +1494,7 @@ const renderFeed = () => {
         mode: feedMode,
         viewerUid: currentUser?.uid,
         followedUids,
-        selectedTopics: new Set(),
+        selectedTopics: selectedTopics,
         savedFilter: null,
         now: Date.now()
       });
@@ -1784,6 +1790,44 @@ const syncPollVoteListeners = () => {
 };
 
 document.addEventListener("visibilitychange", syncInteractionListeners);
+
+const renderChosenTopics = () => {
+  if (!chosenTopicList) return;
+  chosenTopicList.replaceChildren(...[...selectedTopics].map((topic) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chosen-topic-chip";
+    chip.textContent = `#${topic} ×`;
+    chip.setAttribute("aria-label", `Remove topic ${topic}`);
+    chip.addEventListener("click", () => {
+      selectedTopics.delete(topic);
+      renderChosenTopics();
+      if (feedMode === "topics") renderFeed();
+    });
+    return chip;
+  }));
+};
+
+const addChosenTopic = () => {
+  const topic = normalizeTopic(chosenTopicInput?.value);
+  if (!topic) {
+    if (chosenTopicStatus) chosenTopicStatus.textContent = "Enter a valid topic.";
+    return;
+  }
+  selectedTopics.add(topic);
+  if (chosenTopicInput) chosenTopicInput.value = "";
+  if (chosenTopicStatus) chosenTopicStatus.textContent = `Added #${topic}.`;
+  renderChosenTopics();
+  setFeedView("topics");
+};
+
+addChosenTopicButton?.addEventListener("click", addChosenTopic);
+chosenTopicInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addChosenTopic();
+  }
+});
 
 const setFeedView = (mode) => {
   feedMode = mode;

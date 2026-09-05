@@ -160,6 +160,16 @@
             <button id="show-saved-filter-posts" class="feed-tab" type="button" aria-pressed="false">Saved Filters</button>
             <button id="show-profile-posts" class="feed-tab" type="button" aria-pressed="false">My profile</button>
           </div>
+          <section class="chosen-topics" aria-labelledby="chosen-topics-title">
+            <h3 id="chosen-topics-title">Choose topics</h3>
+            <div class="chosen-topic-entry">
+              <label class="sr-only" for="chosen-topic-input">Add a topic</label>
+              <input id="chosen-topic-input" type="text" maxlength="40" placeholder="Add a topic or #hashtag" autocomplete="off">
+              <button id="add-chosen-topic" class="secondary-button" type="button">Add topic</button>
+            </div>
+            <div id="chosen-topic-list" class="chosen-topic-list" aria-label="Selected topics"></div>
+            <p id="chosen-topic-status" role="status" aria-live="polite"></p>
+          </section>
         </div>
         <ul class="feed" id="feed"></ul>
       </section>
