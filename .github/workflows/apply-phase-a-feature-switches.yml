@@ -1,0 +1,35 @@
+name: Apply Phase A feature switches
+
+on:
+  push:
+    branches:
+      - phase-a-profiles-identity
+    paths:
+      - scripts/apply-phase-a-feature-switches.mjs
+      - .github/workflows/apply-phase-a-feature-switches.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-a-profiles-identity
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/apply-phase-a-feature-switches.mjs
+      - name: Commit materialized feature switch changes
+        run: |
+          if git diff --quiet -- admin.js profile.js; then
+            echo "No Phase A feature switch changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add admin.js profile.js
+          git commit -m "feat: wire Phase A emergency switches"
+          git push origin HEAD:phase-a-profiles-identity
