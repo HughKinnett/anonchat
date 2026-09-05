@@ -101,6 +101,7 @@ const APP_SHELL = [
   "./poll-vote-policy.mjs",
   "./upload.js",
   "./pwa.js",
+  "./site-announcement.js",
   "./manifest.webmanifest",
   "./anonchat-background-mobile.jpg",
   "./anonchat-anonymous.png"

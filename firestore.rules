@@ -19,8 +19,13 @@ service cloud.firestore {
     }
 
     function featureEnabled(featureName) {
-      return !exists(/databases/$(database)/documents/siteSettings/features)
-        || get(/databases/$(database)/documents/siteSettings/features).data.get(featureName, true) == true;
+      let settingsPath = /databases/$(database)/documents/siteSettings/features;
+      return (featureName == 'registrationsEnabled'
+          && exists(settingsPath)
+          && get(settingsPath).data.get(featureName, false) == true)
+        || (featureName != 'registrationsEnabled'
+          && (!exists(settingsPath)
+            || get(settingsPath).data.get(featureName, true) == true));
     }
 
     function accountNotSuspended(profile) {
@@ -679,7 +684,7 @@ service cloud.firestore {
     }
 
     match /siteSettings/{settingId} {
-      allow read: if isAdmin();
+      allow read: if settingId in ['features', 'announcement'] || isAdmin();
       allow write: if isAdmin();
     }
 
@@ -1002,6 +1007,7 @@ service cloud.firestore {
             ||
             (request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['profileImage', 'coverImage'])
+              && featureEnabled('uploadsEnabled')
               && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['profileImage'])
                 || request.resource.data.get('profileImage', '').size() <= 160000)
               && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['coverImage'])
@@ -1026,6 +1032,7 @@ service cloud.firestore {
                 == request.auth.uid)
             ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['spotifyTrackUrl'])
+              && featureEnabled('spotifyEmbedsEnabled')
               && request.resource.data.get('spotifyTrackUrl', '') is string
               && request.resource.data.get('spotifyTrackUrl', '').size() <= 200
               && (request.resource.data.get('spotifyTrackUrl', '') == ''
@@ -1033,6 +1040,7 @@ service cloud.firestore {
                   .matches('https://open[.]spotify[.]com/track/[A-Za-z0-9]{22}')))
             ||
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['spotifyPlaylistUrl'])
+              && featureEnabled('spotifyEmbedsEnabled')
               && isPremiumUidAfter(userId)
               && request.resource.data.get('spotifyPlaylistUrl', '') is string
               && request.resource.data.get('spotifyPlaylistUrl', '').size() <= 220
@@ -1750,7 +1758,9 @@ service cloud.firestore {
 
     match /posts/{postId} {
       allow read: if signedIn() && visibleOrAdmin();
-      allow create: if activeUserAfter() && featureEnabled('postingEnabled') && (validOriginalPost() || validRepost(postId));
+      allow create: if activeUserAfter() && featureEnabled('postingEnabled')
+        && (featureEnabled('uploadsEnabled') || request.resource.data.get('imageData', '') == '')
+        && (validOriginalPost() || validRepost(postId));
       allow update: if validModerationHoldUpdate('post', postId, resource.data.authorId)
         || validAdminMaterialRestore();
       allow delete: if isAdmin() || (signedIn() && resource.data.authorId == request.auth.uid);

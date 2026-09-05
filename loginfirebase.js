@@ -113,19 +113,33 @@ signInForm.addEventListener("submit", async (event) => {
   }
 });
 
-const SIGNUPS_OPEN = false;
+let signupsOpen = false;
 const signUpForm = document.getElementById("sign-up-form");
-signUpForm.hidden = false;
-signUpForm.setAttribute("aria-hidden", "false");
-signUpForm.setAttribute("aria-disabled", String(!SIGNUPS_OPEN));
-if (!SIGNUPS_OPEN) {
-  signUpForm.querySelectorAll("input, button").forEach((control) => { control.disabled = true; });
-}
+const signupControls = [...signUpForm.querySelectorAll("input, button")];
+const setSignupAvailability = (enabled) => {
+  signupsOpen = enabled === true;
+  signUpForm.hidden = false;
+  signUpForm.setAttribute("aria-hidden", "false");
+  signUpForm.setAttribute("aria-disabled", String(!signupsOpen));
+  signupControls.forEach((control) => { control.disabled = !signupsOpen; });
+};
+const refreshSignupAvailability = async () => {
+  try {
+    const snapshot = await getDoc(doc(db, "siteSettings", "features"));
+    signupsOpen = snapshot.exists() ? snapshot.data().registrationsEnabled === true : false; // registration stays closed until an admin opens it
+  } catch {
+    signupsOpen = false;
+  }
+  setSignupAvailability(signupsOpen);
+  return signupsOpen;
+};
+setSignupAvailability(false);
+void refreshSignupAvailability();
 
 signUpForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!SIGNUPS_OPEN) {
-    setStatus("New account registration is temporarily closed.", true);
+  if (!(await refreshSignupAvailability())) {
+    setStatus("New account registration is temporarily closed by AnonChat administration.", true);
     return;
   }
   const username = document.getElementById("username").value.trim();

@@ -37,7 +37,7 @@ Fields:
 - `updatedAt: serverTimestamp()`
 - `updatedBy: admin uid`
 
-Missing fields default to `true` so existing production behavior remains unchanged until an administrator deliberately changes a switch.
+Missing feature fields default to `true` so existing production behavior remains unchanged, except registrations. Registrations default to `false` when no settings document exists, preserving AnonChat's current closed-registration launch state until an administrator deliberately opens registration.
 
 ### `siteSettings/announcement`
 Fields:
