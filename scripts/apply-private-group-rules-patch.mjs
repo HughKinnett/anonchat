@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 
+// Task 8 trigger: keep this patch idempotent so reruns are safe.
 const path = new URL("../firestore.rules", import.meta.url);
 let rules = await readFile(path, "utf8");
 
