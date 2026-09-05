@@ -15,7 +15,7 @@
 
 ## Acquisition and discovery
 
-- [ ] Add interest-based Communities with public discovery, membership, moderators, rules, pinned posts, polls, badges, and community-specific discussions.
+- [x] Add interest-based Communities with public discovery, membership, moderators, rules, pinned posts, polls, badges, and community-specific discussions.
 - [ ] Add topic discovery, hashtags, trending topics, and searchable community/topic surfaces.
 - [ ] Add user-controlled feeds: For You, Latest, Following only, chosen topics, temporary-posts-only, and saved custom feed filters.
 - [ ] Add stronger low-friction onboarding from shared links so visitors can read the shared discussion before signing up.
