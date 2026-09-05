@@ -1,0 +1,34 @@
+name: Apply profiles badges branch patch
+
+on:
+  push:
+    branches:
+      - profiles-badges-inline
+    paths:
+      - scripts/apply-profiles-badges-patch.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: profiles-badges-inline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/apply-profiles-badges-patch.mjs
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No patch changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firestore.rules
+          git commit -m "feat: secure profile bios and badges"
+          git push origin HEAD:profiles-badges-inline
