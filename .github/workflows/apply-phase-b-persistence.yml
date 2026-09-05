@@ -24,6 +24,20 @@ jobs:
         with:
           node-version: "22"
       - run: node scripts/fix-phase-b-persistence-anchor.mjs
+      - name: Diagnose repost anchor
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const timeline = fs.readFileSync("timeline.js", "utf8");
+          const patch = fs.readFileSync("scripts/apply-phase-b-persistence.mjs", "utf8");
+          const needle = `    imageData: post.imageData || "",
+              createdAt: serverTimestamp()`;
+          const index = timeline.indexOf('imageData: post.imageData || ""');
+          console.log("timeline needle present:", timeline.includes(needle));
+          console.log("timeline snippet:", JSON.stringify(timeline.slice(Math.max(0, index - 24), index + 110)));
+          const patchIndex = patch.indexOf("repost media preservation");
+          console.log("patch snippet:", JSON.stringify(patch.slice(Math.max(0, patchIndex - 260), patchIndex + 40)));
+          NODE
       - run: node scripts/apply-phase-b-persistence.mjs
       - name: Commit patch
         run: |
