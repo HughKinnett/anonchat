@@ -8,6 +8,7 @@ const pages = new Map(await Promise.all([
   "groups.html",
   "premium-rooms.html"
 ].map(async (name) => [name, await readFile(new URL(`../${name}`, import.meta.url), "utf8")])));
+const nav = await readFile(new URL("../nav-menu.js", import.meta.url), "utf8");
 
 const productLinks = [
   { href: "community.html", label: "Temporary Rooms" },
@@ -16,11 +17,12 @@ const productLinks = [
   { href: "premium-rooms.html", label: "Premium Rooms" }
 ];
 
+for (const { href, label } of productLinks) {
+  assert.match(nav, new RegExp(`["']${href.replace(".", "\\.")}["']\\s*,\\s*["']${label}["']`), `shared navigation owns the ${label} destination`);
+}
 for (const [name, html] of pages) {
-  for (const { href, label } of productLinks) {
-    const pattern = new RegExp(`<a[^>]+href=["']${href.replace(".", "\\.")}["'][^>]*>\\s*${label}\\s*</a>`, "i");
-    assert.match(html, pattern, `${name} keeps ${label} as a distinct product destination`);
-  }
+  assert.match(html, /id=["']main-menu-panel["']/, `${name} exposes the shared product menu panel`);
+  assert.match(html, /src=["']nav-menu\.js["']/, `${name} loads the shared product navigation`);
 }
 
 assert.match(pages.get("community.html"), /id=["']rooms-panel["']/, "Temporary Rooms remain on the existing community.html surface");
