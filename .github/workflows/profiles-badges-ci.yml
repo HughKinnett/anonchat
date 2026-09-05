@@ -3,7 +3,7 @@ name: Profiles and badges focused CI
 on:
   push:
     branches:
-      - profiles-badges-inline
+      - phase-a-profiles-identity
   workflow_dispatch:
 
 permissions:
@@ -17,6 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: node scripts/test-profile-privacy-policy.mjs
       - run: node scripts/test-badge-policy.mjs
       - run: node scripts/test-badge-milestones.mjs
       - run: node scripts/test-badge-awards-contract.mjs
