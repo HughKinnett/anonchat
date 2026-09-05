@@ -21,3 +21,4 @@ jobs:
       - run: node scripts/test-community-interest-firestore-contract.mjs
       - run: node scripts/test-community-interest-rules.mjs
       - run: node scripts/test-communities-surface.mjs
+      - run: node scripts/test-community-detail-surface.mjs
