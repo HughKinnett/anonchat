@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 const exitPolicy = {
+  "admin-badges.js": { authenticated: 0, authLoss: 1 },
   "admin.js": { authenticated: 1, authLoss: 1 },
   "community.js": { authenticated: 2, authLoss: 1 },
   "connections.js": { authenticated: 1, authLoss: 1 },
