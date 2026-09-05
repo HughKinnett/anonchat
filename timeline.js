@@ -2163,6 +2163,12 @@ onAuthStateChanged(auth, async (user) => {
     const viewDay = new Date().toISOString().slice(0, 10);
     setDoc(doc(db, "pageViews", viewDay), { date: viewDay, views: increment(1), updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
   }
+  const listenForSession = (reference, next, failed) => onSnapshot(
+    reference,
+    (snapshot) => { if (sessionIsCurrent()) next(snapshot); },
+    (error) => { if (sessionIsCurrent()) failed?.(error); }
+  );
+
   listeners.push(clearPollVoteListeners);
   listeners.push(clearInteractionListeners);
   listeners.push(listenForSession(
@@ -2180,12 +2186,6 @@ onAuthStateChanged(auth, async (user) => {
     (snapshot) => { recentSearches = snapshot.docs.map((entry) => normalizeRecentSearch(entry.data().value)).filter(Boolean); renderRecentSearches(); },
     () => setStatus("Could not load recent searches.", true)
   ));
-  const listenForSession = (reference, next, failed) => onSnapshot(
-    reference,
-    (snapshot) => { if (sessionIsCurrent()) next(snapshot); },
-    (error) => { if (sessionIsCurrent()) failed?.(error); }
-  );
-
   listeners.push(listenForSession(
     query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(TIMELINE_POST_LIMIT)),
     (snapshot) => {
