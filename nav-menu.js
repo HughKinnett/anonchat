@@ -2,6 +2,24 @@
   const button = document.getElementById("main-menu-button");
   const panel = document.getElementById("main-menu-panel");
   if (!button || !panel) return;
+
+  const products = [
+    ["community.html", "Temporary Rooms"],
+    ["communities.html", "Communities"],
+    ["groups.html", "Groups"],
+    ["premium-rooms.html", "Premium Rooms"]
+  ];
+  for (const [href, label] of products) {
+    const existing = panel.querySelector(`a[href="${href}"]`);
+    if (existing) existing.textContent = label;
+    else {
+      const link = document.createElement("a");
+      link.href = href;
+      link.textContent = label;
+      panel.append(link);
+    }
+  }
+
   const close = () => { panel.hidden = true; button.setAttribute("aria-expanded", "false"); };
   button.addEventListener("click", (event) => {
     event.stopPropagation();
