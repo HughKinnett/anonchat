@@ -7,6 +7,7 @@ import {
   setCommunityModerator,
   setCommunityPostPinned
 } from "./community-interest-firestore.mjs";
+import { canonicalPollVote, pollVoteDocumentId } from "./poll-vote-policy.mjs";
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
@@ -18,9 +19,11 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   runTransaction,
   serverTimestamp,
   setDoc,
+  where,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -33,6 +36,9 @@ const rulesList = document.getElementById("community-detail-rules");
 const status = document.getElementById("community-detail-status");
 const composer = document.getElementById("community-post-composer");
 const composerText = document.getElementById("community-post-content");
+const postKindSelect = document.getElementById("community-post-kind");
+const pollOptionsPanel = document.getElementById("community-poll-options");
+const pollOptionInputs = [...document.querySelectorAll("[data-community-poll-option]")];
 const postsList = document.getElementById("community-posts-list");
 const signOutButton = document.getElementById("community-detail-sign-out");
 
@@ -61,7 +67,6 @@ const profileLabel = async (uid) => {
 const canShowAuthor = async (uid) => {
   if (!uid || uid === currentUser?.uid) return true;
   try {
-    // Uses the same blocked-pair semantics as viewer-block-policy for the viewer's readable direction.
     return !(await moderation?.isPairBlocked(uid));
   } catch {
     return false;
@@ -164,6 +169,52 @@ const submitComment = async (postId, text) => {
   });
 };
 
+const communityPollVotes = async (post) => {
+  const snapshot = await getDocs(query(
+    collection(db, "communityVotes"),
+    where("postCollection", "==", "communityPosts"),
+    where("postId", "==", post.id)
+  ));
+  return snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+};
+
+const voteOnPoll = async (post, option) => {
+  const voteRef = doc(db, "communityVotes", pollVoteDocumentId("communityPosts", post.id, currentUser.uid));
+  await setDoc(voteRef, canonicalPollVote({
+    postCollection: "communityPosts",
+    postId: post.id,
+    uid: currentUser.uid,
+    option,
+    createdAt: serverTimestamp()
+  }));
+};
+
+const renderPoll = async (post) => {
+  const wrapper = document.createElement("div");
+  wrapper.className = "community-poll";
+  const votes = await communityPollVotes(post);
+  const options = Array.isArray(post.options) ? post.options.slice(0, 4) : [];
+  options.forEach((label, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const count = votes.filter((vote) => vote.option === index).length;
+    const selected = votes.some((vote) => vote.uid === currentUser.uid && vote.option === index);
+    button.textContent = `${label} · ${count}${selected ? " · Your vote" : ""}`;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await voteOnPoll(post, index);
+        await renderPosts();
+      } catch (error) {
+        setStatus(error?.message || "Could not save your vote.");
+        button.disabled = false;
+      }
+    });
+    wrapper.append(button);
+  });
+  return wrapper;
+};
+
 const reportPost = async (post) => {
   if (!moderation || post.authorId === currentUser.uid) return;
   const reason = window.prompt(`Report reason: ${REPORT_REASONS.join(", ")}`, "other");
@@ -246,6 +297,12 @@ const renderPosts = async () => {
     await loadReactions(post.id, reactionSummary);
     actions.append(reactionSummary);
 
+    card.append(author, body);
+    if (post.category === "Poll" && Array.isArray(post.options) && post.options.length >= 2) {
+      card.append(await renderPoll(post));
+    }
+    card.append(actions);
+
     const comments = document.createElement("div");
     comments.className = "post-comments";
     await loadComments(post.id, comments);
@@ -270,7 +327,7 @@ const renderPosts = async () => {
       }
     });
 
-    card.append(author, body, actions, comments, commentForm);
+    card.append(comments, commentForm);
     postsList.append(card);
   }
 };
@@ -299,23 +356,39 @@ const loadCommunity = async () => {
   await renderPosts();
 };
 
+postKindSelect?.addEventListener("change", () => {
+  if (pollOptionsPanel) pollOptionsPanel.hidden = postKindSelect.value !== "Poll";
+});
+
 composer?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!currentMembership) return;
   const content = String(composerText?.value || "").trim().slice(0, 500);
   if (!content) return;
+  const postKind = postKindSelect?.value === "Poll" ? "Poll" : "Question";
+  const options = postKind === "Poll"
+    ? pollOptionInputs.map((input) => String(input.value || "").trim().slice(0, 120)).filter(Boolean)
+    : [];
+  if (postKind === "Poll" && (options.length < 2 || options.length > 4)) {
+    setStatus("Polls need between 2 and 4 options.");
+    return;
+  }
   try {
     await addDoc(collection(db, "communityPosts"), {
       authorId: currentUser.uid,
       username: currentUsername,
       content,
-      category: "Question",
+      category: postKind === "Poll" ? "Poll" : "Question",
       communityId,
-      options: [],
+      options,
       moderationState: "visible",
       createdAt: serverTimestamp()
     });
     composerText.value = "";
+    pollOptionInputs.forEach((input) => { input.value = ""; });
+    if (postKindSelect) postKindSelect.value = "Question";
+    if (pollOptionsPanel) pollOptionsPanel.hidden = true;
+    setStatus("");
     await renderPosts();
   } catch (error) {
     setStatus(error?.message || "Could not create Community post.");
