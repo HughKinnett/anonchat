@@ -3,6 +3,13 @@ const stableEntryId = (postPath = "") => encodeURIComponent(String(postPath).tri
 export const savedPostEntryId = (postPath) => stableEntryId(postPath);
 export const historyEntryId = (postPath) => stableEntryId(postPath);
 
+export const canonicalPostPathParts = (postPath = "") => {
+  const parts = String(postPath).trim().split("/");
+  if (parts.length !== 2 || !parts[1]) return null;
+  if (!['posts', 'communityPosts'].includes(parts[0])) return null;
+  return { collection: parts[0], id: parts[1] };
+};
+
 export const mergeHistoryEntries = (entries = [], next = {}, limit = 100) => {
   const postPath = String(next?.postPath || "").trim();
   if (!postPath) return [...entries].slice(0, Math.max(0, limit));
