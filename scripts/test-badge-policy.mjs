@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   MAX_FEATURED_BADGES,
   PROFILE_BADGE_PREVIEW_LIMIT,
@@ -37,4 +38,11 @@ assert.equal(previewEarnedBadges(earned).length, 4);
 assert.equal(canFeatureBadge(earned, "old"), true);
 assert.equal(canFeatureBadge(earned.map((x, i) => ({ ...x, featured: i < 3 })), "extra"), false);
 
-console.log("badge policy tests passed");
+const firestoreSource = await readFile(new URL("../badge-firestore.mjs", import.meta.url), "utf8");
+for (const name of ["listBadgeTypes", "listUserBadges", "saveBadgeType", "setUserBadge", "removeUserBadge", "setBadgeFeatured"]) {
+  assert.match(firestoreSource, new RegExp(`export const ${name}`));
+}
+assert.match(firestoreSource, /from "\.\/badge-policy\.mjs"/);
+assert.match(firestoreSource, /firebase-firestore\.js/);
+
+console.log("badge policy and firestore adapter contract tests passed");
