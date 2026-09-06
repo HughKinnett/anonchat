@@ -31,10 +31,10 @@ assert.match(
   "profile bootstrap must request the fixed profile module with a cache-busting version"
 );
 
-assert.match(
-  serviceWorker,
-  /CACHE_NAME\s*=\s*["']anonchat-v145["']/,
-  "service worker cache must advance so old cached profile modules are discarded"
+const cacheVersion = Number(serviceWorker.match(/CACHE_NAME\s*=\s*["']anonchat-v(\d+)["']/)?.[1] || 0);
+assert.ok(
+  cacheVersion >= 145,
+  "service worker cache must remain at or above the profile cache-bust version so stale profile modules are discarded"
 );
 
 console.log("Profile auth guard regression checks passed.");
