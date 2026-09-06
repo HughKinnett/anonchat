@@ -20,15 +20,19 @@ jobs:
       - run: node scripts/test-private-message-send-readiness.mjs
       - run: node scripts/test-direct-message-conversation-migration.mjs
       - run: node scripts/test-founder-founding-premium-entitlement.mjs
-      - name: Diagnose QR ESM bundle
+      - name: Diagnose QR vendor dependency bundle
         run: |
           curl --fail --silent --show-error --location --retry 3 \
             https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm \
             --output /tmp/qrcode.mjs
-          sha256sum /tmp/qrcode.mjs
+          curl --fail --silent --show-error --location --retry 3 \
+            https://cdn.jsdelivr.net/npm/dijkstrajs@1.0.3/+esm \
+            --output /tmp/dijkstrajs.mjs
+          sha256sum /tmp/qrcode.mjs /tmp/dijkstrajs.mjs
+          echo '--- qrcode imports ---'
           grep -Eo 'from[[:space:]]+"[^"]+"|from[[:space:]]+'"'"'[^'"'"']+'"'"'' /tmp/qrcode.mjs || true
-          head -c 600 /tmp/qrcode.mjs
-          printf '\n'
+          echo '--- dijkstra imports ---'
+          grep -Eo 'from[[:space:]]+"[^"]+"|from[[:space:]]+'"'"'[^'"'"']+'"'"'' /tmp/dijkstrajs.mjs || true
       - run: node scripts/test-profile-qr-rendering.mjs
       - run: node scripts/test-login-storage-fallback.mjs
       - run: node scripts/test-admin-badges-surface.mjs
