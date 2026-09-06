@@ -12,6 +12,8 @@ const [policy, firestore, admin, profile, serverAdapter, processor] = await Prom
 ]);
 
 for (const id of [
+  "founder",
+  "founding-member",
   "early-member",
   "early-supporter",
   "verified-admin",
@@ -31,6 +33,8 @@ assert.match(policy, /Spark|spark/, "badge system exposes Spark progression styl
 assert.match(policy, /Pulse|pulse/, "badge system exposes Pulse progression styling");
 assert.match(policy, /Beacon|beacon/, "badge system exposes Beacon progression styling");
 assert.match(policy, /Legend|legend/, "badge system exposes Legend progression styling");
+assert.match(policy, /founder[\s\S]*persistent:\s*true/, "Founder is a permanent trusted-identity badge");
+assert.match(policy, /founding-member[\s\S]*persistent:\s*true/, "Founding Member is a permanent launch-cohort badge");
 assert.match(policy, /premium-member[\s\S]*premium_active|premium_active[\s\S]*premium-member/, "Premium Member is tied to active Premium status");
 assert.match(policy, /premium-member[\s\S]*persistent:\s*false/, "Premium Member is a revocable status badge");
 
