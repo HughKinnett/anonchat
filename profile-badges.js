@@ -31,6 +31,7 @@ const hideGallery = () => {
   if (list) list.replaceChildren();
   if (collection) collection.replaceChildren();
   if (section) section.hidden = true;
+  if (entryButton) entryButton.hidden = true;
   if (empty) empty.hidden = true;
   if (viewAll) viewAll.hidden = true;
   if (collectionEmpty) collectionEmpty.hidden = true;
@@ -152,6 +153,7 @@ const load = async () => {
         return definition ? { ...definition, ...assignment } : null;
       })
       .filter(Boolean);
+    if (entryButton) entryButton.hidden = false;
     render();
   } catch {
     hideGallery();

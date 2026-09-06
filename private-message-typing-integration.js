@@ -1,4 +1,3 @@
-import "./private-message-send-readiness.js";
 import "./private-message-request-readiness.js";
 import { auth, db } from "./firebase-config.js";
 import { typingExpiresAt, isTypingActive } from "./private-message-typing-policy.mjs";
