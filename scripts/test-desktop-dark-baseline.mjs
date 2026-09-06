@@ -43,7 +43,7 @@ assert.match(bootstrap, /ensureSharedStyles\(\);[\s\S]*onAuthStateChanged/,
   "shared appearance CSS is installed before asynchronous auth/settings resolution");
 assert.match(controls, /\.main-menu-panel[^\n]*background:var\(--ac-menu-bg\)/,
   "hamburger controls remain tied to the existing AnonChat control theme");
-assert.match(sw, /CACHE_NAME\s*=\s*["']anonchat-v138["']/,
-  "service-worker cache advances so existing desktop and Android installs receive the mobile send and badge fixes");
+assert.match(sw, /CACHE_NAME\s*=\s*["']anonchat-v139["']/,
+  "service-worker cache advances so existing desktop and Android installs receive the architecture correction");
 
 console.log("desktop dark baseline and hamburger contrast contract passed");
