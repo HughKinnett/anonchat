@@ -36,5 +36,7 @@ jobs:
           java-version: "21"
 
       - run: npm ci
+      - name: Harden retired feature and badge rules
+        run: node scripts/apply-retired-feature-rules-hardening.mjs
       - run: npm run test:workflow-policy
       - run: npm run test:firestore-ci
