@@ -11,6 +11,7 @@ import {
   loadTrustedDeviceRecord,
   saveTrustedDeviceRecord
 } from "./e2ee-device-store.mjs";
+import { loadAutoUnlockIdentity, saveAutoUnlockIdentity } from "./e2ee-device-key-store.mjs";
 import { doc, getDoc, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const identityCache = new Map();
@@ -100,9 +101,11 @@ const secureDialog = ({
   actions.className = "e2ee-password-actions";
   const cancel = document.createElement("button");
   cancel.type = "button";
+  cancel.className = "secondary-button";
   cancel.textContent = "Cancel";
   const submit = document.createElement("button");
   submit.type = "submit";
+  submit.className = "primary-button";
   submit.textContent = submitText;
   actions.append(cancel, submit);
   form.append(heading, explanation, recoveryWarning, input, confirmation, acknowledgmentLabel, error, actions);
@@ -161,6 +164,14 @@ const recoveryPassphraseDialog = ({ setup = false } = {}) => secureDialog({
   submitText: setup ? "Create recovery password" : "Recover"
 });
 
+const persistAutoUnlock = async (uid, privateJwk) => {
+  try {
+    await saveAutoUnlockIdentity(uid, privateJwk);
+  } catch {
+    // Persistent browser key storage is an optimization. PIN/recovery remains the secure fallback.
+  }
+};
+
 const persistVerifiedPinRecord = async (uid, privateJwk, pin) => {
   const record = await createTrustedDeviceRecord(privateJwk, pin);
   const verified = await unlockTrustedDeviceRecord(record, pin);
@@ -168,6 +179,7 @@ const persistVerifiedPinRecord = async (uid, privateJwk, pin) => {
     throw new Error("Chat PIN verification failed. Your previous encryption recovery remains unchanged.");
   }
   saveTrustedDeviceRecord(storage(), uid, record);
+  await persistAutoUnlock(uid, verified);
 };
 
 const unlockTrustedIdentity = async (uid, record) => {
@@ -177,10 +189,21 @@ const unlockTrustedIdentity = async (uid, record) => {
   try {
     const privateJwk = await unlockTrustedDeviceRecord(record, pin);
     pinAttempts.recordSuccess(uid);
+    await persistAutoUnlock(uid, privateJwk);
     return { privateJwk, privateKey: await importPrivateKeyJwk(privateJwk) };
   } catch (error) {
     const delay = pinAttempts.recordFailure(uid);
     throw new Error(`That chat PIN is incorrect. Try again in ${Math.ceil(delay / 1000)} seconds.`);
+  }
+};
+
+const autoUnlockTrustedIdentity = async uid => {
+  try {
+    const autoUnlockedJwk = await loadAutoUnlockIdentity(uid);
+    if (!autoUnlockedJwk) return null;
+    return { privateJwk: autoUnlockedJwk, privateKey: await importPrivateKeyJwk(autoUnlockedJwk) };
+  } catch {
+    return null;
   }
 };
 
@@ -232,23 +255,28 @@ export const ensureE2eeIdentity = async (db, user) => {
     throw new Error("Encrypted-chat key verification failed.");
   }
 
-  let record;
-  try {
-    record = loadTrustedDeviceRecord(storage(), user.uid);
-  } catch (error) {
-    if (!(error instanceof TrustedDeviceStateError)) throw error;
-    record = null;
-  }
-
+  const autoUnlocked = await autoUnlockTrustedIdentity(user.uid);
   let privateKey;
-  if (record) {
-    ({ privateKey } = await unlockTrustedIdentity(user.uid, record));
+  if (autoUnlocked) {
+    privateKey = autoUnlocked.privateKey;
   } else {
-    const recoveryPassphrase = await recoveryPassphraseDialog();
-    const privateJwk = await unlockIdentityBundleJwk(privateSnapshot.data().privateBundle, recoveryPassphrase);
-    const pin = await chatPinDialog({ setup: true });
-    await persistVerifiedPinRecord(user.uid, privateJwk, pin);
-    privateKey = await importPrivateKeyJwk(privateJwk);
+    let record;
+    try {
+      record = loadTrustedDeviceRecord(storage(), user.uid);
+    } catch (error) {
+      if (!(error instanceof TrustedDeviceStateError)) throw error;
+      record = null;
+    }
+
+    if (record) {
+      ({ privateKey } = await unlockTrustedIdentity(user.uid, record));
+    } else {
+      const recoveryPassphrase = await recoveryPassphraseDialog();
+      const privateJwk = await unlockIdentityBundleJwk(privateSnapshot.data().privateBundle, recoveryPassphrase);
+      const pin = await chatPinDialog({ setup: true });
+      await persistVerifiedPinRecord(user.uid, privateJwk, pin);
+      privateKey = await importPrivateKeyJwk(privateJwk);
+    }
   }
 
   const identity = { uid: user.uid, privateKey, publicJwk: publicIdentity.publicJwk, fingerprint };
