@@ -97,6 +97,7 @@ const APP_SHELL = [
   "./private-message-typing-policy.mjs",
   "./private-message-typing-integration.js",
   "./private-message-send-readiness.js",
+  "./private-message-request-readiness.js",
   "./private-message-reactions-integration.js",
   "./private-message-replies-integration.js",
   "./private-message-visibility-integration.js",
