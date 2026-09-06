@@ -3,7 +3,7 @@ import { recordPageActivity } from "./activity-integration.mjs";
 import { preparePushForAccountDeletion, selfDeletionQueuePayloads } from "./account-deletion-push.mjs";
 import { createPushAlertsClient } from "./push-client.mjs";
 import { VAPID_PUBLIC_KEY } from "./push-config.mjs";
-import { exitAuthenticatedSession } from "./push-exit.js";
+import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection, deleteDoc, doc, getDoc, getDocs, query, setDoc,
@@ -57,6 +57,7 @@ const loadDeletionProfile=async(user)=>{
 onAuthStateChanged(auth,async user=>{
   if(!user){
     currentUser=null;profile=null;form.hidden=false;
+    await exitAfterAuthLoss({redirect:()=>{}}).catch(()=>{});
     setStatus("Enter your account email and password below to verify the account you want to delete.");
     return;
   }
