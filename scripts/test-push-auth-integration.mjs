@@ -28,6 +28,7 @@ const exitPolicy = {
   "private-message-visibility-integration.js": { authenticated: 0, authLoss: 0 },
   "profile-style.js": { authenticated: 0, authLoss: 1 },
   "profile.js": { authenticated: 2, authLoss: 1 },
+  "settings.js": { authenticated: 0, authLoss: 1 },
   "timeline.js": { authenticated: 2, authLoss: 1 },
   "upload.js": { authenticated: 0, authLoss: 1 }
 };
