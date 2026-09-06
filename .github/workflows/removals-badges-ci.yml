@@ -6,7 +6,9 @@ on:
     paths:
       - 'nav-menu.js'
       - 'sw.js'
+      - 'timeline.html'
       - 'timeline.js'
+      - 'post-media-policy.mjs'
       - 'community.html'
       - 'groups*.html'
       - 'groups*.js'
@@ -37,3 +39,5 @@ jobs:
         run: node scripts/test-groups-removed.mjs
       - name: Interest Communities removal contract
         run: node scripts/test-interest-communities-removed.mjs
+      - name: GIF URL composer removal contract
+        run: node scripts/test-gif-url-composer-removed.mjs
