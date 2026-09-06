@@ -5,6 +5,7 @@
   },
   "hosting": {
     "public": ".",
+    "predeploy": "node scripts/stage-qr-vendor.mjs",
     "ignore": [
       "firebase.json",
       "firestore.rules",
