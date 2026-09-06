@@ -15,11 +15,11 @@ Remove Groups, Interest Communities, the raw GIF URL composer control, and all a
 - The timeline raw `GIF URL` field is removed.
 - Normal photo upload remains.
 - Badge definitions are fixed by AnonChat code and artwork, not created or edited by admins.
-- Earned badges are automatic and immutable.
+- Normal earned milestone badges are automatic and immutable.
+- Premium Member is a system-owned active-status badge: it is shown only while the user has an active paid Premium membership and is automatically removed when paid Premium ends.
 - Admins may view badge status for support/moderation context but cannot create, edit, assign, remove, disable, replace, or otherwise alter badge definitions or earned badge records.
 - Users cannot self-award or alter badge records.
-- Once a badge is earned it stays with the account permanently, including Premium Member after a user has qualified.
-- Badge award writes must be server-controlled, deterministic, and idempotent.
+- Badge award/status writes must be server-controlled, deterministic, and idempotent.
 
 ## Removal architecture
 
@@ -79,9 +79,13 @@ Admins are read-only observers of badge status. They cannot:
 
 Users cannot write badge definitions or earned badge records directly.
 
-### Earned badge records
+### Earned and active-status badge records
 
-Reuse the existing per-user badge storage path where practical for compatibility. Each automatic award record must contain a stable badge ID, an earned timestamp, and an automatic/system source. Awarding is idempotent: running the evaluator again cannot duplicate an already-earned badge.
+Reuse the existing per-user badge storage path where practical for compatibility. Each automatic badge record must contain a stable badge ID, a timestamp, and an automatic/system source.
+
+Normal milestone awards are idempotent and permanent: running the evaluator again cannot duplicate or remove an already-earned milestone badge.
+
+`Premium Member` is the exception because it represents current paid status, not a permanent milestone. The trusted system creates or activates that badge while paid Premium is active and automatically removes/deactivates it when paid Premium ends. Admins and users cannot perform either action.
 
 Existing valid earned records should be migrated or rendered through a safe legacy compatibility layer rather than silently disappearing.
 
@@ -150,6 +154,8 @@ The section must:
 - show `View all badges` when the user has more badges than the preview capacity;
 - allow clicking/tapping a badge to open details;
 - show badge image, badge name, meaning, and earned date in the detail view;
+- show Premium Member only while verified paid Premium is active;
+- remove Premium Member from the visible collection when paid Premium ends;
 - respect the existing profile badge visibility preference if that preference remains part of current privacy behavior.
 
 ### Awarding model
@@ -166,7 +172,7 @@ Initial rule categories:
 - Popular Post Creator: objective post interaction threshold(s) based on canonical interaction totals.
 - Community Helper: objective constructive platform-wide participation threshold(s), independent of removed Communities.
 - Long-Time Member: account-age milestone(s).
-- Premium Member: automatically awarded after the account first meets verified Premium qualification and retained permanently afterward.
+- Premium Member: active-status badge synchronized to verified paid Premium membership; it is awarded/shown while active and automatically removed/hidden when paid Premium ends.
 - Special Achievement: only predefined code-reviewed event/milestone rules; never manual admin assignment.
 
 Exact numeric thresholds belong in the implementation plan/code and must be deterministic, testable, and reviewable.
@@ -177,9 +183,9 @@ Security rules must enforce the new ownership model:
 
 - clients cannot create/update/delete badge definitions;
 - users cannot create/update/delete their own earned badge records;
-- admins cannot create/update/delete earned badge records;
+- admins cannot create/update/delete earned or active-status badge records;
 - read access continues to follow the app's approved profile/privacy model;
-- only the trusted automatic award processing path can create new earned badge records;
+- only the trusted automatic badge processing path can create new earned badges and synchronize/remove the Premium Member active-status badge;
 - retired Groups and Interest Communities rule blocks are removed so those feature paths are no longer client-operable.
 
 ## Data cleanup and deployment ordering
@@ -188,13 +194,13 @@ Because Groups and Interest Communities are being permanently removed, deploymen
 
 Safe order:
 
-1. Add tests that define the removed-surface and immutable-badge contracts.
+1. Add tests that define the removed-surface and badge ownership contracts.
 2. Remove client navigation/UI and feature write paths.
 3. Update Firestore rules so retired feature paths are no longer client-writable and badge writes are system-only.
 4. Deploy code/rules that no longer depend on Groups/Interest Communities.
 5. Run the controlled administrative cleanup for existing Groups/Interest Communities documents and nested records.
 6. Verify no remaining navigation, service-worker, discovery, rules, or runtime references can resurrect the removed features.
-7. Verify automatic badge awarding, profile rendering, and admin read-only visibility.
+7. Verify automatic milestone awards, Premium status synchronization, profile rendering, and admin read-only visibility.
 
 The cleanup script must be narrowly scoped to Groups/Interest Communities collections and must not touch Temporary Rooms, private messages, Premium rooms, profiles, canonical timeline posts, or unrelated user data.
 
@@ -212,10 +218,12 @@ Required contract coverage includes:
 - historical GIF media can still render if already present.
 - badge catalog is fixed and complete.
 - every production badge definition has a valid artwork asset and accessible label/description.
-- automatic eligibility is deterministic and idempotent.
+- automatic milestone eligibility is deterministic and idempotent.
+- Premium Member appears for active paid Premium users and is automatically removed/hidden after paid Premium ends.
 - profile preview, `View all badges`, detail view, and earned date work.
 - admin badge surface is read-only.
 - Firestore rules reject badge writes from ordinary users and admins.
+- Firestore rules permit only the trusted processor to synchronize the Premium Member status badge.
 - Firestore rules no longer expose active Groups/Interest Communities operations.
 - full Firestore CI and relevant Phase C/profile/admin regressions remain green.
 
