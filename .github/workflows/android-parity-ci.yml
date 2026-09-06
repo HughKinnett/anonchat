@@ -33,3 +33,5 @@ jobs:
           node-version: '20'
       - name: Trusted-device auto-unlock contract
         run: node scripts/test-e2ee-auto-unlock.mjs
+      - name: Desktop dark baseline contract
+        run: node scripts/test-desktop-dark-baseline.mjs
