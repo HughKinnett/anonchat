@@ -12,12 +12,18 @@ assert.match(css, /:root\s*\{[\s\S]*--ac-page-bg:\s*#0b0d12/i,
   "shared appearance defaults to the AnonChat dark page background");
 assert.match(css, /body\s*\{[^}]*background-color:\s*var\(--ac-page-bg\)/s,
   "page background uses the shared appearance token before settings load");
-assert.match(css, /\.main-menu-panel[\s\S]{0,500}background-color:\s*var\(--ac-surface\)/,
-  "hamburger panel has an explicit dark default surface");
-assert.match(css, /\.main-menu-panel[\s\S]{0,500}color:\s*var\(--ac-text\)/,
-  "hamburger panel has an explicit readable default foreground");
-assert.match(css, /html\[data-theme="light"\][\s\S]*\.main-menu-panel[\s\S]*background-color:\s*var\(--ac-surface\)/,
-  "explicit Light appearance continues to restyle the hamburger panel through theme tokens");
+
+const defaultSurfaceRule = css.match(/\.topbar,\s*\n\.main-menu-panel,[\s\S]*?\{([^}]*)\}/)?.[1] || "";
+assert.match(defaultSurfaceRule, /background-color:\s*var\(--ac-surface\)/,
+  "default shared surfaces explicitly use the dark AnonChat surface before settings load");
+assert.match(defaultSurfaceRule, /color:\s*var\(--ac-text\)/,
+  "default shared surfaces explicitly use readable AnonChat text before settings load");
+
+const lightSurfaceRule = css.match(/html\[data-theme="light"\] \.topbar,[\s\S]*?\{([^}]*)\}/)?.[1] || "";
+assert.match(lightSurfaceRule, /background-color:\s*var\(--ac-surface\)/,
+  "explicit Light appearance continues to restyle shared surfaces through theme tokens");
+assert.match(lightSurfaceRule, /color:\s*var\(--ac-text\)/,
+  "explicit Light appearance keeps readable text through theme tokens");
 assert.match(bootstrap, /ensureSharedStyles\(\);[\s\S]*onAuthStateChanged/,
   "shared appearance CSS is installed before asynchronous auth/settings resolution");
 assert.match(controls, /\.main-menu-panel[^\n]*background:var\(--ac-menu-bg\)/,
