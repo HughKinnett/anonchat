@@ -10,7 +10,6 @@
   const products = [
     ["community.html", "Temporary Rooms"],
     ["communities.html", "Communities"],
-    ["groups.html", "Groups"],
     ["premium-rooms.html", "Premium Rooms"],
     ["settings.html", "Settings"]
   ];
