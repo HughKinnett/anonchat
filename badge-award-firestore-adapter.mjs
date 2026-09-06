@@ -1,3 +1,5 @@
+import { ANONCHAT_BADGE_CATALOG } from "./badge-policy.mjs";
+
 export class FirestoreBadgeAwardAdapter {
   constructor({ db, FieldValue }) {
     if (!db || !FieldValue) throw new Error("Firestore database and FieldValue are required.");
@@ -14,8 +16,7 @@ export class FirestoreBadgeAwardAdapter {
   }
 
   async listActiveDefinitions() {
-    const snapshot = await this.db.collection("badgeTypes").where("active", "==", true).get();
-    return snapshot.docs.map((document) => ({ id: document.id, ...document.data() }));
+    return ANONCHAT_BADGE_CATALOG.map((badge) => ({ ...badge, awardMode: "automatic", active: true }));
   }
 
   assignmentRef(uid, badgeId) {
@@ -32,12 +33,16 @@ export class FirestoreBadgeAwardAdapter {
       transaction.create(reference, {
         badgeId,
         earnedAt: timestamp,
-        assignedAt: timestamp,
-        assignedBy: "system",
         awardSource: "automatic",
         featured: false
       });
       return { awarded: true, badgeId };
     });
+  }
+
+  async removeStatusBadge(uid, badgeId) {
+    if (!uid || !badgeId) throw new Error("User and badge are required.");
+    await this.assignmentRef(uid, badgeId).delete();
+    return { removed: true, badgeId };
   }
 }
