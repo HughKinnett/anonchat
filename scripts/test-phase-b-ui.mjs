@@ -11,8 +11,7 @@ for (const moduleName of [
   "post-media-policy.mjs",
   "saved-history-policy.mjs",
   "hashtag-discovery-policy.mjs",
-  "suggested-follow-policy.mjs",
-  "recent-search-policy.mjs"
+  "suggested-follow-policy.mjs"
 ]) {
   assert.match(timeline, new RegExp(`from ["']\\./${moduleName.replace(".", "\\.")}["']`), `timeline imports ${moduleName}`);
 }
@@ -20,11 +19,13 @@ for (const moduleName of [
 assert.match(html, /id="post-image-upload"[^>]*multiple/, "post composer accepts multiple images");
 assert.doesNotMatch(html, /id="post-gif-url"/, "post composer no longer exposes a raw GIF URL field");
 assert.match(html, /id="show-trending-posts"[^>]*>Trending</, "Trending feed control is visible");
-assert.match(html, /id="show-popular-today-posts"[^>]*>Popular Today</, "Popular Today feed control is visible");
 assert.match(html, /id="show-saved-posts"[^>]*>Saved</, "Saved screen control is visible");
-assert.match(html, /id="show-history-posts"[^>]*>History</, "History screen control is visible");
 assert.match(html, /id="suggested-follows"/, "suggested follows surface exists");
-assert.match(html, /id="recent-searches"/, "recent-search surface exists");
+assert.doesNotMatch(html, /id="show-popular-today-posts"/, "Popular Today tab is removed");
+assert.doesNotMatch(html, /id="show-history-posts"/, "History tab is removed");
+assert.doesNotMatch(html, /id="recent-searches"|Recent searches/i, "Recent Searches surface above timeline is removed");
+assert.doesNotMatch(timeline, /popular-today|popularTodayScore/, "Popular Today mode is removed from timeline logic");
+assert.doesNotMatch(timeline, /mode\s*===\s*["']history["']|feedTitles[^\n]*history/, "History mode is removed from timeline logic");
 
 assert.match(timeline, /Edited/, "post/comment rendering includes the Edited label");
 assert.match(timeline, /Edit post|Edit comment/, "owners receive edit actions");
@@ -32,8 +33,6 @@ assert.match(timeline, /Reply/, "comments expose Reply actions");
 assert.match(timeline, /Copy text/, "posts expose Copy text action");
 assert.match(timeline, /media:\s*(?:composerMedia|pendingPostMedia)/, "canonical post writes include the Phase B media array");
 assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']saved["']\)/, "Saved posts use a private user Firestore collection");
-assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']viewHistory["']\)/, "History uses a private user Firestore collection");
-assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']recentSearches["']\)/, "recent searches use a private user Firestore collection");
 assert.match(timeline, /className = "hashtag-link"|className\s*=\s*["']hashtag-link["']/, "hashtags render as clickable topic links");
 assert.match(timeline, /interactionParentForPost\(postDoc\)/, "Phase B preserves canonical interaction parent IDs");
 assert.match(timeline, /visiblePosts\.map\(renderPost\)|map\(renderPost\)/, "feed surfaces continue to reuse the canonical post renderer");
@@ -50,4 +49,4 @@ assert.match(profile, /Edit post|Edit comment/, "profile owners receive the same
 assert.match(profile, /doc\(db,\s*["']users["'],\s*currentUser\.uid,\s*["']saved["']/, "profile Save action uses private Firestore Saved data");
 assert.doesNotMatch(profile, /\bisBookmarked\b|\btoggleBookmark\b/, "profile no longer uses browser-local bookmarks as the Saved source of truth");
 
-console.log("Phase B timeline/profile surface contract passed");
+console.log("Phase B personalized discovery surface contract passed");
