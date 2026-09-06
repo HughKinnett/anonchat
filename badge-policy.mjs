@@ -6,6 +6,8 @@ export const BADGE_TIERS = Object.freeze([
 ]);
 
 export const BADGE_MILESTONE_METRICS = Object.freeze([
+  "founder",
+  "founding_member",
   "posts_created",
   "single_post_interactions",
   "total_interactions_received",
@@ -24,6 +26,28 @@ export const MAX_FEATURED_BADGES = 3;
 export const PROFILE_BADGE_PREVIEW_LIMIT = 4;
 
 export const ANONCHAT_BADGE_CATALOG = Object.freeze([
+  Object.freeze({
+    id: "founder",
+    name: "Founder",
+    description: "Identifies an original founder of AnonChat.",
+    imageUrl: "badges/founder.svg",
+    category: "founder",
+    milestoneMetric: "founder",
+    milestoneThreshold: null,
+    tier: "Legend",
+    persistent: true
+  }),
+  Object.freeze({
+    id: "founding-member",
+    name: "Founding Member",
+    description: "Was already part of AnonChat during its founding launch cohort.",
+    imageUrl: "badges/founding-member.svg",
+    category: "founding_member",
+    milestoneMetric: "founding_member",
+    milestoneThreshold: null,
+    tier: "Beacon",
+    persistent: true
+  }),
   Object.freeze({
     id: "early-member",
     name: "Early Member",
@@ -162,6 +186,8 @@ export const canFeatureBadge = (assignments = [], badgeId) => {
 };
 
 export const eligibleAutomaticBadgeIds = ({
+  founder = false,
+  foundingMember = false,
   postsCreated = 0,
   maxPostInteractions = 0,
   commentsOrRepliesCreated = 0,
@@ -174,6 +200,8 @@ export const eligibleAutomaticBadgeIds = ({
   specialAchievement = false
 } = {}) => ANONCHAT_BADGE_CATALOG.filter((badge) => {
   switch (badge.milestoneMetric) {
+    case "founder": return founder;
+    case "founding_member": return foundingMember;
     case "early_member": return earlyMember;
     case "early_supporter": return earlySupporter;
     case "verified_admin": return verifiedAdmin;
