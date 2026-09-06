@@ -24,8 +24,11 @@ assert.match(source, /const viewerTopicSet = new Set\(/, "suggested follows deri
 assert.match(source, /const viewerFollowingSet = new Set\(/, "suggested follows derives the viewer's follow graph");
 assert.match(source, /mutuals:\s*visibleFollows\(\)\.filter/, "suggested follows counts real mutual connections");
 assert.match(source, /sharedTopics:\s*candidateTopics\.filter/, "suggested follows uses shared public topics");
-assert.match(source, /publicInteractions:\s*publicInteractionCountForCandidate/, "suggested follows uses public interaction signals");
+assert.match(source, /viewerComments:\s*suggestionPosts\.filter/, "suggested follows uses viewer comment affinity");
+assert.match(source, /viewerReactions:\s*suggestionPosts\.filter/, "suggested follows uses viewer reaction affinity");
+assert.match(source, /sharedInteractions:\s*publicInteractionCountForCandidate/, "suggested follows uses shared public interaction signals");
+assert.match(source, /lastAffinityAtMs:\s*lastAffinityByAuthor\.get/, "suggested follows forwards affinity recency");
 assert.doesNotMatch(source, /mutuals:\s*0,/, "suggested follows no longer uses a placeholder mutual score");
-assert.doesNotMatch(source, /sharedTopics:\s*0,\s*publicInteractions:\s*0/, "suggested follows no longer uses placeholder zero signals");
+assert.doesNotMatch(source, /sharedTopics:\s*0,\s*(?:publicInteractions|sharedInteractions):\s*0/, "suggested follows no longer uses placeholder zero signals");
 
-console.log("Phase B discovery integration contract passed");
+console.log("Phase B behavioral discovery integration contract passed");
