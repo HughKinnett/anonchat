@@ -1,1 +1,0 @@
-Architecture correction RED phase: profile target contract intentionally added before production resolver implementation. This note exists only to make the test-only phase explicit in branch history and may remain as implementation history.
