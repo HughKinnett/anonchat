@@ -30,24 +30,6 @@ jobs:
       - name: Install trusted dependencies
         run: npm ci
 
-      - name: Stage locally hosted QR renderer
-        run: |
-          mkdir -p vendor
-          curl --fail --silent --show-error --location --retry 3 \
-            https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm \
-            --output vendor/qrcode.mjs
-          curl --fail --silent --show-error --location --retry 3 \
-            https://cdn.jsdelivr.net/npm/dijkstrajs@1.0.3/+esm \
-            --output vendor/dijkstrajs.mjs
-          cat > /tmp/qr-checksums <<'EOF'
-          f712a06862e06fdbb45fc846f9ad273624835025d8c4657c139a0d678d2d3733  vendor/qrcode.mjs
-          62dc939c7c6d5b83a148931d0852d636a15f9d414023c1032647adcac06a4123  vendor/dijkstrajs.mjs
-          EOF
-          sha256sum -c /tmp/qr-checksums
-          sed -i 's#"/npm/dijkstrajs@1.0.3/+esm"#"./dijkstrajs.mjs"#g' vendor/qrcode.mjs
-          ! grep -F '"/npm/' vendor/qrcode.mjs
-          ! grep -F '"/npm/' vendor/dijkstrajs.mjs
-
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v3
