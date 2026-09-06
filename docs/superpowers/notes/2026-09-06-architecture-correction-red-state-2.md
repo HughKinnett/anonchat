@@ -1,1 +1,0 @@
-The first architecture-correction CI run should fail because profile-target.mjs has not yet been implemented. This verifies the new contract can detect the production inconsistency before implementation.
