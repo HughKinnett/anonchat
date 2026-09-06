@@ -1691,6 +1691,7 @@ const renderFeed = () => {
   feed.replaceChildren(...visiblePosts.map(renderPost));
   if (suggestedFollowsList) {
     const followedUidsForSuggestions = new Set(visibleFollows().filter((follow) => follow.data().followerId === currentUser?.uid).map((follow) => follow.data().followingId));
+    const viewerFollowingSet = new Set(followedUidsForSuggestions);
     const viewerTopicSet = new Set(unexpiredPosts
       .filter((post) => post.data().authorId === currentUser?.uid)
       .flatMap((post) => postTopics(post.data())));
@@ -1708,7 +1709,7 @@ const renderFeed = () => {
         .flatMap((post) => postTopics(post.data())))];
       return {
         uid: profile.id,
-        mutuals: 0,
+        mutuals: visibleFollows().filter((follow) => follow.data().followingId === profile.id && viewerFollowingSet.has(follow.data().followerId)).length,
         sharedTopics: candidateTopics.filter((topic) => viewerTopicSet.has(topic)).length,
         publicInteractions: publicInteractionCountForCandidate(profile.id),
         username: profile.data().username
