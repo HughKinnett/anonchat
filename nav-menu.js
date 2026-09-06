@@ -2,6 +2,9 @@
   import("./appearance-accessibility.js").catch(error => {
     console.warn("Unable to apply account appearance settings", error);
   });
+  import("./e2ee-bootstrap.js").catch(error => {
+    console.warn("Unable to initialize encrypted messaging", error);
+  });
 
   const button = document.getElementById("main-menu-button");
   const panel = document.getElementById("main-menu-panel");
