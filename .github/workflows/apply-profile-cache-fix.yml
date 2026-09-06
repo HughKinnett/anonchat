@@ -1,0 +1,47 @@
+name: Apply profile cache fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-profile-cache-fix.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply cache bust for profile auth fix
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+
+          let html = fs.readFileSync('profile.html', 'utf8');
+          html = html.replace('src="profile-bootstrap.js"', 'src="profile-bootstrap.js?v=145"');
+          fs.writeFileSync('profile.html', html);
+
+          let bootstrap = fs.readFileSync('profile-bootstrap.js', 'utf8');
+          bootstrap = bootstrap
+            .replace('import("./profile.js")', 'import("./profile.js?v=145")')
+            .replace('import("./profile-badges.js")', 'import("./profile-badges.js?v=145")')
+            .replace('import("./profile-phase-a.js")', 'import("./profile-phase-a.js?v=145")');
+          fs.writeFileSync('profile-bootstrap.js', bootstrap);
+
+          let sw = fs.readFileSync('sw.js', 'utf8');
+          sw = sw.replace('const CACHE_NAME = "anonchat-v144";', 'const CACHE_NAME = "anonchat-v145";');
+          fs.writeFileSync('sw.js', sw);
+          NODE
+      - name: Verify regression
+        run: node scripts/test-profile-auth-guard.mjs
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add profile.html profile-bootstrap.js sw.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Force fresh profile bundle after auth fix"
+          git push
