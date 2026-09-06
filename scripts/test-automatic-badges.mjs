@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
-const [policy, firestore, admin, profile, serverAdapter, processor] = await Promise.all([
+const [policy, firestore, admin, profileHtml, profileJs, serverAdapter, processor] = await Promise.all([
   read("badge-policy.mjs"),
   read("badge-firestore.mjs"),
   read("admin-badges.js"),
+  read("profile.html"),
   read("profile-badges.js"),
   read("badge-award-firestore-adapter.mjs"),
   read("badge-award-processor.mjs")
 ]);
+const profile = `${profileHtml}\n${profileJs}`;
 
 for (const id of [
   "founder",
@@ -45,6 +47,7 @@ assert.doesNotMatch(admin, /Save badge|Assign selected badge|Remove badge|Deacti
 assert.match(admin, /read-only|view/i, "admin badge UI explains that badge data is read-only");
 
 assert.match(profile, /View all badges|view all badges/i, "profile badge UI supports View all badges");
+assert.match(profileJs, /profile-badges-view-all[\s\S]*addEventListener\(["']click["']/, "View all badges is wired to an interactive collection action");
 assert.match(profile, /earned|earnedAt/i, "profile badge details include earned date information");
 assert.match(profile, /image|artwork/i, "profile badge UI renders badge artwork");
 
