@@ -15,16 +15,20 @@ community = community.replace(
   '  messages.forEach(message => message.data().encrypted ? void decryptDirectMessage(message, other) : void migrateDirectMessage(message, other));',
   '  messages.forEach(message => { if (!message.data().unsentAt) message.data().encrypted ? void decryptDirectMessage(message, other) : void migrateDirectMessage(message, other); });'
 );
-community = community.replace(
-  '    text.textContent = decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : "");',
-  '    text.textContent = data.unsentAt ? "Message unsent" : (decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : ""));'
-);
+if (!community.includes('text.textContent = data.unsentAt ? "Message unsent"')) {
+  community = community.replace(
+    /^    text\.textContent = .*$/m,
+    '    text.textContent = data.unsentAt ? "Message unsent" : (decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : ""));'
+  );
+}
 const hardDelete = `    const remove = document.createElement("button");\n    remove.type = "button";\n    remove.className = "private-message-delete";\n    remove.textContent = "Delete for everyone";\n    remove.addEventListener("click", async () => {\n      remove.disabled = true;\n      try {\n        await deleteDoc(message.ref);\n        revealedPrivatePhotos.delete(message.id);\n        setStatus("Private message deleted permanently.");\n      } catch {\n        remove.disabled = false;\n        setStatus("Could not delete that private message.", true);\n      }\n    });\n    actions.append(remove);\n`;
 community = community.replace(hardDelete, "");
-community = community.replace(
-  '    if (data.text || data.bodyCipher) item.append(text);',
-  '    if (data.unsentAt || data.text || data.bodyCipher) item.append(text);'
-);
+if (!community.includes('if (data.unsentAt || data.text || data.bodyCipher) item.append(text);')) {
+  community = community.replace(
+    /^    if \(data\.text \|\| data\.bodyCipher\) item\.append\(text\);$/m,
+    '    if (data.unsentAt || data.text || data.bodyCipher) item.append(text);'
+  );
+}
 community = community.replace(
   '    const imageData = data.senderId === state.user.uid ? (decrypted?.imageData || data.imageData) : revealedImage;',
   '    const imageData = data.unsentAt ? "" : (data.senderId === state.user.uid ? (decrypted?.imageData || data.imageData) : revealedImage);'
