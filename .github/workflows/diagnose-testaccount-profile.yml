@@ -1,0 +1,61 @@
+name: Diagnose TestAccount profile
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/diagnose-testaccount-profile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
+          create_credentials_file: true
+      - name: Inspect TestAccount auth and profile state
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+        run: |
+          node --input-type=module <<'NODE'
+          import admin from 'firebase-admin';
+          if (!admin.apps.length) admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT });
+          const db = admin.firestore();
+          const auth = admin.auth();
+          const candidates = await db.collection('users').where('username', '==', 'TestAccount').limit(5).get();
+          if (candidates.empty) {
+            console.log('RESULT no exact TestAccount profile');
+            process.exit(0);
+          }
+          for (const doc of candidates.docs) {
+            const data = doc.data();
+            let authUser = null;
+            let authError = null;
+            try { authUser = await auth.getUser(doc.id); } catch (error) { authError = error?.code || error?.message || String(error); }
+            console.log(JSON.stringify({
+              result: 'candidate',
+              docId: doc.id,
+              profileUid: data.uid ?? null,
+              username: data.username ?? null,
+              banned: data.banned === true,
+              suspendedUntilPresent: Boolean(data.suspendedUntil),
+              deletionPending: data.deletionPending === true,
+              authFound: Boolean(authUser),
+              authUid: authUser?.uid ?? null,
+              authDisabled: authUser?.disabled ?? null,
+              emailVerified: authUser?.emailVerified ?? null,
+              authError
+            }));
+          }
+          NODE
