@@ -1,0 +1,20 @@
+name: Profile auth guard CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - profile.js
+      - scripts/test-profile-auth-guard.mjs
+      - .github/workflows/profile-auth-guard-ci.yml
+  workflow_dispatch:
+
+jobs:
+  profile-auth-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/test-profile-auth-guard.mjs
