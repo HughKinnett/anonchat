@@ -27,6 +27,8 @@ jobs:
         run: node scripts/apply-phase-c-settings-rules-patch.mjs
       - name: User settings policy
         run: node scripts/test-user-settings-policy.mjs
+      - name: User settings storage path
+        run: node scripts/test-user-settings-storage.mjs
       - name: Firestore settings rules contract
         run: node scripts/test-user-settings-rules.mjs
       - name: Settings page integration
