@@ -25,6 +25,30 @@
   }
 
   const close = () => { panel.hidden = true; button.setAttribute("aria-expanded", "false"); };
+
+  const temporaryRoomsLink = panel.querySelector('a[href="community.html"]');
+  temporaryRoomsLink?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    close();
+    const destination = temporaryRoomsLink.href;
+    try {
+      const [{ auth, db }, { ensureE2eeIdentity }] = await Promise.all([
+        import("./firebase-config.js"),
+        import("./e2ee-identity.js")
+      ]);
+      const user = auth.currentUser;
+      if (!user) {
+        window.location.href = destination;
+        return;
+      }
+      await ensureE2eeIdentity(db, user);
+      window.location.href = destination;
+    } catch (error) {
+      console.warn("Temporary Rooms encryption setup was not completed", error);
+      window.alert(error?.message || "Complete encrypted-chat setup before entering Temporary Rooms.");
+    }
+  });
+
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     const open = panel.hidden;
