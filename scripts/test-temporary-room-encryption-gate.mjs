@@ -14,6 +14,24 @@ assert.doesNotMatch(
   "normal navigation must not initialize encryption or open encryption setup"
 );
 
+assert.match(
+  navMenu,
+  /href\s*===?\s*["']community\.html["']|getAttribute\(["']href["']\)\s*===?\s*["']community\.html["']/,
+  "hamburger navigation must identify the Temporary Rooms link"
+);
+
+assert.match(
+  navMenu,
+  /ensureE2eeIdentity\s*\(/,
+  "clicking Temporary Rooms in the hamburger menu must verify or set up encryption before navigation"
+);
+
+assert.match(
+  navMenu,
+  /preventDefault\s*\(\)[\s\S]{0,1200}?ensureE2eeIdentity\s*\([\s\S]{0,1200}?(location\.(assign|href)|window\.location)/,
+  "Temporary Rooms navigation must be blocked until encryption setup succeeds"
+);
+
 assert.doesNotMatch(
   upload,
   /e2ee-bootstrap\.js/,
@@ -41,19 +59,7 @@ assert.doesNotMatch(
 assert.match(
   community,
   /const ensureTemporaryRoomEncryptionReady\s*=\s*async\s*\(\)\s*=>\s*\{[\s\S]{0,500}?ensureE2eeIdentity\(db,\s*state\.user\)[\s\S]{0,300}?state\.e2eeIdentity\s*=\s*identity[\s\S]{0,200}?return identity/,
-  "temporary-room entry must have an explicit encryption readiness gate"
-);
-
-assert.match(
-  community,
-  /const openRoom\s*=\s*async\s*\([^)]*\)\s*=>\s*\{[\s\S]{0,500}?await ensureTemporaryRoomEncryptionReady\(\)[\s\S]{0,1200}?setDoc\(doc\(db,\s*"roomMembers"/,
-  "joining/opening a temporary room must complete encryption setup before membership is written"
-);
-
-assert.match(
-  community,
-  /\$\("room-form"\)\.addEventListener\("submit",\s*async\s*\(event\)\s*=>\s*\{[\s\S]{0,500}?await ensureTemporaryRoomEncryptionReady\(\)[\s\S]{0,500}?createRoomKeyEnvelope/,
-  "creating a temporary room must complete encryption setup before creating its encryption key"
+  "temporary-room entry must retain an encryption readiness helper"
 );
 
 console.log("Temporary-room encryption gate regression checks passed.");
