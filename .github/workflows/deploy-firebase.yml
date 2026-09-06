@@ -40,6 +40,9 @@ jobs:
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
+      - name: Harden retired feature and badge rules
+        run: node scripts/apply-retired-feature-rules-hardening.mjs
+
       - name: Verify Firebase cost index policy
         run: npm run test:cost-indexes
 
