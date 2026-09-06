@@ -19,3 +19,6 @@ jobs:
       - run: node scripts/test-suggested-follow-policy.mjs
       - run: node scripts/test-feed-ranking-policy.mjs
       - run: node scripts/test-hashtag-discovery-policy.mjs
+      - run: node scripts/test-timeline-recommendation-context.mjs
+      - run: node scripts/test-phase-b-ui.mjs
+      - run: node --check timeline.js
