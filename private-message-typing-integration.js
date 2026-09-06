@@ -1,3 +1,4 @@
+import "./private-message-send-readiness.js";
 import { auth, db } from "./firebase-config.js";
 import { typingExpiresAt, isTypingActive } from "./private-message-typing-policy.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";

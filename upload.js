@@ -1,3 +1,4 @@
+import "./e2ee-bootstrap.js";
 import { auth, db } from "./firebase-config.js";
 import { hasPremiumAccess } from "./premium-policy.mjs";
 import { applyPremiumAvatar, applyPremiumCover, resolvedPremiumSettings } from "./premium-theme.mjs";

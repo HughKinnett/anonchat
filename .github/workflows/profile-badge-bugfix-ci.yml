@@ -1,0 +1,27 @@
+name: Profile badges and bugfix CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: node scripts/test-private-message-send-readiness.mjs
+      - run: node scripts/test-login-storage-fallback.mjs
+      - run: node scripts/test-admin-badges-surface.mjs
+      - run: node scripts/test-profile-badge-collection.mjs
+      - run: node scripts/test-profile-privacy-policy.mjs
+      - run: node scripts/test-badge-full-reconciliation.mjs
+      - run: node scripts/test-badge-reconciliation-state.mjs
+      - run: node scripts/test-existing-user-badge-backfill-workflow.mjs

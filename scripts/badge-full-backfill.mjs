@@ -2,8 +2,7 @@ import { pathToFileURL } from "node:url";
 import { applicationDefault, deleteApp, initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { FirestoreBadgeAwardAdapter } from "../badge-award-firestore-adapter.mjs";
-import { reconcileActivityBadges } from "../badge-activity-reconciliation.mjs";
-import { loadBadgeReconciliationCursor, saveBadgeReconciliationCursor } from "../badge-reconciliation-state.mjs";
+import { reconcileAllExistingUsers } from "../badge-full-reconciliation.mjs";
 
 const resolveProjectId = (environment = process.env) => {
   const direct = environment.GCLOUD_PROJECT || environment.GOOGLE_CLOUD_PROJECT;
@@ -17,14 +16,11 @@ const resolveProjectId = (environment = process.env) => {
 
 export const main = async (dependencies = {}) => {
   const projectId = resolveProjectId(dependencies.env ?? process.env);
-  const app = initializeApp({ credential: applicationDefault(), projectId }, `badge-activity-${Date.now()}`);
+  const app = initializeApp({ credential: applicationDefault(), projectId }, `badge-full-backfill-${Date.now()}`);
   try {
     const db = getFirestore(app);
     const adapter = new FirestoreBadgeAwardAdapter({ db, FieldValue });
-    const startCursor = await loadBadgeReconciliationCursor({ db, kind: "activity" });
-    const result = await reconcileActivityBadges({ adapter, startCursor });
-    await saveBadgeReconciliationCursor({ db, kind: "activity", cursor: result.nextCursor });
-    return result;
+    return await reconcileAllExistingUsers({ adapter });
   } finally {
     await deleteApp(app);
   }
@@ -32,5 +28,10 @@ export const main = async (dependencies = {}) => {
 
 const directlyExecuted = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (directlyExecuted) main()
-  .then((result) => console.log(`BADGE_ACTIVITY_RESULT inspected=${result.inspected} evaluated=${result.evaluated} batches=${result.batches} nextCursor=${result.nextCursor ?? "none"}`))
-  .catch((error) => { console.error("BADGE_ACTIVITY_FATAL", error?.message || error); process.exitCode = 1; });
+  .then((result) => console.log(
+    `BADGE_FULL_BACKFILL_RESULT completed=${result.completed} identityUsers=${result.identityUsers} activityUsers=${result.activityUsers} identityPasses=${result.identityPasses} activityPasses=${result.activityPasses}`
+  ))
+  .catch((error) => {
+    console.error("BADGE_FULL_BACKFILL_FATAL", error?.message || error);
+    process.exitCode = 1;
+  });

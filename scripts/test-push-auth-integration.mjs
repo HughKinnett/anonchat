@@ -10,6 +10,7 @@ const exitPolicy = {
   "connections.js": { authenticated: 1, authLoss: 1 },
   "customize.js": { authenticated: 0, authLoss: 1 },
   "delete-account.js": { authenticated: 2, authLoss: 1 },
+  "e2ee-bootstrap.js": { authenticated: 0, authLoss: 1 },
   "experience.js": { authenticated: 0, authLoss: 1 },
   "loginfirebase.js": { authenticated: 2, authLoss: 1 },
   "online-followers.js": { authenticated: 0, authLoss: 0 },

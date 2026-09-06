@@ -5,6 +5,7 @@ import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import {
   browserLocalPersistence,
   browserSessionPersistence,
+  inMemoryPersistence,
   createUserWithEmailAndPassword,
   deleteUser,
   onAuthStateChanged,
@@ -52,7 +53,8 @@ const invalidCredentialCodes = ["auth/invalid-credential", "auth/wrong-password"
 const signInAcrossDevices = async (email, password) => {
   await chooseDurablePersistence(setPersistence, auth, [
     browserLocalPersistence,
-    browserSessionPersistence
+    browserSessionPersistence,
+    inMemoryPersistence
   ]);
 
   const normalizedEmail = email.trim().toLowerCase();
@@ -62,7 +64,7 @@ const signInAcrossDevices = async (email, password) => {
 const signInMessage = (error) => {
   if (error.message === "account-banned") return "This account has been banned.";
   if (error.code === "auth/storage-unavailable") {
-    return "Your browser is blocking the storage AnonChat needs to keep you signed in. Allow site data for anonchatlogin.web.app, then try again.";
+    return "Your browser could not initialize authentication storage. Refresh the page and try again.";
   }
   if (error.code === "auth/too-many-requests") {
     return "Too many sign-in attempts. Wait a few minutes or use Forgot password below.";

@@ -3,6 +3,7 @@ import { applicationDefault, deleteApp, initializeApp } from "firebase-admin/app
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { FirestoreBadgeAwardAdapter } from "../badge-award-firestore-adapter.mjs";
 import { reconcileAccountAgeBadges } from "../badge-account-age-reconciliation.mjs";
+import { loadBadgeReconciliationCursor, saveBadgeReconciliationCursor } from "../badge-reconciliation-state.mjs";
 
 const resolveProjectId = (environment = process.env) => {
   const direct = environment.GCLOUD_PROJECT || environment.GOOGLE_CLOUD_PROJECT;
@@ -20,7 +21,10 @@ export const main = async (dependencies = {}) => {
   try {
     const db = getFirestore(app);
     const adapter = new FirestoreBadgeAwardAdapter({ db, FieldValue });
-    return await reconcileAccountAgeBadges({ adapter });
+    const startCursor = await loadBadgeReconciliationCursor({ db, kind: "identity" });
+    const result = await reconcileAccountAgeBadges({ adapter, startCursor });
+    await saveBadgeReconciliationCursor({ db, kind: "identity", cursor: result.nextCursor });
+    return result;
   } finally {
     await deleteApp(app);
   }
