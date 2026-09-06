@@ -1,5 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
+import { canCreateMessageRequest } from "./private-message-request-policy.mjs";
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS, isRoomActive, roomExpiry } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
@@ -21,7 +22,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   user: null, profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
   roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
-  messages: [], reveals: [], preferences: null, activeRoom: "",
+  messages: [], reveals: [], preferences: null, requestPrivacyMode: "everyone", activeRoom: "",
   blockTracker: createViewerBlockTracker(), viewerBlocks: null, moderation: null, e2eeIdentity: null
 };
 state.viewerBlocks = state.blockTracker.current();
@@ -701,7 +702,17 @@ const createMessageRequest = async (to) => {
     getDoc(doc(db, "follows", `${state.user.uid}_${to}`)),
     getDoc(doc(db, "follows", `${to}_${state.user.uid}`))
   ]);
+  const privacySnapshot = await getDoc(doc(db, "messageRequestPrivacy", to));
+  const requestMode = privacySnapshot.exists() ? privacySnapshot.data().mode : "everyone";
   const mutual = outgoingFollow.exists() && incomingFollow.exists();
+  if (!canCreateMessageRequest({
+    mode: requestMode,
+    followsRecipient: incomingFollow.exists(),
+    blocked: isBlockedUid(to),
+    alreadyAccepted: false
+  })) {
+    throw Object.assign(new Error("This user is not accepting a new message request from you."), { code: "request-privacy" });
+  }
   await setDoc(doc(db, "messageRequests", id), {
     fromId: state.user.uid, toId: to, status: mutual ? "accepted" : "pending",
     createdAt: serverTimestamp(), ...(mutual ? { respondedAt: serverTimestamp() } : {})
@@ -816,7 +827,7 @@ $("request-chat").addEventListener("click", async () => {
     setRequestStatus("Request sent. Waiting for this user to accept or decline.");
   } catch (error) {
     console.error("Message request failed", error);
-    setRequestStatus("Could not send request. Please try again.", true);
+    setRequestStatus(error?.code === "request-privacy" ? "This user is not accepting a new message request from you." : "Could not send request. Please try again.", true);
   } finally {
     state.requestBusy = false;
     $("message-user").disabled = false;
@@ -1068,6 +1079,10 @@ $("privacy-form").addEventListener("submit", async (event) => {
       uid: state.user.uid, interests: $("privacy-interests").value.trim(), region: $("privacy-region").value.trim(),
       ageRange: $("privacy-age").value, updatedAt: serverTimestamp()
     }, { merge: true });
+    await setDoc(doc(db, "messageRequestPrivacy", state.user.uid), {
+      uid: state.user.uid, mode: $("message-request-privacy").value, updatedAt: serverTimestamp()
+    }, { merge: true });
+    state.requestPrivacyMode = $("message-request-privacy").value;
     setStatus("Privacy choices saved.");
   } catch {
     setStatus("Could not save privacy choices.", true);
@@ -1081,6 +1096,7 @@ const loadPrivacy = () => {
   $("privacy-interests").value = state.privateDetails.interests || "";
   $("privacy-region").value = state.privateDetails.region || "";
   $("privacy-age").value = state.privateDetails.ageRange || "";
+  $("message-request-privacy").value = state.requestPrivacyMode || "everyone";
 };
 
 const refreshViewerBlocks = () => {
@@ -1132,7 +1148,7 @@ const stopCommunityResources = () => {
   Object.assign(state, {
     profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
     roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
-    messages: [], reveals: [], preferences: null, activeRoom: "", moderation: null, e2eeIdentity: null
+    messages: [], reveals: [], preferences: null, requestPrivacyMode: "everyone", activeRoom: "", moderation: null, e2eeIdentity: null
   });
   state.blockTracker.reset(state.user?.uid);
   state.viewerBlocks = state.blockTracker.current();
@@ -1246,6 +1262,9 @@ onAuthStateChanged(auth, async (user) => {
   const privateSnapshot = await getDoc(doc(db, "userPrivate", user.uid));
   if (!sessionIsCurrent()) return;
   state.privateDetails = privateSnapshot.exists() ? privateSnapshot.data() : {};
+  const requestPrivacySnapshot = await getDoc(doc(db, "messageRequestPrivacy", user.uid));
+  if (!sessionIsCurrent()) return;
+  state.requestPrivacyMode = requestPrivacySnapshot.exists() ? requestPrivacySnapshot.data().mode : "everyone";
   loadPrivacy();
   renderIdentity();
 

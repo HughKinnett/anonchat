@@ -248,6 +248,14 @@ service cloud.firestore {
         && existsAfter(/databases/$(database)/documents/follows/$(right + '_' + left));
     }
 
+    function recipientAllowsMessageRequest(recipientUid, senderUid) {
+      let privacyPath = /databases/$(database)/documents/messageRequestPrivacy/$(recipientUid);
+      return !exists(privacyPath)
+        || get(privacyPath).data.get('mode', 'everyone') == 'everyone'
+        || (get(privacyPath).data.get('mode', 'everyone') == 'people-i-follow'
+          && exists(/databases/$(database)/documents/follows/$(recipientUid + '_' + senderUid)));
+    }
+
     function visibleOrAdmin() {
       return isAdmin() || resource.data.get('moderationState', 'visible') != 'hidden';
     }
@@ -2246,6 +2254,17 @@ service cloud.firestore {
         && linkedRoomAvailable(resource.data.roomId));
     }
 
+    match /messageRequestPrivacy/{uid} {
+      allow read: if signedIn() && accountAvailable(uid);
+      allow create, update: if activeUserAfter()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'mode', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.mode in ['everyone', 'people-i-follow', 'none']
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if activeUser() && uid == request.auth.uid;
+    }
+
     match /messageRequests/{requestId} {
       allow read: if signedIn()
         && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
@@ -2256,6 +2275,7 @@ service cloud.firestore {
         && request.resource.data.fromId == request.auth.uid
         && request.resource.data.toId != request.auth.uid
         && !pairIsBlocked(request.auth.uid, request.resource.data.toId)
+        && recipientAllowsMessageRequest(request.resource.data.toId, request.resource.data.fromId)
         && (request.resource.data.status == 'pending'
           || (request.resource.data.status == 'accepted'
             && mutuallyFollowAfter(request.resource.data.fromId, request.resource.data.toId)
