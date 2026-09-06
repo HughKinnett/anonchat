@@ -1,15 +1,15 @@
-name: Reconcile automatic badges
+name: Reconcile activity badges
 
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "37 5 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: anonchat-automatic-badges
+  group: anonchat-activity-badges
   cancel-in-progress: false
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
 
-      - run: npm run badge-account-age:process
+      - run: node scripts/badge-activity-processor.mjs
         env:
           GCLOUD_PROJECT: anonchatlogin
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}

@@ -1,0 +1,58 @@
+name: Removals and Badges CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'nav-menu.js'
+      - 'sw.js'
+      - 'timeline.html'
+      - 'timeline.js'
+      - 'post-media-policy.mjs'
+      - 'community.html'
+      - 'groups*.html'
+      - 'groups*.js'
+      - 'group-*.mjs'
+      - 'private-group-*.js'
+      - 'private-group-*.mjs'
+      - 'communities*.html'
+      - 'communities*.js'
+      - 'community-detail.*'
+      - 'community-interest-*.mjs'
+      - 'badge-*.mjs'
+      - 'founder-identities.mjs'
+      - 'profile-badges.js'
+      - 'admin-badges.js'
+      - 'firestore.rules'
+      - 'scripts/retired-feature-rules-hardening.mjs'
+      - 'scripts/apply-retired-feature-rules-hardening.mjs'
+      - 'scripts/purge-retired-groups-communities.mjs'
+      - 'scripts/test-*.mjs'
+      - '.github/workflows/removals-badges-ci.yml'
+      - '.github/workflows/purge-retired-groups-communities.yml'
+  workflow_dispatch:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Groups removal contract
+        run: node scripts/test-groups-removed.mjs
+      - name: Interest Communities removal contract
+        run: node scripts/test-interest-communities-removed.mjs
+      - name: GIF URL composer removal contract
+        run: node scripts/test-gif-url-composer-removed.mjs
+      - name: Automatic immutable badge contract
+        run: node scripts/test-automatic-badges.mjs
+      - name: Automatic activity badge reconciliation contract
+        run: node scripts/test-badge-activity-reconciliation.mjs
+      - name: Retired feature Firestore rules hardening contract
+        run: node scripts/test-retired-feature-rules-hardening.mjs
+      - name: Retired data purge scope contract
+        run: node scripts/test-purge-retired-groups-communities.mjs
+      - name: Retired data purge workflow contract
+        run: node scripts/test-retired-purge-workflow.mjs

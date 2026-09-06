@@ -18,7 +18,7 @@ for (const moduleName of [
 }
 
 assert.match(html, /id="post-image-upload"[^>]*multiple/, "post composer accepts multiple images");
-assert.match(html, /id="post-gif-url"/, "post composer exposes a GIF attachment control");
+assert.doesNotMatch(html, /id="post-gif-url"/, "post composer no longer exposes a raw GIF URL field");
 assert.match(html, /id="show-trending-posts"[^>]*>Trending</, "Trending feed control is visible");
 assert.match(html, /id="show-popular-today-posts"[^>]*>Popular Today</, "Popular Today feed control is visible");
 assert.match(html, /id="show-saved-posts"[^>]*>Saved</, "Saved screen control is visible");
@@ -31,7 +31,6 @@ assert.match(timeline, /Edit post|Edit comment/, "owners receive edit actions");
 assert.match(timeline, /Reply/, "comments expose Reply actions");
 assert.match(timeline, /Copy text/, "posts expose Copy text action");
 assert.match(timeline, /media:\s*(?:composerMedia|pendingPostMedia)/, "canonical post writes include the Phase B media array");
-assert.match(timeline, /postGifUrl[^\n]*value|postGifUrl\?\.value/, "GIF URL participates in composer media state");
 assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']saved["']\)/, "Saved posts use a private user Firestore collection");
 assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']viewHistory["']\)/, "History uses a private user Firestore collection");
 assert.match(timeline, /collection\(db,\s*["']users["'],\s*user\.uid,\s*["']recentSearches["']\)/, "recent searches use a private user Firestore collection");

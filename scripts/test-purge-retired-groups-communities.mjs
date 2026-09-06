@@ -1,0 +1,64 @@
+import assert from "node:assert/strict";
+import { purgeRetiredCollections } from "../retired-groups-communities-purge.mjs";
+
+const doc = (path, data = {}) => ({ id: path.split("/").at(-1), ref: { path }, data: () => data });
+const documents = {
+  groups: [doc("groups/g1"), doc("groups/g2")],
+  communities: [doc("communities/c1")],
+  communityPosts: [
+    doc("communityPosts/group-post", { groupId: "g1" }),
+    doc("communityPosts/community-post", { communityId: "c1" }),
+    doc("communityPosts/unrelated", { category: "Question" })
+  ],
+  communityVotes: [
+    doc("communityVotes/group-vote", { postCollection: "communityPosts", postId: "group-post" }),
+    doc("communityVotes/community-vote", { postCollection: "communityPosts", postId: "community-post" }),
+    doc("communityVotes/unrelated-vote", { postCollection: "communityPosts", postId: "unrelated" }),
+    doc("communityVotes/timeline-vote", { postCollection: "posts", postId: "timeline-post" })
+  ],
+  e2eeRoomKeyEnvelopes: [
+    doc("e2eeRoomKeyEnvelopes/private-group", { kind: "privateGroup", roomId: "g1" }),
+    doc("e2eeRoomKeyEnvelopes/premium-room", { kind: "premiumRoom", roomId: "p1" }),
+    doc("e2eeRoomKeyEnvelopes/temporary-room", { kind: "temporaryRoom", roomId: "r1" })
+  ],
+  rooms: [doc("rooms/r1")],
+  users: [doc("users/u1")]
+};
+const requestedCollections = [];
+const deleted = [];
+const db = {
+  collection(name) {
+    requestedCollections.push(name);
+    return { get: async () => ({ size: documents[name]?.length ?? 0, docs: documents[name] ?? [] }) };
+  },
+  recursiveDelete: async (ref) => { deleted.push(ref.path); }
+};
+
+const result = await purgeRetiredCollections({ db, logger: { log() {} } });
+assert.deepEqual(requestedCollections, ["groups", "communities", "communityPosts", "communityVotes", "e2eeRoomKeyEnvelopes"],
+  "purge reads only retired roots plus shared collections requiring exact marker filtering");
+assert.deepEqual(deleted, [
+  "groups/g1",
+  "groups/g2",
+  "communities/c1",
+  "communityPosts/group-post",
+  "communityPosts/community-post",
+  "communityVotes/group-vote",
+  "communityVotes/community-vote",
+  "e2eeRoomKeyEnvelopes/private-group"
+], "purge deletes retired roots, marked posts, their votes, and private Group envelopes only");
+assert.equal(result.deletedRoots, 3);
+assert.equal(result.retiredCommunityPosts, 2);
+assert.equal(result.retiredCommunityVotes, 2);
+assert.equal(result.privateGroupEnvelopes, 1);
+assert.equal(result.collections.groups, 2);
+assert.equal(result.collections.communities, 1);
+assert.equal(deleted.includes("communityPosts/unrelated"), false, "unrelated shared community posts remain untouched");
+assert.equal(deleted.includes("communityVotes/unrelated-vote"), false, "votes for unrelated shared posts remain untouched");
+assert.equal(deleted.includes("communityVotes/timeline-vote"), false, "timeline poll votes remain untouched");
+assert.equal(deleted.includes("e2eeRoomKeyEnvelopes/premium-room"), false, "Premium room envelopes remain untouched");
+assert.equal(deleted.includes("e2eeRoomKeyEnvelopes/temporary-room"), false, "Temporary Room envelopes remain untouched");
+assert.equal(deleted.some((path) => path.startsWith("rooms/")), false, "Temporary Rooms are never purged");
+assert.equal(deleted.some((path) => path.startsWith("users/")), false, "user profiles are never purged");
+
+console.log("Retired Groups/Communities purge scope contract passed");

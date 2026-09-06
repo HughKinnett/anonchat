@@ -55,6 +55,8 @@ let installation;
 handlers.get("install")({ waitUntil: (promise) => { installation = promise; } });
 await installation;
 
+// Interest Communities were intentionally removed. Temporary Rooms remain part
+// of the installed/offline shell through community.html.
 const shellPages = [
   "index.html",
   "timeline.html",
@@ -84,6 +86,9 @@ while (pendingDependencies.length) {
     if (/\.(?:html|js|mjs)$/.test(localPath)) pendingDependencies.push(localPath);
   }
 }
+assert.equal(localDependencies.has("community.html"), true, "Temporary Rooms remain in the offline app graph");
+assert.equal(localDependencies.has("communities.html"), false, "retired Interest Communities are not in the offline app graph");
+assert.equal(localDependencies.has("groups.html"), false, "retired Groups are not in the offline app graph");
 for (const dependency of localDependencies) {
   assert.equal(cachedShell.includes(`./${dependency}`), true, `${dependency} is available in the exact offline app graph`);
 }
@@ -206,7 +211,7 @@ const clickTarget = async (payloadUrl, { existingWindow = true } = {}) => {
 assert.equal(
   await clickTarget("./community.html#messages-panel"),
   "https://anonchatlogin.web.app/community.html#messages-panel",
-  "an approved same-origin app route is preserved"
+  "an approved same-origin Temporary Rooms route is preserved"
 );
 
 for (const unsafe of [

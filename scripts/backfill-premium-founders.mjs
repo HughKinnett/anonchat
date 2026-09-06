@@ -1,11 +1,11 @@
 import { getApps, initializeApp, applicationDefault } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { isAnonChatFounder } from "../founder-identities.mjs";
 
 const projectId = process.env.GCLOUD_PROJECT || "anonchatlogin";
 const app = getApps()[0] || initializeApp({ credential: applicationDefault(), projectId });
 const db = getFirestore(app);
 const launchRef = db.doc("system/premiumLaunch");
-const founderHandles = new Set(["i_love_you_h", "cybercapone", "ownercybercapone"]);
 
 let launch = await launchRef.get();
 if (!launch.exists) {
@@ -21,8 +21,7 @@ let batch = db.batch(), writes = 0, total = 0;
 for (const user of users.docs) {
   const data = user.data();
   if (data.createdAt?.toMillis?.() > cutoff.toMillis()) continue;
-  const handle = String(data.username || "").toLowerCase();
-  const tier = founderHandles.has(handle) ? "founder" : "founding";
+  const tier = isAnonChatFounder(data.username) ? "founder" : "founding";
   const entitlement = db.doc(`premiumAccess/${user.id}`);
   if (existingAccess.has(user.id)) continue;
   batch.create(entitlement, {

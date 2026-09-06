@@ -14,9 +14,17 @@ export const processBadgeAwards = async ({ adapter, uid, changedMetrics = [], me
   if (!adapter || !uid) throw new Error("Badge award adapter and user are required.");
   if (typeof adapter.featureEnabled === "function"
     && await adapter.featureEnabled("badgeAwardsEnabled", true) === false) return [];
+
+  const changed = new Set(Array.isArray(changedMetrics) ? changedMetrics : []);
+  const results = [];
+
+  if (changed.has("premium_active") && metrics.premium_active === false
+    && typeof adapter.removeStatusBadge === "function") {
+    results.push(await adapter.removeStatusBadge(uid, "premium-member"));
+  }
+
   const definitions = await adapter.listActiveDefinitions();
   const matches = matchingAutomaticBadges(definitions, metrics, changedMetrics);
-  const results = [];
   for (const badge of matches) {
     const result = await adapter.awardIfMissing(uid, badge.id);
     results.push(result?.reason === "already-earned"

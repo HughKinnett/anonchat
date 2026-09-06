@@ -1,28 +1,15 @@
-export const EARLY_MEMBER_CUTOFF = Date.parse("2026-09-05T23:59:59.999Z");
+import { ANONCHAT_BADGE_CATALOG } from "./badge-policy.mjs";
 
-const automaticBadge = (id, name, milestoneMetric, milestoneThreshold = null) => Object.freeze({
-  id,
-  name,
-  awardMode: "automatic",
-  milestoneMetric,
-  milestoneThreshold,
-  active: true
-});
+export const FOUNDING_MEMBER_CUTOFF = Date.parse("2026-09-05T23:59:59.999Z");
+export const EARLY_MEMBER_CUTOFF = Date.parse("2026-10-05T23:59:59.999Z");
 
-export const INITIAL_AUTOMATIC_BADGES = Object.freeze([
-  automaticBadge("first-post", "First Post", "posts_created", 1),
-  automaticBadge("contributor", "Contributor", "posts_created", 10),
-  automaticBadge("top-contributor", "Top Contributor", "posts_created", 100),
-  automaticBadge("community-favorite", "Community Favorite", "single_post_interactions", 25),
-  automaticBadge("popular-creator", "Popular Creator", "total_interactions_received", 100),
-  automaticBadge("conversation-starter", "Conversation Starter", "comments_received", 25),
-  automaticBadge("community-helper", "Community Helper", "comments_or_replies_created", 50),
-  automaticBadge("connected", "Connected", "followers_count", 25),
-  automaticBadge("well-known", "Well Known", "followers_count", 100),
-  automaticBadge("long-time-member", "Long-Time Member", "account_age_days", 365),
-  automaticBadge("early-member", "Early Member", "early_member"),
-  automaticBadge("premium-member", "Premium Member", "premium_active")
-]);
+export const INITIAL_AUTOMATIC_BADGES = Object.freeze(
+  ANONCHAT_BADGE_CATALOG.map((badge) => Object.freeze({
+    ...badge,
+    awardMode: "automatic",
+    active: true
+  }))
+);
 
 const finiteNumber = (value) => typeof value === "number" && Number.isFinite(value);
 
@@ -31,8 +18,17 @@ export const qualifiesForBadge = (definition = {}, metrics = {}) => {
 
   const metric = definition.milestoneMetric;
   if (metric === "premium_active") return metrics.premium_active === true;
+  if (metric === "founder") return metrics.founder === true;
+  if (metric === "founding_member") {
+    if (typeof metrics.founding_member === "boolean") return metrics.founding_member;
+    return finiteNumber(metrics.account_created_at_ms) && metrics.account_created_at_ms <= FOUNDING_MEMBER_CUTOFF;
+  }
   if (metric === "early_member") {
+    if (typeof metrics.early_member === "boolean") return metrics.early_member;
     return finiteNumber(metrics.account_created_at_ms) && metrics.account_created_at_ms <= EARLY_MEMBER_CUTOFF;
+  }
+  if (["early_supporter", "verified_admin", "verified_moderator", "special_achievement"].includes(metric)) {
+    return metrics[metric] === true;
   }
 
   const threshold = Number(definition.milestoneThreshold);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import {
   assertSettledModerationResult,
   gcloudCompositeIndexCreateArguments,
@@ -9,6 +9,7 @@ import {
   verifyProductionRolloutState,
   waitForRequiredIndexes
 } from "../production-rollout-policy.mjs";
+import { hardenRetiredFeatureRules } from "./retired-feature-rules-hardening.mjs";
 
 const productionProcessorSource = await readFile(
   new URL("./process-production-moderation.mjs", import.meta.url),
@@ -130,5 +131,11 @@ for (const [key, value] of [
   assert.throws(() => verifyProductionRolloutState(state, { nowMs: 1_000, maxHeartbeatAgeMs: 100 }),
     (error) => error.code === "PRODUCTION_ROLLOUT_NOT_READY", `${key} must fail closed`);
 }
+
+const rulesUrl = new URL("../firestore.rules", import.meta.url);
+const sourceRules = await readFile(rulesUrl, "utf8");
+const hardenedRules = hardenRetiredFeatureRules(sourceRules);
+assert.notEqual(hardenedRules, sourceRules, "release test hardens retired feature rules before emulator CI");
+await writeFile(rulesUrl, hardenedRules);
 
 console.log("Production rollout policy passed");
