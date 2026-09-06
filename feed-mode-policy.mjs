@@ -62,6 +62,14 @@ export const filterFeedPosts = (posts = [], context = {}) => {
     });
 };
 
+export const sortScoredFeedPosts = (posts = [], scoreFor = () => 0) => [...posts].sort((left, right) => {
+  const leftScore = Number(scoreFor(left));
+  const rightScore = Number(scoreFor(right));
+  const normalizedLeft = Number.isFinite(leftScore) ? leftScore : Number.NEGATIVE_INFINITY;
+  const normalizedRight = Number.isFinite(rightScore) ? rightScore : Number.NEGATIVE_INFINITY;
+  return normalizedRight - normalizedLeft;
+});
+
 export const sortFeedPosts = (posts = [], mode = "for-you", context = {}) => {
   const normalizedMode = normalizeFeedMode(mode);
   if (normalizedMode === "latest") {

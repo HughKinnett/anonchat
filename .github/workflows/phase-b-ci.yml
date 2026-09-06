@@ -1,0 +1,49 @@
+name: Phase B focused CI
+
+on:
+  push:
+    branches:
+      - phase-b-content-discovery
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/test-content-edit-policy.mjs
+      - run: node scripts/test-threaded-reply-policy.mjs
+      - run: node scripts/test-post-media-policy.mjs
+      - run: node scripts/test-saved-history-policy.mjs
+      - run: node scripts/test-hashtag-discovery-policy.mjs
+      - run: node scripts/test-suggested-follow-policy.mjs
+      - run: node scripts/test-recent-search-policy.mjs
+      - run: node scripts/test-content-writer-policy.mjs
+      - run: node scripts/test-feed-mode-policy.mjs
+      - run: node scripts/test-phase-b-ui.mjs
+      - run: node scripts/test-phase-b-package.mjs
+      - run: node scripts/test-phase-b-listener-order.mjs
+      - run: node scripts/test-phase-b-reference-loading.mjs
+      - run: node scripts/test-phase-b-discovery-integration.mjs
+      - run: node scripts/test-phase-b-admin-edit-history.mjs
+      - run: node scripts/test-phase-b-styles.mjs
+      - run: node scripts/test-push-service-worker.mjs
+      - run: node --check timeline.js
+      - run: node --check profile.js
+      - run: node --check admin.js
+
+  full-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run test:firestore-ci

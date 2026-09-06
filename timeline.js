@@ -5,6 +5,13 @@ import { applyPremiumAvatar, applyPremiumTheme, resolvedPremiumSettings } from "
 import { applyFreeAvatar } from "./free-profile-theme.mjs";
 import { isBookmarked, recordContribution, toggleBookmark } from "./experience-preferences.mjs";
 import { buildOriginalPost, buildRepost } from "./content-writer-policy.mjs";
+import { buildEditHistorySnapshot, canEditOwnedContent, nextEditMetadata } from "./content-edit-policy.mjs";
+import { groupCommentThreads, threadRootId } from "./threaded-reply-policy.mjs";
+import { normalizePostMedia, validatePostMedia } from "./post-media-policy.mjs";
+import { canonicalPostPathParts, historyEntryId, savedPostEntryId } from "./saved-history-policy.mjs";
+import { applicationDayBounds, popularTodayScore, trendingScore } from "./hashtag-discovery-policy.mjs";
+import { suggestFollowCandidates } from "./suggested-follow-policy.mjs";
+import { mergeRecentSearches, normalizeRecentSearch, removeRecentSearch } from "./recent-search-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
 import { recordPageActivity } from "./activity-integration.mjs";
 import { shouldRecordDailyPageView } from "./page-view-budget.mjs";
@@ -17,8 +24,8 @@ import { buildInAppNotifications, notificationUiId } from "./notification-ui-pol
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
-import { filterFeedPosts, sortFeedPosts } from "./feed-mode-policy.mjs";
-import { normalizeTopic } from "./topic-policy.mjs";
+import { filterFeedPosts, sortFeedPosts, sortScoredFeedPosts } from "./feed-mode-policy.mjs";
+import { normalizeTopic, postTopics } from "./topic-policy.mjs";
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
 import { pollVoteDocumentId as voteDocumentId } from "./poll-vote-policy.mjs";
 import { scheduleExpiryBoundary } from "./temporary-room-timer-policy.mjs";
@@ -69,6 +76,20 @@ const topicPostsButton = document.getElementById("show-topic-posts");
 const temporaryPostsButton = document.getElementById("show-temporary-posts");
 const savedFilterPostsButton = document.getElementById("show-saved-filter-posts");
 const profilePostsButton = document.getElementById("show-profile-posts");
+const trendingPostsButton = document.getElementById("show-trending-posts");
+const popularTodayPostsButton = document.getElementById("show-popular-today-posts");
+const savedPostsButton = document.getElementById("show-saved-posts");
+const historyPostsButton = document.getElementById("show-history-posts");
+const postGifUrl = document.getElementById("post-gif-url");
+const suggestedFollowsList = document.getElementById("suggested-follows-list");
+const recentSearchList = document.getElementById("recent-search-list");
+const clearRecentSearchesButton = document.getElementById("clear-recent-searches");
+let pendingPostMedia = [];
+let activeReplyTarget = null;
+let recentSearches = [];
+let savedPostPaths = new Set();
+let viewedPostPaths = [];
+let referencedPostDocs = new Map();
 const chosenTopicInput = document.getElementById("chosen-topic-input");
 const addChosenTopicButton = document.getElementById("add-chosen-topic");
 const chosenTopicList = document.getElementById("chosen-topic-list");
@@ -92,6 +113,8 @@ let currentUserIsPremium = false;
 let currentPremiumSettings = null;
 let notificationReads = [];
 let communityPostDocs = [];
+let discoveryPostDocs = [];
+let discoveryCommunityPostDocs = [];
 let pollVotes = [];
 let pollVoteListeners = [];
 let pollVoteGeneration = 0;
@@ -113,6 +136,7 @@ let showingProfile = false;
 let feedMode = "for-you";
 let selectedTopics = new Set();
 const TIMELINE_POST_LIMIT = 20;
+const DISCOVERY_POST_LIMIT = 100;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
 const notificationPanel = document.getElementById("notification-panel");
@@ -150,8 +174,12 @@ const pendingPostDeletes = new Set();
 const postDeleteStatuses = new Map();
 
 const blockedUid = (uid) => isBlockedActor(uid, viewerBlocks);
-const visibleTimelinePosts = () => allTimelinePosts()
+const visibleTimelinePosts = (posts = allTimelinePosts()) => [...new Map([
+  ...posts,
+  ...referencedPostDocs.values()
+].map((post) => [post.ref.path, post])).values()]
   .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
+  .filter((post) => post.data().moderationState !== "hidden")
   .filter((post) => isBlockedPost(post, viewerBlocks))
   .filter((post) => reportCardStatuses.get(post.ref.path)?.hidden !== true);
 const syncReportedHolds = (collectionName, documents) => {
@@ -377,24 +405,32 @@ postImageLabel?.addEventListener("keydown", (event) => {
 });
 
 postImageInput.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  setStatus("Preparing your post photo…");
+  const files = [...(event.target.files || [])].slice(0, 4);
+  if (!files.length) return;
+  setStatus("Preparing your post photos…");
   try {
-    pendingPostImage = await compressPostImage(file);
+    if (files.some((file) => file.type === "image/gif")) throw new Error("Use the GIF URL field for GIFs so animation is preserved.");
+    const urls = await Promise.all(files.map(compressPostImage));
+    pendingPostMedia = urls.map((url) => ({ type: "image", url }));
+    const validation = validatePostMedia(pendingPostMedia);
+    if (!validation.ok) throw new Error("Choose up to four photos, or one GIF.");
+    pendingPostImage = pendingPostMedia[0]?.url || "";
     postImagePreview.src = pendingPostImage;
     postImagePreviewWrap.hidden = false;
     setPhotoSelected(true);
-    setStatus("Photo ready.");
+    setStatus(`${pendingPostMedia.length} photo${pendingPostMedia.length === 1 ? "" : "s"} ready.`);
   } catch (error) {
     pendingPostImage = "";
+    pendingPostMedia = [];
     setPhotoSelected(false);
-    setStatus(error.message || "Could not prepare that photo.", true);
+    setStatus(error.message || "Could not prepare those photos.", true);
   }
 });
 
 document.getElementById("remove-post-image").addEventListener("click", () => {
   pendingPostImage = "";
+  pendingPostMedia = [];
+  if (postGifUrl) postGifUrl.value = "";
   postImageInput.value = "";
   postImagePreviewWrap.hidden = true;
   setPhotoSelected(false);
@@ -422,6 +458,46 @@ const openPostFromSearch = (postId) => {
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
     target?.classList.add("notification-highlight");
     window.setTimeout(() => target?.classList.remove("notification-highlight"), 1800);
+  });
+};
+
+const renderRecentSearches = () => {
+  if (!recentSearchList) return;
+  recentSearchList.replaceChildren(...recentSearches.map((value) => {
+    const row = document.createElement("div");
+    row.className = "recent-search-row";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = value;
+    open.addEventListener("click", () => { searchInput.value = value; renderSearchResults(); searchInput.focus(); });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove recent search ${value}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", async () => {
+      if (!currentUser) return;
+      recentSearches = removeRecentSearch(recentSearches, value);
+      renderRecentSearches();
+      const snapshot = await getDocs(collection(db, "users", currentUser.uid, "recentSearches"));
+      const match = snapshot.docs.find((entry) => normalizeRecentSearch(entry.data().value) === normalizeRecentSearch(value));
+      if (match) await deleteDoc(match.ref);
+    });
+    row.append(open, remove);
+    return row;
+  }));
+};
+
+const persistRecentSearch = async (value) => {
+  if (!currentUser) return;
+  const normalized = normalizeRecentSearch(value);
+  if (normalized.length < 2) return;
+  recentSearches = mergeRecentSearches(recentSearches, normalized, 20);
+  renderRecentSearches();
+  const entryId = encodeURIComponent(normalized).slice(0, 200);
+  await setDoc(doc(db, "users", currentUser.uid, "recentSearches", entryId), {
+    uid: currentUser.uid,
+    value: normalized,
+    searchedAt: serverTimestamp()
   });
 };
 
@@ -505,6 +581,7 @@ searchInput.addEventListener("input", () => {
   userSearchTimer = window.setTimeout(refreshUserSearch, 280);
 });
 searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); void persistRecentSearch(searchInput.value); renderSearchResults(); return; }
   if (event.key === "Escape") {
     searchInput.value = "";
     closeSearch();
@@ -545,7 +622,22 @@ const formatNotificationTime = (timestamp) =>
   timestamp?.toDate ? timestamp.toDate().toLocaleString() : "Just now";
 
 const appendLinkedText = (container, value) => {
-  String(value || "").split(/(@[A-Za-z0-9_]{3,30})/g).forEach((part) => {
+  String(value || "").split(/(@[A-Za-z0-9_]{3,30}|#[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*)/g).forEach((part) => {
+    if (part.startsWith("#")) {
+      const topic = normalizeTopic(part.slice(1));
+      if (!topic) { container.append(document.createTextNode(part)); return; }
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "hashtag-link";
+      link.textContent = part;
+      link.addEventListener("click", () => {
+        selectedTopics = new Set([topic]);
+        renderChosenTopics();
+        setFeedView("topics");
+      });
+      container.append(link);
+      return;
+    }
     if (!part.startsWith("@")) {
       container.append(document.createTextNode(part));
       return;
@@ -642,6 +734,7 @@ const mentionsCurrentUser = (value) => {
 };
 
 const allTimelinePosts = () => [...postDocs, ...communityPostDocs];
+const discoveryTimelinePosts = () => [...discoveryPostDocs, ...discoveryCommunityPostDocs];
 const allNotificationPosts = () => {
   const byPath = new Map(allTimelinePosts().map((post) => [post.ref.path, post]));
   interactionSubscriptions.forEach((entry) => {
@@ -1078,6 +1171,7 @@ const sharePost = async (postDoc) => {
     originalUsername: sourceUsername,
     content: post.content,
     imageData: post.imageData || "",
+    media: post.media || [],
     createdAt: serverTimestamp()
   }));
 };
@@ -1122,6 +1216,7 @@ const renderPost = (postDoc) => {
   const item = document.createElement("li");
   item.className = "feed-item";
   item.dataset.interactionPath = parent.path;
+  item.dataset.canonicalPostPath = parent.path;
   item.id = `post-${sourceCollection}-${postDoc.id}`;
 
   if (post.type === "repost") {
@@ -1150,20 +1245,19 @@ const renderPost = (postDoc) => {
   authorRow.append(author, createFollowControl(displayedAuthorId));
   const text = document.createElement("p");
   appendLinkedText(text, post.content);
-  const postImage = post.imageData ? document.createElement("img") : null;
-  if (postImage) {
-    postImage.className = "post-image";
-    postImage.loading = "lazy";
-    postImage.decoding = "async";
-    postImage.src = post.imageData;
-    postImage.alt = "Photo attached to this post";
-    postImage.tabIndex = 0;
-    postImage.title = "Tap to reveal this photograph in Data Saver mode";
-    postImage.addEventListener("click", () => postImage.classList.add("data-saver-revealed"));
-    postImage.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") postImage.classList.add("data-saver-revealed");
-    });
-  }
+  if (post.editedAt || Number(post.editVersion) > 0) { const edited = document.createElement("small"); edited.className = "edited-label"; edited.textContent = "Edited"; text.append(document.createTextNode(" "), edited); }
+  const mediaItems = normalizePostMedia(Array.isArray(post.media) && post.media.length ? post.media : (post.imageData ? [{ type: "image", url: post.imageData }] : []));
+  const mediaGrid = document.createElement("div");
+  mediaGrid.className = `post-media-grid media-count-${mediaItems.length}`;
+  mediaItems.forEach((media) => {
+    const image = document.createElement("img");
+    image.className = media.type === "gif" ? "post-image post-gif" : "post-image";
+    image.loading = "lazy"; image.decoding = "async"; image.src = media.url; image.alt = media.type === "gif" ? "GIF attached to this post" : "Photo attached to this post";
+    image.tabIndex = 0; image.title = "Tap to reveal this media in Data Saver mode";
+    image.addEventListener("click", () => image.classList.add("data-saver-revealed"));
+    image.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") image.classList.add("data-saver-revealed"); });
+    mediaGrid.append(image);
+  });
   const time = document.createElement("small");
   const expiresAt = post.expiresAt?.toMillis?.();
   time.textContent = (post.createdAt?.toDate
@@ -1284,10 +1378,13 @@ const renderPost = (postDoc) => {
   const commentsList = document.createElement("ul");
   commentsList.className = "comments-list";
 
-  commentDocs.forEach((commentDoc) => {
+  const threadedCommentDocs = groupCommentThreads(commentDocs.map((commentDoc) => ({ id: commentDoc.id, ...commentDoc.data(), __doc: commentDoc })))
+    .flatMap(({ root, replies }) => [root, ...replies]);
+  threadedCommentDocs.forEach((threadedComment) => {
+    const commentDoc = threadedComment.__doc;
     const comment = commentDoc.data();
     const commentItem = document.createElement("li");
-    commentItem.className = "comment-item";
+    commentItem.className = comment.parentCommentId ? "comment-item comment-reply" : "comment-item";
     const commenter = document.createElement("a");
     commenter.className = "comment-author";
     commenter.href = `profile.html?uid=${encodeURIComponent(comment.uid)}`;
@@ -1295,21 +1392,38 @@ const renderPost = (postDoc) => {
     const commentText = document.createElement("p");
     appendLinkedText(commentText, comment.text);
     const commentTime = document.createElement("time");
-    commentTime.textContent = comment.createdAt?.toDate
-      ? comment.createdAt.toDate().toLocaleString()
-      : "Posting…";
+    commentTime.textContent = (comment.createdAt?.toDate ? comment.createdAt.toDate().toLocaleString() : "Posting…") + (comment.editedAt || Number(comment.editVersion) > 0 ? " · Edited" : "");
     const commentActions = document.createElement("div");
     commentActions.className = "comment-actions";
     const reply = document.createElement("button");
     reply.type = "button";
     reply.textContent = "Reply";
     reply.addEventListener("click", () => {
+      activeReplyTarget = { id: commentDoc.id, threadRootId: threadRootId({ id: commentDoc.id, ...comment }) };
       commentInput.value = `@${comment.username || "anonymous"} `;
       commentsSection.open = true;
       commentInput.focus();
       commentInput.setSelectionRange(commentInput.value.length, commentInput.value.length);
     });
     commentActions.append(reply);
+    if (comment.uid === currentUser.uid) {
+      const editComment = document.createElement("button");
+      editComment.type = "button"; editComment.textContent = "Edit comment";
+      editComment.addEventListener("click", async () => {
+        const nextText = window.prompt("Edit comment", comment.text)?.trim();
+        if (!nextText || nextText === comment.text) return;
+        try {
+          await runTransaction(db, async (transaction) => {
+            const snapshot = await transaction.get(commentDoc.ref);
+            if (!snapshot.exists() || !canEditOwnedContent(snapshot.data(), currentUser.uid)) throw new Error("not-authorized");
+            const meta = nextEditMetadata(snapshot.data(), Date.now());
+            transaction.set(doc(commentDoc.ref, "editHistory", `v${meta.editVersion}`), { ...buildEditHistorySnapshot(snapshot.data(), currentUser.uid, Date.now()), archivedAt: serverTimestamp() });
+            transaction.update(commentDoc.ref, { text: nextText, editedAt: serverTimestamp(), editVersion: meta.editVersion });
+          });
+        } catch { setStatus("Could not edit that comment.", true); }
+      });
+      commentActions.append(editComment);
+    }
     if (comment.uid === currentUser.uid || displayedAuthorId === currentUser.uid) {
       const removeComment = document.createElement("button");
       removeComment.type = "button";
@@ -1353,6 +1467,7 @@ const renderPost = (postDoc) => {
         uid: currentUser.uid,
         username: profileUsername,
         text,
+        ...(activeReplyTarget ? { parentCommentId: activeReplyTarget.id, threadRootId: activeReplyTarget.threadRootId } : {}),
         createdAt: serverTimestamp()
       });
       const entry = interactionSubscriptions.get(parent.path);
@@ -1363,6 +1478,7 @@ const renderPost = (postDoc) => {
         queueInteractionRender();
       }
       commentInput.value = "";
+      activeReplyTarget = null;
       commentsSection.open = true;
     } catch {
       setStatus("Could not post your comment.", true);
@@ -1378,13 +1494,40 @@ const renderPost = (postDoc) => {
   const bookmark = document.createElement("button");
   bookmark.type = "button";
   bookmark.className = "bookmark-button";
-  const updateBookmarkLabel = () => { bookmark.textContent = isBookmarked(parent.path) ? "🔖 Saved" : "🔖 Bookmark"; };
+  const updateBookmarkLabel = () => { bookmark.textContent = savedPostPaths.has(parent.path) ? "🔖 Saved" : "🔖 Save"; };
   updateBookmarkLabel();
-  bookmark.addEventListener("click", () => {
-    toggleBookmark({ path: parent.path, author: displayedUsername, excerpt: post.content });
-    updateBookmarkLabel();
+  bookmark.addEventListener("click", async () => {
+    const savedRef = doc(db, "users", currentUser.uid, "saved", savedPostEntryId(parent.path));
+    bookmark.disabled = true;
+    try {
+      if (savedPostPaths.has(parent.path)) await deleteDoc(savedRef);
+      else await setDoc(savedRef, { uid: currentUser.uid, postPath: parent.path, savedAt: serverTimestamp() });
+    } catch { setStatus("Could not update Saved posts.", true); }
+    finally { bookmark.disabled = false; }
   });
   actions.append(bookmark);
+  if (post.content) {
+    const copyText = document.createElement("button"); copyText.type = "button"; copyText.textContent = "Copy text";
+    copyText.addEventListener("click", async () => { try { await navigator.clipboard.writeText(post.content); setStatus("Post text copied."); } catch { setStatus("Could not copy post text.", true); } });
+    actions.append(copyText);
+  }
+  if (post.authorId === currentUser.uid && post.type !== "repost") {
+    const editPost = document.createElement("button"); editPost.type = "button"; editPost.textContent = "Edit post";
+    editPost.addEventListener("click", async () => {
+      const nextContent = window.prompt("Edit post", post.content)?.trim();
+      if (!nextContent || nextContent === post.content) return;
+      try {
+        await runTransaction(db, async (transaction) => {
+          const snapshot = await transaction.get(postDoc.ref);
+          if (!snapshot.exists() || !canEditOwnedContent(snapshot.data(), currentUser.uid)) throw new Error("not-authorized");
+          const meta = nextEditMetadata(snapshot.data(), Date.now());
+          transaction.set(doc(postDoc.ref, "editHistory", `v${meta.editVersion}`), { ...buildEditHistorySnapshot(snapshot.data(), currentUser.uid, Date.now()), archivedAt: serverTimestamp() });
+          transaction.update(postDoc.ref, { content: nextContent, topics: postTopics({ ...snapshot.data(), content: nextContent }), editedAt: serverTimestamp(), editVersion: meta.editVersion });
+        });
+      } catch { setStatus("Could not edit that post.", true); }
+    });
+    actions.append(editPost);
+  }
   const repostId = `repost_${currentUser.uid}_${sourceId}`;
   const alreadyShared = postDocs.some((candidate) => candidate.id === repostId);
 
@@ -1468,13 +1611,42 @@ const renderPost = (postDoc) => {
   }
 
   item.append(authorRow, text);
-  if (postImage) item.append(postImage);
+  if (mediaGrid.childElementCount) item.append(mediaGrid);
   item.append(time);
   if (poll.childElementCount) item.append(poll);
   if (reactionsBar.childElementCount) item.append(reactionsBar);
   item.append(interactionSummary);
   item.append(commentsSection, actions);
   return item;
+};
+
+const loadReferencedPostDocs = async (paths = []) => {
+  const uniquePaths = [...new Set(paths.map((path) => String(path || "").trim()).filter(Boolean))];
+  const requested = uniquePaths
+    .map((path) => ({ path, parts: canonicalPostPathParts(path) }))
+    .filter((entry) => entry.parts);
+  const next = new Map(referencedPostDocs);
+  await Promise.all(requested.map(async ({ path, parts }) => {
+    try {
+      const snapshot = await getDoc(doc(db, parts.collection, parts.id));
+      if (!snapshot.exists()
+        || snapshot.data().moderationState === "hidden"
+        || (snapshot.data().expiresAt?.toMillis?.() && snapshot.data().expiresAt.toMillis() <= Date.now())
+        || !isBlockedPost(snapshot, viewerBlocks)) {
+        next.delete(path);
+        return;
+      }
+      next.set(path, snapshot);
+    } catch {
+      next.delete(path);
+    }
+  }));
+  const stillReferenced = new Set([...savedPostPaths, ...viewedPostPaths]);
+  for (const path of next.keys()) if (!stillReferenced.has(path)) next.delete(path);
+  referencedPostDocs = next;
+  syncInteractionListeners();
+  renderFeed();
+  void hydrateVisibleAuthorMetadata();
 };
 
 const renderFeed = () => {
@@ -1484,7 +1656,9 @@ const renderFeed = () => {
     setStatus("Loading privacy choices…");
     return;
   }
-  const unexpiredPosts = visibleTimelinePosts().sort(compareNewestFirst);
+  const activeFeedPosts = ["trending", "popular-today", "topics"].includes(feedMode) ? discoveryTimelinePosts() : allTimelinePosts();
+  const unexpiredPosts = visibleTimelinePosts(activeFeedPosts).sort(compareNewestFirst);
+  const suggestionPosts = visibleTimelinePosts(discoveryTimelinePosts()).sort(compareNewestFirst);
   const reactionCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postReactions(post).length]));
   const commentCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postComments(post).length]));
   const followedUids = new Set(visibleFollows().filter(follow => follow.data().followerId === currentUser?.uid).map(follow => follow.data().followingId));
@@ -1498,9 +1672,18 @@ const renderFeed = () => {
         savedFilter: null,
         now: Date.now()
       });
+  let phaseBPosts = filteredPosts;
+  if (feedMode === "trending") {
+    const trendingPosts = [...filteredPosts].filter((post) => trendingScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).filter((c) => !c.data().parentCommentId).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()) > -Infinity);
+    phaseBPosts = sortScoredFeedPosts(trendingPosts, (post) => trendingScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()));
+  } else if (feedMode === "popular-today") {
+    const popularPosts = [...filteredPosts].filter((post) => { const data = post.data(); const score = popularTodayScore({ createdAtMs: data.createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()); return score > -Infinity; });
+    phaseBPosts = sortScoredFeedPosts(popularPosts, (post) => popularTodayScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()));
+  } else if (feedMode === "saved-posts") phaseBPosts = filteredPosts.filter((post) => savedPostPaths.has(interactionParentForPost(post).path));
+  else if (feedMode === "history") phaseBPosts = viewedPostPaths.map((path) => filteredPosts.find((post) => interactionParentForPost(post).path === path)).filter(Boolean);
   const orderedPosts = showingProfile
-    ? filteredPosts
-    : sortFeedPosts(filteredPosts, feedMode, {
+    ? phaseBPosts
+    : ["trending", "popular-today", "saved-posts", "history"].includes(feedMode) ? phaseBPosts : sortFeedPosts(phaseBPosts, feedMode, {
         viewerUid: currentUser?.uid,
         followedUids,
         reactionCounts,
@@ -1512,6 +1695,35 @@ const renderFeed = () => {
     : orderedPosts;
 
   feed.replaceChildren(...visiblePosts.map(renderPost));
+  if (suggestedFollowsList) {
+    const followedUidsForSuggestions = new Set(visibleFollows().filter((follow) => follow.data().followerId === currentUser?.uid).map((follow) => follow.data().followingId));
+    const viewerFollowingSet = new Set(followedUidsForSuggestions);
+    const viewerTopicSet = new Set(suggestionPosts
+      .filter((post) => post.data().authorId === currentUser?.uid)
+      .flatMap((post) => postTopics(post.data())));
+    const publicInteractionCountForCandidate = (candidateUid) => suggestionPosts.reduce((total, post) => {
+      const authorId = post.data().authorId;
+      if (authorId !== candidateUid && authorId !== currentUser?.uid) return total;
+      const counterpartUid = authorId === candidateUid ? currentUser?.uid : candidateUid;
+      const reactionMatches = postReactions(post).filter((reaction) => reaction.data().uid === counterpartUid).length;
+      const commentMatches = postComments(post).filter((comment) => comment.data().uid === counterpartUid).length;
+      return total + reactionMatches + commentMatches;
+    }, 0);
+    const candidates = visibleUsers().map((profile) => {
+      const candidateTopics = [...new Set(suggestionPosts
+        .filter((post) => post.data().authorId === profile.id)
+        .flatMap((post) => postTopics(post.data())))];
+      return {
+        uid: profile.id,
+        mutuals: visibleFollows().filter((follow) => follow.data().followingId === profile.id && viewerFollowingSet.has(follow.data().followerId)).length,
+        sharedTopics: candidateTopics.filter((topic) => viewerTopicSet.has(topic)).length,
+        publicInteractions: publicInteractionCountForCandidate(profile.id),
+        username: profile.data().username
+      };
+    });
+    const suggestions = suggestFollowCandidates(candidates, { viewerUid: currentUser?.uid, followedUids: followedUidsForSuggestions, blockedUids: new Set(viewerBlocks.blockedUids) }, 5);
+    suggestedFollowsList.replaceChildren(...suggestions.map((suggestion) => { const row = document.createElement("div"); const link = document.createElement("a"); link.href = `profile.html?uid=${encodeURIComponent(suggestion.uid)}`; link.textContent = `@${suggestion.username || "anonymous"}`; row.append(link, createFollowControl(suggestion.uid)); return row; }));
+  }
   interactionVisibilityObserver?.disconnect();
   feed.querySelectorAll("[data-interaction-path]").forEach((item) => interactionVisibilityObserver?.observe(item));
   renderNotifications();
@@ -1522,6 +1734,21 @@ const renderFeed = () => {
       : "No posts yet. Start the conversation.");
 };
 
+const recordedHistoryPaths = new Set();
+const recordViewedPost = async (postPath) => {
+  if (!currentUser || !postPath || recordedHistoryPaths.has(postPath)) return;
+  recordedHistoryPaths.add(postPath);
+  try {
+    await setDoc(doc(db, "users", currentUser.uid, "viewHistory", historyEntryId(postPath)), {
+      uid: currentUser.uid,
+      postPath,
+      viewedAt: serverTimestamp()
+    });
+    const snapshot = await getDocs(query(collection(db, "users", currentUser.uid, "viewHistory"), orderBy("viewedAt", "desc"), limit(101)));
+    await Promise.all(snapshot.docs.slice(100).map((entry) => deleteDoc(entry.ref)));
+  } catch { recordedHistoryPaths.delete(postPath); }
+};
+
 const interactionVisibilityObserver = typeof IntersectionObserver === "function"
   ? new IntersectionObserver((entries) => {
       let changed = false;
@@ -1530,6 +1757,7 @@ const interactionVisibilityObserver = typeof IntersectionObserver === "function"
         if (!path) return;
         if (entry.isIntersecting && !visibleInteractionPaths.has(path)) {
           visibleInteractionPaths.add(path);
+          void recordViewedPost(entry.target.dataset.canonicalPostPath);
           changed = true;
         } else if (!entry.isIntersecting && visibleInteractionPaths.delete(path)) {
           changed = true;
@@ -1650,7 +1878,8 @@ const syncInteractionListeners = () => {
     queueInteractionRender();
     return;
   }
-  const posts = visibleTimelinePosts().sort(compareNewestFirst);
+  const interactionFeedPosts = ["trending", "popular-today", "topics"].includes(feedMode) ? discoveryTimelinePosts() : allTimelinePosts();
+  const posts = visibleTimelinePosts(interactionFeedPosts).sort(compareNewestFirst);
   const visibleParents = new Map(posts.map((post) => [interactionParentForPost(post).path, post]));
   const desired = new Map(timelineInteractionPlan(posts, MAX_INTERACTION_PARENTS)
     .map((parent) => [parent.path, parent]));
@@ -1831,6 +2060,7 @@ chosenTopicInput?.addEventListener("keydown", (event) => {
 
 const setFeedView = (mode) => {
   feedMode = mode;
+  syncInteractionListeners();
   showingProfile = mode === "profile";
   allPostsButton.setAttribute("aria-pressed", String(mode === "for-you"));
   latestPostsButton.setAttribute("aria-pressed", String(mode === "latest"));
@@ -1839,7 +2069,11 @@ const setFeedView = (mode) => {
   temporaryPostsButton.setAttribute("aria-pressed", String(mode === "temporary"));
   savedFilterPostsButton.setAttribute("aria-pressed", String(mode === "saved"));
   profilePostsButton.setAttribute("aria-pressed", String(mode === "profile"));
-  const feedTitles = { "for-you": "For You", latest: "Latest posts", following: "Following", topics: "Chosen Topics", temporary: "Temporary Only", saved: "Saved Filters", profile: "My profile posts" };
+  trendingPostsButton?.setAttribute("aria-pressed", String(mode === "trending"));
+  popularTodayPostsButton?.setAttribute("aria-pressed", String(mode === "popular-today"));
+  savedPostsButton?.setAttribute("aria-pressed", String(mode === "saved-posts"));
+  historyPostsButton?.setAttribute("aria-pressed", String(mode === "history"));
+  const feedTitles = { "for-you": "For You", latest: "Latest posts", following: "Following", topics: "Chosen Topics", temporary: "Temporary Only", saved: "Saved Filters", trending: "Trending", "popular-today": "Popular Today", "saved-posts": "Saved posts", history: "Viewed history", profile: "My profile posts" };
   document.getElementById("feed-title").textContent = feedTitles[mode] || "For You";
   renderFeed();
 };
@@ -1851,6 +2085,16 @@ topicPostsButton.addEventListener("click", () => { feedMode = "topics"; setFeedV
 temporaryPostsButton.addEventListener("click", () => { feedMode = "temporary"; setFeedView(feedMode); });
 savedFilterPostsButton.addEventListener("click", () => { feedMode = "saved"; setFeedView(feedMode); });
 profilePostsButton.addEventListener("click", () => setFeedView("profile"));
+trendingPostsButton?.addEventListener("click", () => setFeedView("trending"));
+popularTodayPostsButton?.addEventListener("click", () => setFeedView("popular-today"));
+savedPostsButton?.addEventListener("click", () => setFeedView("saved-posts"));
+historyPostsButton?.addEventListener("click", () => setFeedView("history"));
+clearRecentSearchesButton?.addEventListener("click", async () => {
+  if (!currentUser) return;
+  recentSearches = []; renderRecentSearches();
+  const snapshot = await getDocs(collection(db, "users", currentUser.uid, "recentSearches"));
+  const batch = writeBatch(db); snapshot.docs.forEach((entry) => batch.delete(entry.ref)); await batch.commit();
+});
 
 const stopTimelineResources = () => {
   listeners.splice(0).forEach((unsubscribe) => unsubscribe());
@@ -1862,6 +2106,12 @@ const stopTimelineResources = () => {
   clearInteractionListeners();
   postDocs = [];
   communityPostDocs = [];
+  discoveryPostDocs = [];
+  discoveryCommunityPostDocs = [];
+  savedPostPaths = new Set();
+  viewedPostPaths = [];
+  recentSearches = [];
+  referencedPostDocs = new Map();
   follows = [];
   followerCountsByUid = new Map();
   users = [];
@@ -1984,14 +2234,57 @@ onAuthStateChanged(auth, async (user) => {
     const viewDay = new Date().toISOString().slice(0, 10);
     setDoc(doc(db, "pageViews", viewDay), { date: viewDay, views: increment(1), updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
   }
-  listeners.push(clearPollVoteListeners);
-  listeners.push(clearInteractionListeners);
   const listenForSession = (reference, next, failed) => onSnapshot(
     reference,
     (snapshot) => { if (sessionIsCurrent()) next(snapshot); },
     (error) => { if (sessionIsCurrent()) failed?.(error); }
   );
 
+  listeners.push(clearPollVoteListeners);
+  listeners.push(clearInteractionListeners);
+  listeners.push(listenForSession(
+    query(collection(db, "users", user.uid, "saved"), orderBy("savedAt", "desc"), limit(250)),
+    (snapshot) => {
+      savedPostPaths = new Set(snapshot.docs.map((entry) => entry.data().postPath).filter(Boolean));
+      void loadReferencedPostDocs([...savedPostPaths]);
+      renderFeed();
+    },
+    () => setStatus("Could not load Saved posts.", true)
+  ));
+  listeners.push(listenForSession(
+    query(collection(db, "users", user.uid, "viewHistory"), orderBy("viewedAt", "desc"), limit(100)),
+    (snapshot) => {
+      viewedPostPaths = snapshot.docs.map((entry) => entry.data().postPath).filter(Boolean);
+      void loadReferencedPostDocs(viewedPostPaths);
+      if (feedMode === "history") renderFeed();
+    },
+    () => setStatus("Could not load viewed history.", true)
+  ));
+  listeners.push(listenForSession(
+    query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(DISCOVERY_POST_LIMIT)),
+    (snapshot) => {
+      discoveryPostDocs = snapshot.docs;
+      if (["trending", "popular-today", "topics"].includes(feedMode)) syncInteractionListeners();
+      renderPosts();
+    },
+    () => setStatus("Could not load discovery posts.", true)
+  ));
+
+  listeners.push(listenForSession(
+    query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(DISCOVERY_POST_LIMIT)),
+    (snapshot) => {
+      discoveryCommunityPostDocs = snapshot.docs;
+      if (["trending", "popular-today", "topics"].includes(feedMode)) syncInteractionListeners();
+      renderPosts();
+    },
+    () => setStatus("Could not load discovery community posts.", true)
+  ));
+
+  listeners.push(listenForSession(
+    query(collection(db, "users", user.uid, "recentSearches"), orderBy("searchedAt", "desc"), limit(20)),
+    (snapshot) => { recentSearches = snapshot.docs.map((entry) => normalizeRecentSearch(entry.data().value)).filter(Boolean); renderRecentSearches(); },
+    () => setStatus("Could not load recent searches.", true)
+  ));
   listeners.push(listenForSession(
     query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(TIMELINE_POST_LIMIT)),
     (snapshot) => {
@@ -2100,18 +2393,16 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const postContent = content.value.trim();
   const category = postCategory.value;
-  const options = [...document.querySelectorAll(".poll-option")]
-    .map((input) => input.value.trim())
-    .filter(Boolean);
+  const options = [...document.querySelectorAll(".poll-option")].map((input) => input.value.trim()).filter(Boolean);
   const premiumWordCount = postContent ? postContent.split(/\s+/).filter(Boolean).length : 0;
+  const gifUrl = postGifUrl?.value.trim() || "";
+  const composerMedia = gifUrl ? [{ type: "gif", url: gifUrl }] : pendingPostMedia;
+  const mediaValidation = validatePostMedia(composerMedia);
+  if (!mediaValidation.ok) { setStatus("Choose up to four photos, or one GIF.", true); return; }
   if (!currentUser || (!currentUserIsPremium && postContent.length > 500) || (currentUserIsPremium && premiumWordCount > 1000)) { setStatus(currentUserIsPremium ? "Premium posts can contain up to 1,000 words." : "Posts can contain up to 500 characters.", true); return; }
-  if (category === "Poll" && options.length < 2) {
-    setStatus("Add at least two poll choices.", true);
-    return;
-  }
-  if (category !== "Poll" && !postContent && !pendingPostImage) return;
+  if (category === "Poll" && options.length < 2) { setStatus("Add at least two poll choices.", true); return; }
+  if (category !== "Poll" && !postContent && !composerMedia.length) return;
   const expiryHours = Number(postExpiry.value);
-
   const submit = form.querySelector("button[type='submit']");
   submit.disabled = true;
   try {
@@ -2119,7 +2410,8 @@ form.addEventListener("submit", async (event) => {
       authorId: currentUser.uid,
       username: profileUsername,
       content: postContent || "Poll",
-      imageData: pendingPostImage,
+      imageData: composerMedia[0]?.url || "",
+      media: composerMedia,
       category,
       options: category === "Poll" ? options : [],
       expiresAt: expiryHours ? Timestamp.fromMillis(Date.now() + expiryHours * 3600000) : null,
@@ -2128,6 +2420,8 @@ form.addEventListener("submit", async (event) => {
     content.value = "";
     localStorage.removeItem(`anonchat:post-draft:${currentUser.uid}`);
     pendingPostImage = "";
+    pendingPostMedia = [];
+    if (postGifUrl) postGifUrl.value = "";
     postImageInput.value = "";
     postImagePreviewWrap.hidden = true;
     setPhotoSelected(false);
@@ -2135,11 +2429,8 @@ form.addEventListener("submit", async (event) => {
     postExpiry.value = "0";
     pollOptions.hidden = true;
     recordContribution();
-  } catch {
-    setStatus("Could not publish your post.", true);
-  } finally {
-    submit.disabled = false;
-  }
+  } catch { setStatus("Could not publish your post.", true); }
+  finally { submit.disabled = false; }
 });
 
 document.getElementById("sign-out").addEventListener("click", async () => {
