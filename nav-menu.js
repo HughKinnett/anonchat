@@ -7,7 +7,8 @@
     ["community.html", "Temporary Rooms"],
     ["communities.html", "Communities"],
     ["groups.html", "Groups"],
-    ["premium-rooms.html", "Premium Rooms"]
+    ["premium-rooms.html", "Premium Rooms"],
+    ["settings.html", "Settings"]
   ];
   for (const [href, label] of products) {
     const existing = panel.querySelector(`a[href="${href}"]`);
