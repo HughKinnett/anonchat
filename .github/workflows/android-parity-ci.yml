@@ -1,0 +1,35 @@
+name: Android Parity CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'e2ee-*.js'
+      - 'e2ee-*.mjs'
+      - 'appearance-accessibility.*'
+      - 'profile*.html'
+      - 'profile*.js'
+      - 'profile*.mjs'
+      - 'profile*.css'
+      - 'controls.css'
+      - 'sw.js'
+      - 'scripts/test-e2ee-auto-unlock.mjs'
+      - 'scripts/test-desktop-dark-baseline.mjs'
+      - 'scripts/test-profile-badge-target-resolution.mjs'
+      - 'scripts/test-android-current-web-parity.mjs'
+      - '.github/workflows/android-parity-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Trusted-device auto-unlock contract
+        run: node scripts/test-e2ee-auto-unlock.mjs
