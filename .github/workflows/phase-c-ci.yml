@@ -27,4 +27,5 @@ jobs:
       - run: node scripts/test-private-message-request-privacy-integration.mjs
       - run: for file in community.js sw.js private-message-*.js private-message-*.mjs scripts/test-private-message-*.mjs scripts/test-community-lifecycle.mjs; do node --check "$file"; done
       - run: node scripts/test-push-service-worker.mjs
+      - run: node scripts/test-push-auth-integration.mjs
       - run: npm run test:firestore-ci
