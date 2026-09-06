@@ -25,6 +25,7 @@ jobs:
       - run: node scripts/test-suggested-follow-policy.mjs
       - run: node scripts/test-recent-search-policy.mjs
       - run: node scripts/test-content-writer-policy.mjs
+      - run: node scripts/test-feed-mode-policy.mjs
       - run: node scripts/test-phase-b-ui.mjs
       - run: node scripts/test-phase-b-package.mjs
       - run: node scripts/test-phase-b-listener-order.mjs
