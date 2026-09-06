@@ -30,6 +30,14 @@ jobs:
       - name: Install trusted dependencies
         run: npm ci
 
+      - name: Stage locally hosted QR renderer
+        run: |
+          mkdir -p vendor
+          curl --fail --silent --show-error --location --retry 3 \
+            https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js \
+            --output vendor/qrcode.min.js
+          test -s vendor/qrcode.min.js
+
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v3
