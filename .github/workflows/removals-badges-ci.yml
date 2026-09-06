@@ -35,3 +35,5 @@ jobs:
           node-version: '20'
       - name: Groups removal contract
         run: node scripts/test-groups-removed.mjs
+      - name: Interest Communities removal contract
+        run: node scripts/test-interest-communities-removed.mjs
