@@ -575,7 +575,7 @@ service cloud.firestore {
       let normalizedUsername = profile.username.lower();
       let reservationPath = /databases/$(database)/documents/usernames/$(normalizedUsername);
       return profile.username is string
-        && normalizedUsername in ['i_love_you_h', 'cybercapone']
+        && normalizedUsername in ['i_love_you_h', 'cybercapone', 'testaccount']
         && exists(reservationPath)
         && get(reservationPath).data.uid == request.auth.uid
         && get(reservationPath).data.username == profile.username;

@@ -1,6 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { recordPageActivity } from "./activity-integration.mjs";
-import { adminDeletionQueuePayloads, canAdminSetBanned, canQueueAdminDeletion, isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
+import { adminDeletionQueuePayloads, canAdminSetBanned, canQueueAdminDeletion, isAuthorizedAdministratorUsername, isProtectedAdministrator, normalizeUsername } from "./admin-deletion-policy.mjs";
 import { canConfirmDeletion, deletionDialogJobTransition, deletionJobRecord, filterModerationCases, filterUsers, generalContentDeletionPayloads, generalContentDeletionWriteMode, hasDeletionJob, isTerminalModerationAction, legacyRoomActionPayload, moderationActionPayload, moderationActionRetryPayload, moderationActionState, moderationActionsAvailable, moderationCaseRecord, moderationTranscriptMessage, processorHealth, queueFailureDialogTransition, resolveReportActionFocus, resolveUserFocus, sortInactiveUsers, statusForUser, timestampMillis } from "./admin-dashboard-policy.mjs";
 import { exitAfterAuthLoss, exitAuthenticatedSession } from "./push-exit.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
@@ -752,7 +752,7 @@ onAuthStateChanged(auth, async user => {
     return;
   }
   const profile = await getDoc(doc(db, "users", user.uid)), profileData = profile.exists() ? profile.data() : null, username = profileData?.username || "";
-  const reservation = isProtectedAdministrator(username) ? await getDoc(doc(db, "usernames", normalizeUsername(username))) : null;
+  const reservation = isAuthorizedAdministratorUsername(username) ? await getDoc(doc(db, "usernames", normalizeUsername(username))) : null;
   const authorized = !profileData?.banned && reservation?.exists() && reservation.data().uid === user.uid && reservation.data().username === username;
   if (!authorized) { location.replace("timeline.html"); return; }
   adminUid = user.uid; adminUser = user; $("admin-identity").textContent = `Signed in as @${username}`;

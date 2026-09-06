@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { isAuthorizedAdministratorUsername, isProtectedAdministrator } from '../admin-deletion-policy.mjs';
+assert.equal(isAuthorizedAdministratorUsername('TestAccount'), true);
+assert.equal(isAuthorizedAdministratorUsername('testaccount'), true);
+assert.equal(isProtectedAdministrator('TestAccount'), false);
+assert.equal(isProtectedAdministrator('i_love_you_h'), true);
+assert.equal(isProtectedAdministrator('cybercapone'), true);
+const adminJs = fs.readFileSync(new URL('../admin.js', import.meta.url), 'utf8');
+assert.match(adminJs, /isAuthorizedAdministratorUsername\(username\)/);
+const rules = fs.readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+assert.match(rules, /normalizedUsername in \['i_love_you_h', 'cybercapone', 'testaccount'\]/);
+assert.match(rules, /i_love_you_h\|cybercapone/);

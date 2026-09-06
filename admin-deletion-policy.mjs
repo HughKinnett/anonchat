@@ -3,12 +3,20 @@ export const PROTECTED_ADMIN_USERNAMES = Object.freeze([
   "cybercapone"
 ]);
 
+export const ADMIN_USERNAMES = Object.freeze([
+  ...PROTECTED_ADMIN_USERNAMES,
+  "testaccount"
+]);
+
 export const normalizeUsername = (username) => typeof username === "string"
   ? username.trim().toLowerCase()
   : "";
 
 export const isProtectedAdministrator = (username) =>
   PROTECTED_ADMIN_USERNAMES.includes(normalizeUsername(username));
+
+export const isAuthorizedAdministratorUsername = (username) =>
+  ADMIN_USERNAMES.includes(normalizeUsername(username));
 
 export const canQueueAdminDeletion = ({ targetUid, username, existingJob, existingQueueState }) =>
   typeof targetUid === "string"
