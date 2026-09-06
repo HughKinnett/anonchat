@@ -4,12 +4,16 @@ on:
     branches: [main]
     paths:
       - 'user-settings-*.mjs'
+      - 'appearance-accessibility-*.mjs'
+      - 'appearance-accessibility*.js'
+      - 'user-appearance.mjs'
       - 'settings.html'
       - 'settings.js'
       - 'settings.css'
       - 'nav-menu.js'
       - 'scripts/test-user-settings-*.mjs'
       - 'scripts/test-settings-page-integration.mjs'
+      - 'scripts/test-appearance-accessibility-*.mjs'
       - 'scripts/apply-phase-c-settings-rules-patch.mjs'
       - 'firestore.rules'
       - '.github/workflows/phase-c-settings-red.yml'
@@ -33,3 +37,5 @@ jobs:
         run: node scripts/test-user-settings-rules.mjs
       - name: Settings page integration
         run: node scripts/test-settings-page-integration.mjs
+      - name: Appearance and accessibility policy
+        run: node scripts/test-appearance-accessibility-policy.mjs
