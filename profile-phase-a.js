@@ -3,7 +3,8 @@ import { normalizeProfilePrivacy, resolveProfileVisibility } from "./profile-pri
 import { buildProfileShareData, safeProfileQrPayload } from "./profile-share.mjs";
 import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const targetUserId = new URLSearchParams(location.search).get("uid");
+const queryUserId = new URLSearchParams(location.search).get("uid");
+let targetUserId = queryUserId;
 const controls = document.getElementById("profile-privacy-controls");
 const privacyInputs = [...document.querySelectorAll("[data-profile-privacy]")];
 const privateNote = document.getElementById("profile-private-note");
@@ -32,7 +33,7 @@ const markPrivate = (node, hidden) => {
 };
 
 const applyVisibility = () => {
-  if (!profile || !viewer) return;
+  if (!profile || !viewer || !targetUserId) return;
   const privacy = normalizeProfilePrivacy(profile.profilePrivacy);
   const ownerView = viewer.uid === targetUserId;
   const unavailable = document.getElementById("profile-name")?.textContent === "Unavailable profile";
@@ -169,7 +170,8 @@ qrDialog?.addEventListener("click", (event) => {
 const initialize = async () => {
   await auth.authStateReady();
   viewer = auth.currentUser;
-  if (!viewer || !targetUserId) return;
+  if (!viewer) return;
+  targetUserId = queryUserId || viewer.uid;
   await loadFeatures();
   await loadProfile();
 };
