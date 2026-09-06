@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
+// Regression coverage for encryption setup being gated exclusively at temporary-room entry.
 const community = fs.readFileSync(new URL("../community.js", import.meta.url), "utf8");
 const navMenu = fs.readFileSync(new URL("../nav-menu.js", import.meta.url), "utf8");
 const upload = fs.readFileSync(new URL("../upload.js", import.meta.url), "utf8");
