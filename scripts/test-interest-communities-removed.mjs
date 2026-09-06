@@ -18,7 +18,10 @@ const [nav, sw, timeline, temporaryRooms] = await Promise.all([
   read("community.html")
 ]);
 
-assert.doesNotMatch(nav, /communities\.html/i, "shared navigation must not expose Interest Communities");
+assert.doesNotMatch(nav, /\[\s*["']communities\.html["']\s*,\s*["']Communities["']\s*\]/i,
+  "shared navigation must not expose Interest Communities");
+assert.match(nav, /querySelectorAll\([^\n]*communities\.html/i,
+  "shared navigation removes stale page-level Interest Communities links");
 assert.doesNotMatch(sw, /communities\.html|community-detail\.html|communities\.js|community-detail\.js|community-interest-firestore\.mjs|community-interest-policy\.mjs|community-badge-policy\.mjs/i,
   "service worker must not cache Interest Communities runtime files");
 assert.doesNotMatch(timeline, /communities\.html|community-detail\.html|collection\([^\n]*[\"']communities[\"']/i,
