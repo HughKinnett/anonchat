@@ -15,9 +15,9 @@ const boot = async () => {
   }
 
   await Promise.all([
-    import("./profile.js"),
-    import("./profile-badges.js"),
-    import("./profile-phase-a.js")
+    import("./profile.js?v=145"),
+    import("./profile-badges.js?v=145"),
+    import("./profile-phase-a.js?v=145")
   ]);
 };
 
