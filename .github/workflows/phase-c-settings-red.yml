@@ -8,6 +8,7 @@ on:
       - 'appearance-accessibility*.js'
       - 'user-appearance.mjs'
       - 'notification-preference-policy.mjs'
+      - 'push-policy.mjs'
       - 'settings.html'
       - 'settings.js'
       - 'settings.css'
@@ -16,6 +17,7 @@ on:
       - 'scripts/test-settings-page-integration.mjs'
       - 'scripts/test-appearance-accessibility-*.mjs'
       - 'scripts/test-notification-preference-policy.mjs'
+      - 'scripts/test-push-policy.mjs'
       - 'scripts/apply-phase-c-settings-rules-patch.mjs'
       - 'firestore.rules'
       - '.github/workflows/phase-c-settings-red.yml'
@@ -45,3 +47,5 @@ jobs:
         run: node scripts/test-appearance-accessibility-integration.mjs
       - name: Notification preference policy
         run: node scripts/test-notification-preference-policy.mjs
+      - name: Push timezone metadata policy
+        run: node scripts/test-push-policy.mjs
