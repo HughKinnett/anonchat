@@ -1005,6 +1005,8 @@ $("direct-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const other = $("conversation-user").value;
   const text = $("direct-message").value.trim();
+  const replyToMessageId = event.target.dataset.replyToMessageId || "";
+  const replyToSenderId = event.target.dataset.replyToSenderId || "";
   if (!other || (!text && !pendingDirectImage) || (text && !safeToSend(text))) return;
   if (isBlockedUid(other)) {
     setStatus("Could not send to a blocked user.", true);
@@ -1031,11 +1033,14 @@ $("direct-message-form").addEventListener("submit", async (event) => {
       cipherVersion: 1,
       bodyCipher,
       ...(imageCipher ? { imageCipher } : {}),
+      ...(replyToMessageId && replyToSenderId ? { replyToMessageId, replyToSenderId } : {}),
       createdAt: serverTimestamp(),
       ...(disappear ? { expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) } : {})
     });
     event.target.reset();
     clearDirectPhoto();
+    delete event.target.dataset.replyToMessageId;
+    delete event.target.dataset.replyToSenderId;
   } catch {
     setStatus("Could not send private message.", true);
   }
