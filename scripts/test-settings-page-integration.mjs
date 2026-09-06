@@ -7,7 +7,7 @@ const js = await readFile(new URL('../settings.js', import.meta.url), 'utf8').ca
 
 assert.match(nav, /settings\.html/);
 assert.match(nav, /Settings/);
-assert.match(html, /Privacy & Messaging/);
+assert.match(html, /Privacy &(?:amp;)? Messaging/);
 assert.match(html, /Notifications/);
 assert.match(html, /Appearance/);
 assert.match(html, /Accessibility/);
