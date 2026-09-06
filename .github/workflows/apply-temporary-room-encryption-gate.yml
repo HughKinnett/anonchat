@@ -1,0 +1,35 @@
+name: Apply temporary-room encryption gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/apply-temporary-room-encryption-gate.mjs
+      - .github/workflows/apply-temporary-room-encryption-gate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply behavior change
+        run: node scripts/apply-temporary-room-encryption-gate.mjs
+      - name: Verify regression
+        run: node scripts/test-temporary-room-encryption-gate.mjs
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add community.js nav-menu.js upload.js e2ee-bootstrap.js private-message-request-readiness.js sw.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Gate encryption setup at temporary-room entry"
+          git push origin HEAD:main
