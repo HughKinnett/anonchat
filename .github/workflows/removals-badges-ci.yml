@@ -29,6 +29,7 @@ on:
       - 'scripts/purge-retired-groups-communities.mjs'
       - 'scripts/test-*.mjs'
       - '.github/workflows/removals-badges-ci.yml'
+      - '.github/workflows/purge-retired-groups-communities.yml'
   workflow_dispatch:
 
 jobs:
@@ -53,3 +54,5 @@ jobs:
         run: node scripts/test-retired-feature-rules-hardening.mjs
       - name: Retired data purge scope contract
         run: node scripts/test-purge-retired-groups-communities.mjs
+      - name: Retired data purge workflow contract
+        run: node scripts/test-retired-purge-workflow.mjs
