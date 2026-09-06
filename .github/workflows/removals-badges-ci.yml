@@ -23,6 +23,8 @@ on:
       - 'profile-badges.js'
       - 'admin-badges.js'
       - 'firestore.rules'
+      - 'scripts/retired-feature-rules-hardening.mjs'
+      - 'scripts/apply-retired-feature-rules-hardening.mjs'
       - 'scripts/test-*.mjs'
       - '.github/workflows/removals-badges-ci.yml'
   workflow_dispatch:
@@ -43,3 +45,5 @@ jobs:
         run: node scripts/test-gif-url-composer-removed.mjs
       - name: Automatic immutable badge contract
         run: node scripts/test-automatic-badges.mjs
+      - name: Retired feature Firestore rules hardening contract
+        run: node scripts/test-retired-feature-rules-hardening.mjs
