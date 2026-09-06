@@ -13,16 +13,14 @@ assert.match(badges, /import\s*\{[^}]*auth[^}]*db[^}]*\}\s*from\s*["']\.\/fireba
   "badge controller can resolve the signed-in owner when no uid query is present");
 assert.match(badges, /auth\.authStateReady\(\)|onAuthStateChanged/,
   "badge controller waits for authentication before resolving an own-profile target");
-assert.match(badges, /queryUid|searchParams|URLSearchParams/,
+assert.match(badges, /queryUserId|searchParams|URLSearchParams/,
   "badge controller still honors an explicit other-user uid query");
-assert.match(badges, /currentUser\?\.uid|currentUser\.uid/,
-  "badge controller falls back to the signed-in user's uid for their own profile");
-assert.doesNotMatch(badges, /if \(!targetUserId\s*\|\|\s*profileUnavailable\(\)\) return;/,
-  "badge loading is no longer blocked solely by a missing uid query parameter");
+assert.match(badges, /targetUserId\s*=\s*queryUserId\s*\|\|\s*auth\.currentUser\?\.uid\s*\|\|\s*null[\s\S]*if \(!targetUserId\s*\|\|\s*profileUnavailable\(\)\) return;/,
+  "badge controller resolves query uid or authenticated owner before the final no-target safety guard");
 
-assert.match(phaseA, /currentUser\?\.uid|viewer\.uid/,
-  "profile privacy controller has access to the authenticated viewer uid");
-assert.match(phaseA, /effectiveProfileUid|profileUid|targetUserId\s*\|\|\s*viewer\.uid/,
+assert.match(phaseA, /viewer\s*=\s*auth\.currentUser/,
+  "profile privacy controller resolves the authenticated viewer");
+assert.match(phaseA, /targetUserId\s*=\s*queryUserId\s*\|\|\s*viewer\.uid/,
   "profile privacy resolves the same effective owner profile when uid is absent");
 
 assert.match(html, /id="profile-badges-section"/,
