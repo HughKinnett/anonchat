@@ -4,6 +4,18 @@ import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase
 import { loadUserSettings } from './user-settings-storage.mjs';
 import { applyUserAppearance, watchUserAppearance } from './user-appearance.mjs';
 
+const ensureSharedStyles = () => {
+  if (!globalThis.document?.head) return;
+  if (document.querySelector('link[data-anonchat-appearance]')) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'appearance-accessibility.css';
+  link.dataset.anonchatAppearance = 'true';
+  document.head.append(link);
+};
+
+ensureSharedStyles();
+
 const firestore = { doc, getDoc };
 let stopWatching = () => {};
 let generation = 0;
