@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { extractDiscoveryHashtags, trendingScore } from "../hashtag-discovery-policy.mjs";
+
+const policySource = fs.readFileSync(new URL("../hashtag-discovery-policy.mjs", import.meta.url), "utf8");
+assert.doesNotMatch(policySource, /popularTodayScore/, "Popular Today scoring is retired");
 
 assert.deepEqual(
   extractDiscoveryHashtags("#Music hello #music #Indie_Rock"),
