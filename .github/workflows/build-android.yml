@@ -2,6 +2,25 @@ name: Build Android
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'e2ee-device-key-store.mjs'
+      - 'e2ee-identity.js'
+      - 'appearance-accessibility.css'
+      - 'appearance-accessibility.js'
+      - 'controls.css'
+      - 'profile.html'
+      - 'profile.js'
+      - 'profile-badges.js'
+      - 'profile-phase-a.js'
+      - 'profile-phase-a.css'
+      - 'profile-privacy-policy.mjs'
+      - 'profile-pinning.mjs'
+      - 'profile-share.mjs'
+      - 'sw.js'
+      - '.github/workflows/build-android.yml'
   push:
     branches: [main]
     paths:
