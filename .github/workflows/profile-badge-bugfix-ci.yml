@@ -20,6 +20,12 @@ jobs:
       - run: node scripts/test-private-message-send-readiness.mjs
       - run: node scripts/test-direct-message-conversation-migration.mjs
       - run: node scripts/test-founder-founding-premium-entitlement.mjs
+      - name: Diagnose QR bundle checksum
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js \
+            --output /tmp/qrcode.min.js
+          sha256sum /tmp/qrcode.min.js
       - run: node scripts/test-profile-qr-rendering.mjs
       - run: node scripts/test-login-storage-fallback.mjs
       - run: node scripts/test-admin-badges-surface.mjs
