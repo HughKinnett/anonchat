@@ -18,7 +18,7 @@ export const main = async (dependencies = {}) => {
   try {
     const db = getFirestore(app);
     const result = await purgeRetiredCollections({ db, logger: dependencies.logger ?? console });
-    console.log(`PURGE_RETIRED_RESULT groups=${result.collections.groups ?? 0} communities=${result.collections.communities ?? 0} communityPosts=${result.retiredCommunityPosts} privateGroupEnvelopes=${result.privateGroupEnvelopes} deletedRoots=${result.deletedRoots}`);
+    console.log(`PURGE_RETIRED_RESULT groups=${result.collections.groups ?? 0} communities=${result.collections.communities ?? 0} communityPosts=${result.retiredCommunityPosts} communityVotes=${result.retiredCommunityVotes} privateGroupEnvelopes=${result.privateGroupEnvelopes} deletedRoots=${result.deletedRoots}`);
     return result;
   } finally {
     await deleteApp(app);
