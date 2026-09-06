@@ -23,6 +23,15 @@ assert.match(phaseA, /viewer\s*=\s*auth\.currentUser/,
 assert.match(phaseA, /targetUserId\s*=\s*queryUserId\s*\|\|\s*viewer\.uid/,
   "profile privacy resolves the same effective owner profile when uid is absent");
 
+assert.match(html, /id="profile-badges-open"[^>]*class="[^"]*secondary-button[^\"]*"[^>]*>Badges<\/button>/,
+  "profile action row exposes a clearly labeled themed Badges button");
+assert.match(phaseA, /profile-badges-open/,
+  "profile privacy controller owns the public visibility of the Badges entry button");
+assert.match(phaseA, /badgeEntryButton\.hidden\s*=\s*!visibility\.badges/,
+  "Badges entry button is visible to owners/public visitors and hidden from visitors when badges are private");
+assert.match(badges, /profile-badges-open/,
+  "badge controller wires the profile Badges entry button to the collection dialog");
+
 assert.match(html, /id="profile-badges-section"/,
   "profile keeps a clearly labeled Badges section");
 assert.match(html, /id="profile-badges-empty"[^>]*class="[^"]*profile-badges-empty/,
@@ -31,5 +40,9 @@ assert.match(css, /\.profile-badges-empty/,
   "empty badge state uses the existing profile stylesheet");
 assert.match(html, /id="profile-badges-view-all"[^>]*class="[^"]*secondary-button/,
   "badge collection action uses the existing AnonChat secondary button theme");
+assert.match(html, /id="profile-badges-collection-empty"[^>]*>No badges earned yet\.<\/p>/,
+  "badge collection itself has an empty state so the Badges button always opens something useful");
+assert.doesNotMatch(badges, /openBadgeCollection[\s\S]{0,250}!allBadges\.length/,
+  "badge collection opening is not blocked just because the user has zero badges");
 
 console.log("profile badge target and discoverability contract passed");
