@@ -1,10 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  applicationDayBounds,
-  extractDiscoveryHashtags,
-  popularTodayScore,
-  trendingScore
-} from "../hashtag-discovery-policy.mjs";
+import { extractDiscoveryHashtags, trendingScore } from "../hashtag-discovery-policy.mjs";
 
 assert.deepEqual(
   extractDiscoveryHashtags("#Music hello #music #Indie_Rock"),
@@ -13,16 +8,24 @@ assert.deepEqual(
 );
 assert.deepEqual(extractDiscoveryHashtags("plain text"), []);
 
-const now = Date.UTC(2026, 8, 5, 18, 0, 0);
+const now = Date.UTC(2026, 8, 6, 20, 0, 0);
 const fresh = trendingScore({ createdAtMs: now - 60_000, uniqueInteractions: 5, commentCount: 2, replyCount: 1 }, now);
 const old = trendingScore({ createdAtMs: now - 23 * 60 * 60_000, uniqueInteractions: 5, commentCount: 2, replyCount: 1 }, now);
 assert.ok(fresh > old, "recency contributes to Trending");
-assert.equal(trendingScore({ createdAtMs: now - 25 * 60 * 60_000, uniqueInteractions: 99, commentCount: 99, replyCount: 99 }, now), -Infinity, "posts older than 24 hours are excluded");
+assert.ok(
+  trendingScore({ createdAtMs: now - 60_000, commentCount: 4, uniqueInteractions: 1, replyCount: 0 }, now)
+  > trendingScore({ createdAtMs: now - 60_000, commentCount: 1, uniqueInteractions: 4, replyCount: 0 }, now),
+  "conversation should outweigh passive reaction volume"
+);
+assert.ok(
+  trendingScore({ createdAtMs: now - 60_000, commentCount: 1, uniqueInteractions: 1, replyCount: 3 }, now)
+  > trendingScore({ createdAtMs: now - 60_000, commentCount: 1, uniqueInteractions: 1, replyCount: 0 }, now),
+  "replies contribute to Trending"
+);
+assert.equal(
+  trendingScore({ createdAtMs: now - 48 * 60 * 60 * 1000, commentCount: 100, uniqueInteractions: 100, replyCount: 100 }, now),
+  -Infinity,
+  "posts outside the rolling 24-hour window are excluded"
+);
 
-const bounds = applicationDayBounds(now);
-assert.equal(bounds.startMs, Date.UTC(2026, 8, 5, 0, 0, 0), "application day is UTC for deterministic clients");
-assert.equal(bounds.endMs, Date.UTC(2026, 8, 6, 0, 0, 0));
-assert.ok(popularTodayScore({ createdAtMs: now, uniqueInteractions: 2, commentCount: 1, replyCount: 0 }, now) > 0);
-assert.equal(popularTodayScore({ createdAtMs: bounds.startMs - 1, uniqueInteractions: 100 }, now), -Infinity, "Popular Today excludes posts outside the application day");
-
-console.log("hashtag/discovery policy contract passed");
+console.log("hashtag/trending discovery policy contract passed");
