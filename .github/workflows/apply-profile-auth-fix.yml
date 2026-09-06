@@ -1,0 +1,42 @@
+name: Apply profile auth fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-profile-auth-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Remove profile-only email verification sign-out
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'profile.js';
+          const source = fs.readFileSync(path, 'utf8');
+          const block = `  if (!user.emailVerified) {\n    await exitAuthenticatedSession({ user, stopListeners: stopProfileResources, redirect: () => window.location.replace("index.html") });\n    return;\n  }\n\n`;
+          if (!source.includes(block)) {
+            throw new Error('Expected profile email-verification sign-out block was not found');
+          }
+          fs.writeFileSync(path, source.replace(block, ''));
+          NODE
+      - name: Verify regression locally
+        run: node scripts/test-profile-auth-guard.mjs
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add profile.js
+          git commit -m "Fix profile logout for unverified users"
+          git push
