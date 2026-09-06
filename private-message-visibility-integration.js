@@ -147,8 +147,13 @@ document.addEventListener("click", (event) => {
   void hideLoadedChatForMe();
 }, true);
 
-observer = stream ? new MutationObserver(() => decorate()) : null;
-observer?.observe(stream, { childList: true });
+const observeStream = () => {
+  observer?.disconnect();
+  observer = stream ? new MutationObserver(() => decorate()) : null;
+  observer?.observe(stream, { childList: true });
+};
+
+observeStream();
 conversation?.addEventListener("change", watchConversation);
 
 onAuthStateChanged(auth, (user) => {
@@ -157,8 +162,18 @@ onAuthStateChanged(auth, (user) => {
   watchConversation();
 });
 
-addEventListener("pagehide", () => {
+addEventListener("pagehide", (event) => {
   stopMessages();
   stopVisibility();
+  stopMessages = () => {};
+  stopVisibility = () => {};
   observer?.disconnect();
+  if (event.persisted) return;
+  observer = null;
+});
+
+addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  observeStream();
+  watchConversation();
 });
