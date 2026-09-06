@@ -1,5 +1,5 @@
 const QR_LIBRARY_URL = "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js";
-const CACHE_NAME = "anonchat-v132";
+const CACHE_NAME = "anonchat-v133";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -13,8 +13,6 @@ const APP_SHELL = [
   "./community.html",
   "./communities.html",
   "./community-detail.html",
-  "./groups.html",
-  "./group-detail.html",
   "./premium.html",
   "./customize.html",
   "./premium-rooms.html",
@@ -98,12 +96,6 @@ const APP_SHELL = [
   "./community-interest-firestore.mjs",
   "./community-interest-policy.mjs",
   "./community-badge-policy.mjs",
-  "./groups.js",
-  "./group-detail.js",
-  "./private-group-detail.js",
-  "./group-firestore.mjs",
-  "./private-group-firestore.mjs",
-  "./group-policy.mjs",
   "./message-request-policy.mjs",
   "./private-message-reaction-policy.mjs",
   "./private-message-reply-policy.mjs",
