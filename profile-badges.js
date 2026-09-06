@@ -1,10 +1,13 @@
-import { db } from "./firebase-config.js";
+import { auth, db } from "./firebase-config.js";
 import { listBadgeTypes, listUserBadges } from "./badge-firestore.mjs";
 import { PROFILE_BADGE_PREVIEW_LIMIT, previewEarnedBadges, sortEarnedBadges } from "./badge-policy.mjs";
 
-const targetUserId = new URLSearchParams(window.location.search).get("uid");
+const searchParams = new URLSearchParams(window.location.search);
+const queryUserId = searchParams.get("uid");
+let targetUserId = queryUserId;
 const section = document.getElementById("profile-badges-section");
 const list = document.getElementById("profile-badges-list");
+const empty = document.getElementById("profile-badges-empty");
 const viewAll = document.getElementById("profile-badges-view-all");
 const collectionDialog = document.getElementById("profile-badges-collection-dialog");
 const collection = document.getElementById("profile-badges-collection");
@@ -26,6 +29,7 @@ const hideGallery = () => {
   if (list) list.replaceChildren();
   if (collection) collection.replaceChildren();
   if (section) section.hidden = true;
+  if (empty) empty.hidden = true;
   if (viewAll) viewAll.hidden = true;
   collectionDialog?.close?.();
   dialog?.close?.();
@@ -115,8 +119,9 @@ const render = () => {
   }
   const visible = previewEarnedBadges(allBadges);
   list.replaceChildren(...visible.map(badgeButton));
-  section.hidden = allBadges.length === 0;
-  if (viewAll) viewAll.hidden = allBadges.length <= PROFILE_BADGE_PREVIEW_LIMIT;
+  section.hidden = false;
+  if (empty) empty.hidden = allBadges.length !== 0;
+  if (viewAll) viewAll.hidden = allBadges.length === 0;
 };
 
 const openBadgeCollection = () => {
@@ -127,6 +132,8 @@ const openBadgeCollection = () => {
 
 const load = async () => {
   hideGallery();
+  await auth.authStateReady();
+  targetUserId = queryUserId || auth.currentUser?.uid || null;
   if (!targetUserId || profileUnavailable()) return;
   try {
     const [assignments, definitions] = await Promise.all([
