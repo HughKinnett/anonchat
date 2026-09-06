@@ -3,6 +3,7 @@ import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.5/f
 import { doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
 import { loadUserSettings, saveUserSettings } from './user-settings-storage.mjs';
 import { applyUserAppearance } from './user-appearance.mjs';
+import { exitAfterAuthLoss } from './push-exit.js';
 
 const form = document.getElementById('settings-form');
 const status = document.getElementById('settings-status');
@@ -102,6 +103,7 @@ form?.addEventListener('submit', async event => {
 
 onAuthStateChanged(auth, async user => {
   if (!user) {
+    await exitAfterAuthLoss();
     location.replace('index.html');
     return;
   }
