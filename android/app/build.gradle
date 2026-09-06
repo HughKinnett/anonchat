@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.anonchat.app'
+    namespace 'com.hughkinnett.anonchat'
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.anonchat.app'
+        applicationId 'com.hughkinnett.anonchat'
         minSdk 23
         targetSdk 35
         versionCode 5
