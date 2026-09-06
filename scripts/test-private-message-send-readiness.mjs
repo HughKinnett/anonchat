@@ -11,8 +11,12 @@ const [community, upload, typing, bootstrap, requestReadiness, navMenu, sw] = aw
   readFile(new URL("../sw.js", import.meta.url), "utf8").catch(() => "")
 ]);
 
-assert.match(community, /That user has not enabled encrypted chats yet\./,
-  "the existing direct-key path still detects a missing recipient identity");
+assert.match(community, /recipient-encryption-not-ready/,
+  "an accepted legacy conversation identifies a missing recipient encryption identity without invalidating acceptance");
+assert.match(community, /This accepted conversation is ready, but the other user must open AnonChat once to finish encrypted-chat setup before you can send\./,
+  "the sender receives an actionable accepted-conversation encryption readiness message");
+assert.match(community, /if \(error\?\.code === "recipient-encryption-not-ready"\)/,
+  "the authoritative send handler preserves accepted-conversation state and handles only the missing-key condition specially");
 assert.match(community, /\$\("direct-message-form"\)\.addEventListener\("submit", async \(event\) =>/,
   "community keeps one authoritative private-message submit handler");
 assert.match(community, /const key = await directKeyFor\(other\)/,
@@ -40,6 +44,6 @@ assert.match(requestReadiness, /messageRequests/,
 assert.match(requestReadiness, /follows/,
   "request readiness detects mutual-follow auto-accept cases");
 assert.match(sw, /CACHE_NAME\s*=\s*["']anonchat-v140["']/,
-  "service-worker cache advances so installed mobile clients receive the canonical conversation and QR fixes");
+  "service-worker cache remains on the current canonical conversation and QR release while this compatibility fix is verified");
 
 console.log("Private-message send readiness contract passed.");
