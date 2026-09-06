@@ -32,6 +32,24 @@ assert.match(
   "Temporary Rooms navigation must be blocked until encryption setup succeeds"
 );
 
+assert.match(
+  navMenu,
+  /isEncryptionExemptUser\s*=\s*\([^)]*\)\s*=>[\s\S]{0,240}?displayName[\s\S]{0,160}?testaccount/i,
+  "the encryption setup exemption must be explicit and scoped to TestAccount"
+);
+
+assert.match(
+  navMenu,
+  /if\s*\(\s*isEncryptionExemptUser\(user\)\s*\)\s*\{[\s\S]{0,240}?(location\.(assign|href)|window\.location)/,
+  "TestAccount must bypass the Temporary Rooms encryption setup gate"
+);
+
+assert.doesNotMatch(
+  navMenu,
+  /isEncryptionExemptUser[\s\S]{0,180}?(admin|moderator|owner|verified|premium)/i,
+  "the encryption exemption must not broaden to privileged or paid users"
+);
+
 assert.doesNotMatch(
   upload,
   /e2ee-bootstrap\.js/,
