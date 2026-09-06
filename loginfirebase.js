@@ -24,7 +24,6 @@ const status = document.getElementById("auth-status");
 const signInForm = document.getElementById("sign-in-form");
 let authInProgress = false;
 
-// Signup is paused, but returning-user controls must always remain interactive.
 signInForm.querySelectorAll("input, button").forEach((control) => {
   control.disabled = false;
 });
@@ -118,7 +117,7 @@ signInForm.addEventListener("submit", async (event) => {
 let signupsOpen = false;
 const signUpForm = document.getElementById("sign-up-form");
 const signupButton = document.getElementById("sign-up");
-const registrationSummary = document.getElementById("signup-registration-summary");
+const registrationSummary = document.getElementById("signup-registration-summary") || signUpForm.closest(".auth-card")?.querySelector("p:not(.signup-closed-notice)");
 const signupNotice = document.querySelector(".signup-closed-notice");
 const signupControls = [...signUpForm.querySelectorAll("input, button")];
 const setSignupAvailability = (enabled) => {
@@ -129,8 +128,8 @@ const setSignupAvailability = (enabled) => {
   signUpForm.classList.toggle("signup-locked-form", !signupsOpen);
   signupControls.forEach((control) => { control.disabled = !signupsOpen; });
   signupButton.textContent = signupsOpen ? "Create Account" : "Signups Paused";
-  registrationSummary.textContent = signupsOpen ? "New account registration is open." : "New account registration is temporarily closed.";
-  signupNotice.textContent = signupsOpen ? "Create a new AnonChat account below." : "Existing users can continue signing in normally.";
+  if (registrationSummary) registrationSummary.textContent = signupsOpen ? "New account registration is open." : "New account registration is temporarily closed.";
+  if (signupNotice) signupNotice.textContent = signupsOpen ? "Create a new AnonChat account below." : "Existing users can continue signing in normally.";
 };
 const refreshSignupAvailability = async () => {
   try {
@@ -238,7 +237,6 @@ signUpForm.addEventListener("submit", async (event) => {
     setStatus(message, true);
   }
 });
-
 
 const signInPassword = document.getElementById("password");
 const passwordToggle = document.getElementById("toggle-sign-in-password");
