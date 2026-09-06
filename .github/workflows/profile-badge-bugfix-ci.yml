@@ -24,3 +24,4 @@ jobs:
       - run: node scripts/test-profile-privacy-policy.mjs
       - run: node scripts/test-badge-full-reconciliation.mjs
       - run: node scripts/test-badge-reconciliation-state.mjs
+      - run: node scripts/test-existing-user-badge-backfill-workflow.mjs
