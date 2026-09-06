@@ -36,11 +36,11 @@ timeline = timeline
 
 timeline = replaceOnce(
   timeline,
-  /\n\s*} else if \(feedMode === \\"popular-today\\"\) \{[\s\S]*?\n\s*} else if \(feedMode === \\"saved-posts\\"\)/,
+  /\n\s*} else if \(feedMode === "popular-today"\) \{[\s\S]*?\n\s*} else if \(feedMode === "saved-posts"\)/,
   '\n  } else if (feedMode === "saved-posts")',
   "Popular Today render branch"
 );
-timeline = timeline.replace(/\n\s*else if \(feedMode === \\"history\\"\)[^\n]*/, "");
+timeline = timeline.replace(/\n\s*else if \(feedMode === "history"\)[^\n]*/, "");
 timeline = timeline.replace('["trending", "popular-today", "saved-posts", "history"]', '["trending", "saved-posts"]');
 timeline = timeline
   .replace(/\n\s*popularTodayPostsButton\?\.setAttribute\([^\n]*/, "")
