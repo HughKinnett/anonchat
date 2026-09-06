@@ -1,0 +1,45 @@
+name: Verify final personalized discovery full regression
+
+on:
+  push:
+    branches:
+      - verify/personalized-discovery-final-3
+    paths:
+      - '.github/workflows/verify-personalized-discovery-final.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Verify service worker integrity
+        run: |
+          grep -q 'const CACHE_NAME = "anonchat-v149";' sw.js
+          test "$(wc -l < sw.js)" -gt 200
+          grep -q 'self.addEventListener("fetch"' sw.js
+          grep -q 'self.addEventListener("push"' sw.js
+      - name: Verify personalized discovery
+        run: |
+          node scripts/test-suggested-follow-policy.mjs
+          node scripts/test-feed-ranking-policy.mjs
+          node scripts/test-hashtag-discovery-policy.mjs
+          node scripts/test-timeline-recommendation-context.mjs
+          node scripts/test-phase-b-ui.mjs
+          node scripts/test-feed-mode-policy.mjs
+          node scripts/test-phase-b-package.mjs
+          node scripts/test-phase-b-listener-order.mjs
+          node scripts/test-phase-b-reference-loading.mjs
+          node scripts/test-phase-b-discovery-integration.mjs
+          node scripts/test-push-service-worker.mjs
+          node scripts/test-push-auth-integration.mjs
+          node scripts/test-profile-auth-guard.mjs
+          node --check timeline.js
+      - name: Run full repository regression
+        run: npm run test:firestore-ci
