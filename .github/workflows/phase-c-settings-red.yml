@@ -1,10 +1,11 @@
-name: Phase C Settings RED
+name: Phase C Settings
 on:
   pull_request:
     branches: [main]
     paths:
       - 'user-settings-*.mjs'
       - 'scripts/test-user-settings-*.mjs'
+      - 'scripts/apply-phase-c-settings-rules-patch.mjs'
       - 'firestore.rules'
       - '.github/workflows/phase-c-settings-red.yml'
   workflow_dispatch:
@@ -17,6 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Apply settings rules patch
+        run: node scripts/apply-phase-c-settings-rules-patch.mjs
       - name: User settings policy
         run: node scripts/test-user-settings-policy.mjs
       - name: Firestore settings rules contract
