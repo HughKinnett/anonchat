@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - profile.js
+      - profile.html
+      - profile-bootstrap.js
+      - sw.js
       - scripts/test-profile-auth-guard.mjs
       - .github/workflows/profile-auth-guard-ci.yml
   workflow_dispatch:
