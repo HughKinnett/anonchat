@@ -568,9 +568,9 @@ const renderRoomMessages = () => {
     const sender = document.createElement("small");
     sender.textContent = data.tempName;
     const text = document.createElement("span");
-    text.textContent = decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : "");
+    text.textContent = data.unsentAt ? "Message unsent" : (decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : ""));
     item.append(sender);
-    if (data.text || data.bodyCipher) item.append(text);
+    if (data.unsentAt || data.text || data.bodyCipher) item.append(text);
     const roomImage = decrypted?.imageData || data.imageData;
     if (roomImage) {
       const photo = document.createElement("img");
@@ -890,7 +890,7 @@ const renderDirectMessages = () => {
     && !isBlockedUid(message.data().senderId)
     && (!message.data().expiresAt?.toMillis || message.data().expiresAt.toMillis() > currentTime)
   ).sort(compareOldestFirst);
-  messages.forEach(message => message.data().encrypted ? void decryptDirectMessage(message, other) : void migrateDirectMessage(message, other));
+  messages.forEach(message => { if (!message.data().unsentAt) message.data().encrypted ? void decryptDirectMessage(message, other) : void migrateDirectMessage(message, other); });
   $("direct-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
     const decrypted = data.encrypted ? decryptedDirectMessages.get(message.id) : data;
@@ -907,26 +907,10 @@ const renderDirectMessages = () => {
       expiry.textContent = `Disappears ${data.expiresAt.toDate().toLocaleString()}`;
       actions.append(expiry);
     }
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "private-message-delete";
-    remove.textContent = "Delete for everyone";
-    remove.addEventListener("click", async () => {
-      remove.disabled = true;
-      try {
-        await deleteDoc(message.ref);
-        revealedPrivatePhotos.delete(message.id);
-        setStatus("Private message deleted permanently.");
-      } catch {
-        remove.disabled = false;
-        setStatus("Could not delete that private message.", true);
-      }
-    });
-    actions.append(remove);
     item.append(sender);
     if (data.text || data.bodyCipher) item.append(text);
     const revealedImage = revealedPrivatePhotos.get(message.id);
-    const imageData = data.senderId === state.user.uid ? (decrypted?.imageData || data.imageData) : revealedImage;
+    const imageData = data.unsentAt ? "" : (data.senderId === state.user.uid ? (decrypted?.imageData || data.imageData) : revealedImage);
     if (imageData) {
       const photo = document.createElement("img");
       photo.className = "message-photo";
@@ -934,7 +918,7 @@ const renderDirectMessages = () => {
       photo.src = imageData;
       photo.alt = "Photo sent in this private conversation";
       item.append(photo);
-    } else if ((data.imageData || data.imageCipher) && data.senderId !== state.user.uid) {
+    } else if (!data.unsentAt && (data.imageData || data.imageCipher) && data.senderId !== state.user.uid) {
       const viewPhoto = document.createElement("button");
       viewPhoto.type = "button";
       viewPhoto.className = "view-once-photo-button";
@@ -952,7 +936,7 @@ const renderDirectMessages = () => {
         } catch { setStatus("That encrypted photo could not be opened.", true); }
       }, { once: true });
       item.append(viewPhoto);
-    } else if (data.photoViewedAt) {
+    } else if (!data.unsentAt && data.photoViewedAt) {
       const viewed = document.createElement("small");
       viewed.className = "view-once-photo-status";
       viewed.textContent = "View-once photo opened";
@@ -970,36 +954,6 @@ const renderDirectMessages = () => {
     clearDirectMessageExpiryTimer = () => window.clearTimeout(timer);
   }
 };
-
-$("delete-chat").addEventListener("click", async () => {
-  const other = $("conversation-user").value;
-  if (!other) {
-    setStatus("Choose an accepted conversation first.", true);
-    return;
-  }
-  const chatMessages = state.messages.filter((message) =>
-    message.data().participants.includes(state.user.uid)
-    && message.data().participants.includes(other)
-  );
-  if (!window.confirm("Delete every message in this chat for both users? You will remain connected and can message again without another request.")) return;
-  const control = $("delete-chat");
-  control.disabled = true;
-  control.textContent = "Deleting chat…";
-  try {
-    const references = chatMessages.map((message) => message.ref);
-    for (let offset = 0; offset < references.length; offset += 400) {
-      const batch = writeBatch(db);
-      references.slice(offset, offset + 400).forEach((reference) => batch.delete(reference));
-      await batch.commit();
-    }
-    setStatus("Chat messages deleted. This conversation remains accepted, so no new request is needed.");
-  } catch {
-    setStatus("Could not delete the entire chat.", true);
-  } finally {
-    control.disabled = false;
-    control.textContent = "Delete chat";
-  }
-});
 
 $("direct-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();

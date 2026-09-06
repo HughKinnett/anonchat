@@ -2335,6 +2335,24 @@ service cloud.firestore {
         && reactionId == resource.data.messageId + '_' + request.auth.uid;
     }
 
+    match /messageRequests/{requestId}/messageVisibility/{visibilityId} {
+      allow read: if activeUser()
+        && acceptedConversation(requestId)
+        && resource.data.uid == request.auth.uid;
+      allow create, update: if activeUserAfter()
+        && acceptedConversation(requestId)
+        && request.resource.data.keys().hasOnly(['messageId', 'uid', 'hiddenAt'])
+        && request.resource.data.messageId is string
+        && request.resource.data.messageId.size() > 0
+        && request.resource.data.uid == request.auth.uid
+        && visibilityId == request.resource.data.messageId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/messageRequests/$(requestId)/messages/$(request.resource.data.messageId))
+        && request.resource.data.hiddenAt == request.time;
+      allow delete: if activeUser()
+        && acceptedConversation(requestId)
+        && resource.data.uid == request.auth.uid;
+    }
+
     match /messageRequests/{requestId}/messages/{messageId} {
       allow read: if activeUser()
         && acceptedConversation(requestId);
@@ -2389,9 +2407,16 @@ service cloud.firestore {
             && !request.resource.data.keys().hasAny(['text', 'imageData'])
             && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['text', 'imageData', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher']))
+          ||
+          (resource.data.senderId == request.auth.uid
+            && !resource.data.keys().hasAny(['unsentAt', 'unsentBy'])
+            && request.resource.data.unsentAt == request.time
+            && request.resource.data.unsentBy == request.auth.uid
+            && !request.resource.data.keys().hasAny(['bodyCipher', 'imageCipher', 'text', 'imageData'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['bodyCipher', 'imageCipher', 'text', 'imageData', 'unsentAt', 'unsentBy']))
         );
-      allow delete: if signedIn()
-        && request.auth.uid in resource.data.participants;
+      allow delete: if false;
     }
 
     match /directMessages/{messageId} {
