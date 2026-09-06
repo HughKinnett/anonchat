@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+// One-shot migration used to remove timeline-local score sorting.
 const path = "timeline.js";
 let source = fs.readFileSync(path, "utf8");
 
