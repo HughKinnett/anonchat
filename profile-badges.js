@@ -9,8 +9,10 @@ const section = document.getElementById("profile-badges-section");
 const list = document.getElementById("profile-badges-list");
 const empty = document.getElementById("profile-badges-empty");
 const viewAll = document.getElementById("profile-badges-view-all");
+const entryButton = document.getElementById("profile-badges-open");
 const collectionDialog = document.getElementById("profile-badges-collection-dialog");
 const collection = document.getElementById("profile-badges-collection");
+const collectionEmpty = document.getElementById("profile-badges-collection-empty");
 const collectionClose = document.getElementById("profile-badges-collection-close");
 const dialog = document.getElementById("profile-badge-dialog");
 const dialogImage = document.getElementById("profile-badge-dialog-image");
@@ -31,6 +33,7 @@ const hideGallery = () => {
   if (section) section.hidden = true;
   if (empty) empty.hidden = true;
   if (viewAll) viewAll.hidden = true;
+  if (collectionEmpty) collectionEmpty.hidden = true;
   collectionDialog?.close?.();
   dialog?.close?.();
 };
@@ -125,8 +128,9 @@ const render = () => {
 };
 
 const openBadgeCollection = () => {
-  if (!collectionDialog || !collection || profileUnavailable() || !allBadges.length) return;
+  if (!collectionDialog || !collection || profileUnavailable()) return;
   collection.replaceChildren(...sortEarnedBadges(allBadges).map(collectionCard));
+  if (collectionEmpty) collectionEmpty.hidden = allBadges.length !== 0;
   collectionDialog.showModal?.();
 };
 
@@ -154,6 +158,7 @@ const load = async () => {
   }
 };
 
+entryButton?.addEventListener("click", openBadgeCollection);
 viewAll?.addEventListener("click", openBadgeCollection);
 collectionClose?.addEventListener("click", () => collectionDialog?.close?.());
 collectionDialog?.addEventListener("click", (event) => {
