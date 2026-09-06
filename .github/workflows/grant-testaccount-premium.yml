@@ -1,0 +1,67 @@
+name: Grant TestAccount Premium
+
+on:
+  push:
+    paths:
+      - .github/workflows/grant-testaccount-premium.yml
+
+permissions:
+  contents: write
+
+jobs:
+  grant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
+          create_credentials_file: true
+      - name: Grant Premium to TestAccount
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+        run: |
+          node --input-type=module <<'EOF'
+          import { applicationDefault, initializeApp } from 'firebase-admin/app';
+          import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+
+          initializeApp({ credential: applicationDefault(), projectId: process.env.GCLOUD_PROJECT });
+          const db = getFirestore();
+          const usernameKey = 'testaccount';
+          const usernameSnap = await db.collection('usernames').doc(usernameKey).get();
+          if (!usernameSnap.exists) throw new Error('Username @TestAccount was not found in usernames/testaccount');
+          const uid = usernameSnap.data()?.uid;
+          if (!uid) throw new Error('Username @TestAccount has no uid');
+
+          const userSnap = await db.collection('users').doc(uid).get();
+          if (!userSnap.exists) throw new Error(`User profile ${uid} was not found`);
+
+          await db.collection('premiumAccess').doc(uid).set({
+            uid,
+            status: 'active',
+            tier: 'subscriber',
+            complimentary: true,
+            source: 'owner_grant',
+            grantedAt: FieldValue.serverTimestamp()
+          }, { merge: true });
+
+          const verify = await db.collection('premiumAccess').doc(uid).get();
+          const data = verify.data();
+          if (!verify.exists || data?.status !== 'active' || data?.tier !== 'subscriber') {
+            throw new Error('Premium grant verification failed');
+          }
+          console.log(`Premium active for @TestAccount uid=${uid}`);
+          EOF
+      - name: Remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          git rm .github/workflows/grant-testaccount-premium.yml
+          git commit -m "Remove TestAccount premium grant workflow"
+          git push origin HEAD:main
