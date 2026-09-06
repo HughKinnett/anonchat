@@ -35,3 +35,5 @@ jobs:
         run: node scripts/test-e2ee-auto-unlock.mjs
       - name: Desktop dark baseline contract
         run: node scripts/test-desktop-dark-baseline.mjs
+      - name: Profile badge discoverability contract
+        run: node scripts/test-profile-badge-target-resolution.mjs
