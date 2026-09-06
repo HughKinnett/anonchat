@@ -23,7 +23,7 @@ const [
   buildWorkflow
 ] = await Promise.all([
   "android/app/build.gradle",
-  "android/app/src/main/java/com/anonchat/app/MainActivity.java",
+  "android/app/src/main/java/com/hughkinnett/anonchat/MainActivity.java",
   "android/app/src/main/AndroidManifest.xml",
   ".well-known/assetlinks.json",
   "profile.html",
@@ -43,13 +43,19 @@ const [
 
 assert.match(activity, /extends\s+LauncherActivity/, "Android remains a Trusted Web Activity wrapper");
 assert.match(activity, /FLAG_SECURE/, "secure-window behavior remains enabled");
+assert.match(activity, /package\s+com\.hughkinnett\.anonchat;/,
+  "MainActivity uses the new Android package");
 assert.match(manifest, /android\.support\.customtabs\.trusted\.DEFAULT_URL[^\n]*https:\/\/anonchatlogin\.web\.app\//,
   "Android launches the production AnonChat origin");
 assert.match(manifest, /android:host="anonchatlogin\.web\.app"/, "verified app links target production");
-assert.match(gradle, /applicationId\s+["']com\.anonchat\.app["']/,
-  "Android package ID stays com.anonchat.app");
-assert.match(assetLinks, /"package_name"\s*:\s*"com\.anonchat\.app"/,
+assert.match(gradle, /namespace\s+["']com\.hughkinnett\.anonchat["']/,
+  "Android namespace uses com.hughkinnett.anonchat");
+assert.match(gradle, /applicationId\s+["']com\.hughkinnett\.anonchat["']/,
+  "Android package ID uses com.hughkinnett.anonchat");
+assert.match(assetLinks, /"package_name"\s*:\s*"com\.hughkinnett\.anonchat"/,
   "Digital Asset Links stay bound to the Android package");
+assert.doesNotMatch(gradle + activity + assetLinks, /com\.anonchat\.app/,
+  "active Android package configuration no longer uses the retired package ID");
 assert.doesNotMatch(gradle, /com\.android\.billingclient|stripe-android|com\.stripe/i,
   "Android parity release adds no Play Billing or Stripe SDK");
 
