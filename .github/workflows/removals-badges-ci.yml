@@ -20,11 +20,13 @@ on:
       - 'community-detail.*'
       - 'community-interest-*.mjs'
       - 'badge-*.mjs'
+      - 'founder-identities.mjs'
       - 'profile-badges.js'
       - 'admin-badges.js'
       - 'firestore.rules'
       - 'scripts/retired-feature-rules-hardening.mjs'
       - 'scripts/apply-retired-feature-rules-hardening.mjs'
+      - 'scripts/purge-retired-groups-communities.mjs'
       - 'scripts/test-*.mjs'
       - '.github/workflows/removals-badges-ci.yml'
   workflow_dispatch:
@@ -45,5 +47,9 @@ jobs:
         run: node scripts/test-gif-url-composer-removed.mjs
       - name: Automatic immutable badge contract
         run: node scripts/test-automatic-badges.mjs
+      - name: Automatic activity badge reconciliation contract
+        run: node scripts/test-badge-activity-reconciliation.mjs
       - name: Retired feature Firestore rules hardening contract
         run: node scripts/test-retired-feature-rules-hardening.mjs
+      - name: Retired data purge scope contract
+        run: node scripts/test-purge-retired-groups-communities.mjs
