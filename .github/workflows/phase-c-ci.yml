@@ -25,3 +25,5 @@ jobs:
       - run: node scripts/test-private-message-replies-integration.mjs
       - run: node scripts/test-private-message-delete-unsend-integration.mjs
       - run: node scripts/test-private-message-request-privacy-integration.mjs
+      - run: node scripts/test-push-service-worker.mjs
+      - run: npm run test:firestore-ci
