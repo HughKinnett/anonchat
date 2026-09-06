@@ -1,6 +1,14 @@
 import { ANONCHAT_BADGE_CATALOG } from "./badge-policy.mjs";
+import { FOUNDING_MEMBER_CUTOFF } from "./badge-milestones.mjs";
+import { isAnonChatFounder } from "./founder-identities.mjs";
 
 const aggregateCount = (snapshot) => Number(snapshot?.data?.()?.count ?? 0);
+const timestampMillis = (value) => {
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (value instanceof Date) return value.getTime();
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
 export class FirestoreBadgeAwardAdapter {
   constructor({ db, FieldValue }) {
@@ -62,6 +70,16 @@ export class FirestoreBadgeAwardAdapter {
       if (maximum >= threshold) break;
     }
     return maximum;
+  }
+
+  async trustedPremiumEntitlement(uid) {
+    if (!uid) return false;
+    const snapshot = await this.db.collection("users").doc(uid).get();
+    if (!snapshot.exists) return false;
+    const profile = snapshot.data() || {};
+    if (isAnonChatFounder(profile.username)) return true;
+    const createdAt = timestampMillis(profile.createdAt);
+    return Number.isFinite(createdAt) && createdAt <= FOUNDING_MEMBER_CUTOFF;
   }
 
   async awardIfMissing(uid, badgeId) {
