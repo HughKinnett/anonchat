@@ -1161,11 +1161,6 @@ onAuthStateChanged(auth, async (user) => {
     await exitAfterAuthLoss({ redirect: () => window.location.replace(destination) });
     return;
   }
-  if (!user.emailVerified) {
-    await exitAuthenticatedSession({ user, stopListeners: stopProfileResources, redirect: () => window.location.replace("index.html") });
-    return;
-  }
-
   if (!targetUserId) {
     window.location.replace("timeline.html");
     return;
