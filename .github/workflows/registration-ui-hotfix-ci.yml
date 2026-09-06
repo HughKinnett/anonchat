@@ -1,0 +1,25 @@
+name: Registration UI hotfix CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'loginfirebase.js'
+      - 'index.html'
+      - 'sw.js'
+      - 'scripts/test-registration-ui-state.mjs'
+      - '.github/workflows/registration-ui-hotfix-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/test-registration-ui-state.mjs
+      - run: npm test
