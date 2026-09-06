@@ -85,8 +85,8 @@ assert.match(visibilityIntegration, /hide\.textContent = "Delete for me"/,
   "individual private-message deletion is participant-local");
 assert.match(visibilityIntegration, /unsend\.textContent = "Unsend for everyone"[\s\S]{0,420}unsendForEveryone\(message\)/,
   "sender-owned unsend is a distinct action from participant-local deletion");
-assert.match(visibilityIntegration, /batch\.set\(doc\(db, "messageRequests", pairIdFor\(otherUid\), "messageVisibility", visibilityIdFor\(message\.id\)\)/,
-  "deleting a chat for me writes participant-local visibility records instead of deleting canonical messages");
+assert.match(visibilityIntegration, /batch\.set\(doc\(db, "messageRequests", canonicalConversationId\(currentUser\.uid, otherUid\), "messageVisibility", visibilityIdFor\(message\.id\)\)/,
+  "deleting a chat for me writes participant-local visibility records under the canonical conversation instead of deleting messages");
 assert.doesNotMatch(visibilityIntegration, /deleteDoc\(acceptedRequest\.ref\)/,
   "chat deletion never removes the accepted request record");
 assert.doesNotMatch(source, /collection\(db, "directMessages"\)/,
