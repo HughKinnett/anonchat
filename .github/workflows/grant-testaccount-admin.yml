@@ -1,0 +1,137 @@
+name: Grant TestAccount Admin Dashboard
+
+on:
+  push:
+    paths:
+      - .github/workflows/grant-testaccount-admin.yml
+
+permissions:
+  contents: write
+
+jobs:
+  grant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+
+      - name: Add admin-access regression test
+        run: |
+          cat > scripts/test-testaccount-admin-access.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import { isAuthorizedAdministratorUsername, isProtectedAdministrator } from '../admin-deletion-policy.mjs';
+
+          assert.equal(isAuthorizedAdministratorUsername('TestAccount'), true, 'TestAccount must be authorized for Admin Dashboard');
+          assert.equal(isAuthorizedAdministratorUsername('testaccount'), true, 'admin authorization must be case-insensitive');
+          assert.equal(isProtectedAdministrator('TestAccount'), false, 'TestAccount must not become a protected/undeletable admin');
+          assert.equal(isProtectedAdministrator('i_love_you_h'), true);
+          assert.equal(isProtectedAdministrator('cybercapone'), true);
+
+          const adminJs = fs.readFileSync(new URL('../admin.js', import.meta.url), 'utf8');
+          assert.match(adminJs, /isAuthorizedAdministratorUsername\(username\)/, 'Admin Dashboard client must use the admin authorization helper');
+
+          const rules = fs.readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+          assert.match(rules, /normalizedUsername in \['i_love_you_h', 'cybercapone', 'testaccount'\]/, 'Firestore admin authorization must include TestAccount');
+          assert.match(rules, /i_love_you_h\|cybercapone/, 'protected-admin rule must remain limited to the original protected admins');
+          EOF
+
+      - name: Verify regression fails before implementation
+        run: |
+          if node scripts/test-testaccount-admin-access.mjs; then
+            echo 'Expected pre-fix regression failure, but test passed.' >&2
+            exit 1
+          else
+            echo 'Regression reproduced.'
+          fi
+
+      - name: Implement TestAccount admin authorization
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          policy = Path('admin-deletion-policy.mjs')
+          text = policy.read_text()
+          old = '''export const PROTECTED_ADMIN_USERNAMES = Object.freeze([\n  "i_love_you_h",\n  "cybercapone"\n]);\n'''
+          new = '''export const PROTECTED_ADMIN_USERNAMES = Object.freeze([\n  "i_love_you_h",\n  "cybercapone"\n]);\n\nexport const ADMIN_USERNAMES = Object.freeze([\n  ...PROTECTED_ADMIN_USERNAMES,\n  "testaccount"\n]);\n'''
+          if old not in text:
+              raise SystemExit('admin-deletion-policy admin list block not found')
+          text = text.replace(old, new, 1)
+          marker = '''export const isProtectedAdministrator = (username) =>\n  PROTECTED_ADMIN_USERNAMES.includes(normalizeUsername(username));\n'''
+          replacement = marker + '''\nexport const isAuthorizedAdministratorUsername = (username) =>\n  ADMIN_USERNAMES.includes(normalizeUsername(username));\n'''
+          if marker not in text:
+              raise SystemExit('protected admin helper not found')
+          policy.write_text(text.replace(marker, replacement, 1))
+
+          admin = Path('admin.js')
+          text = admin.read_text()
+          text = text.replace(
+              'canAdminSetBanned, canQueueAdminDeletion, isProtectedAdministrator, normalizeUsername',
+              'canAdminSetBanned, canQueueAdminDeletion, isAuthorizedAdministratorUsername, isProtectedAdministrator, normalizeUsername',
+              1
+          )
+          old = 'const reservation = isProtectedAdministrator(username) ? await getDoc(doc(db, "usernames", normalizeUsername(username))) : null;'
+          new = 'const reservation = isAuthorizedAdministratorUsername(username) ? await getDoc(doc(db, "usernames", normalizeUsername(username))) : null;'
+          if old not in text:
+              raise SystemExit('admin.js authorization line not found')
+          admin.write_text(text.replace(old, new, 1))
+
+          rules = Path('firestore.rules')
+          text = rules.read_text()
+          old = "normalizedUsername in ['i_love_you_h', 'cybercapone']"
+          new = "normalizedUsername in ['i_love_you_h', 'cybercapone', 'testaccount']"
+          if old not in text:
+              raise SystemExit('Firestore admin whitelist not found')
+          rules.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Verify admin access regression
+        run: node scripts/test-testaccount-admin-access.mjs
+
+      - name: Run admin and core tests
+        run: |
+          npm run test:admin-dashboard
+          npm test
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
+          create_credentials_file: true
+
+      - name: Verify TestAccount reservation in production
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+        run: |
+          node --input-type=module <<'EOF'
+          import { applicationDefault, initializeApp } from 'firebase-admin/app';
+          import { getFirestore } from 'firebase-admin/firestore';
+          initializeApp({ credential: applicationDefault(), projectId: process.env.GCLOUD_PROJECT });
+          const db = getFirestore();
+          const reservation = await db.collection('usernames').doc('testaccount').get();
+          if (!reservation.exists) throw new Error('usernames/testaccount does not exist');
+          const { uid, username } = reservation.data();
+          if (!uid || String(username).toLowerCase() !== 'testaccount') throw new Error('TestAccount username reservation is invalid');
+          const profile = await db.collection('users').doc(uid).get();
+          if (!profile.exists) throw new Error('TestAccount user profile does not exist');
+          if (String(profile.data()?.username).toLowerCase() !== 'testaccount') throw new Error('TestAccount profile username does not match reservation');
+          console.log(`Verified TestAccount admin reservation uid=${uid}`);
+          EOF
+
+      - name: Deploy Firestore rules and Hosting
+        run: |
+          npx --no-install firebase deploy --project anonchatlogin --only firestore:rules --non-interactive
+          npx --no-install firebase deploy --project anonchatlogin --only hosting --non-interactive
+
+      - name: Commit implementation and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add admin-deletion-policy.mjs admin.js firestore.rules scripts/test-testaccount-admin-access.mjs
+          git rm .github/workflows/grant-testaccount-admin.yml
+          git commit -m "Authorize TestAccount for Admin Dashboard"
+          git pull --rebase origin main
+          git push origin HEAD:main
