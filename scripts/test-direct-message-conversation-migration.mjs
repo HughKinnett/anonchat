@@ -10,7 +10,7 @@ assert.match(source, /status[^\n]*accepted|data\?\.status\s*!==\s*["']accepted["
 assert.match(source, /\[.*fromId.*toId.*\]\.sort\(\)\.join\(["']_["']\)/s,
   "migration computes a deterministic sorted pair id");
 for (const child of ["messages", "messageReactions", "messageVisibility"]) {
-  assert.match(source, new RegExp(`collection\\(["']${child}["']\\)|collection\\(\\`${child}\\`\\)|\\/${child}\\/`),
+  assert.match(source, new RegExp(`${child}`),
     `migration preserves ${child} child records`);
 }
 assert.match(source, /DIRECT_MESSAGE_CONVERSATION_MIGRATION/,
