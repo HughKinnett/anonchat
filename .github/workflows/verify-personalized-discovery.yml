@@ -32,3 +32,4 @@ jobs:
       - run: node scripts/test-push-service-worker.mjs
       - run: node --check timeline.js
       - run: npm run test:firestore-ci
+      # Re-run marker after behavioral discovery integration contract update.
