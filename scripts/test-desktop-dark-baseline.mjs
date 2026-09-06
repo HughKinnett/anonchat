@@ -3,10 +3,11 @@ import { readFile } from "node:fs/promises";
 import { resolveTheme } from "../appearance-accessibility-policy.mjs";
 
 const root = new URL("../", import.meta.url);
-const [css, bootstrap, controls] = await Promise.all([
+const [css, bootstrap, controls, sw] = await Promise.all([
   readFile(new URL("appearance-accessibility.css", root), "utf8"),
   readFile(new URL("appearance-accessibility.js", root), "utf8"),
-  readFile(new URL("controls.css", root), "utf8")
+  readFile(new URL("controls.css", root), "utf8"),
+  readFile(new URL("sw.js", root), "utf8")
 ]);
 
 assert.equal(resolveTheme("system", false), "dark",
@@ -42,5 +43,7 @@ assert.match(bootstrap, /ensureSharedStyles\(\);[\s\S]*onAuthStateChanged/,
   "shared appearance CSS is installed before asynchronous auth/settings resolution");
 assert.match(controls, /\.main-menu-panel[^\n]*background:var\(--ac-menu-bg\)/,
   "hamburger controls remain tied to the existing AnonChat control theme");
+assert.match(sw, /CACHE_NAME\s*=\s*["']anonchat-v137["']/,
+  "service-worker cache advances so existing desktop and Android installs receive the live fixes");
 
 console.log("desktop dark baseline and hamburger contrast contract passed");
