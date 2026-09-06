@@ -24,5 +24,14 @@ const bootstrap = await readFile(new URL('appearance-accessibility.js', root), '
 assert.match(bootstrap, /loadUserSettings/);
 assert.match(bootstrap, /applyUserAppearance/);
 assert.match(bootstrap, /onAuthStateChanged/);
+assert.match(bootstrap, /appearance-accessibility\.css/);
+
+const css = await readFile(new URL('appearance-accessibility.css', root), 'utf8').catch(() => '');
+assert.match(css, /data-theme="light"/);
+assert.match(css, /data-theme="dark"/);
+assert.match(css, /data-text-size="small"/);
+assert.match(css, /data-text-size="extra-large"/);
+assert.match(css, /\.reduce-motion/);
+assert.match(css, /\.high-contrast/);
 
 console.log('appearance/accessibility integration tests passed');
