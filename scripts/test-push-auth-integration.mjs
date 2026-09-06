@@ -6,8 +6,6 @@ const exitPolicy = {
   "admin-badges.js": { authenticated: 0, authLoss: 1 },
   "admin.js": { authenticated: 1, authLoss: 1 },
   "appearance-accessibility.js": { authenticated: 0, authLoss: 0 },
-  "communities.js": { authenticated: 1, authLoss: 1 },
-  "community-detail.js": { authenticated: 1, authLoss: 1 },
   "community.js": { authenticated: 2, authLoss: 1 },
   "connections.js": { authenticated: 1, authLoss: 1 },
   "customize.js": { authenticated: 0, authLoss: 1 },
