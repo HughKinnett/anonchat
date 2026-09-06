@@ -48,7 +48,11 @@ body { background-color: var(--ac-page-bg) !important; color: var(--ac-text) !im
 .room-card,
 .profile-card,
 .spotify-profile-card,
-.feed > li { border-color: var(--ac-border) !important; }
+.feed > li {
+  border-color: var(--ac-border) !important;
+  background-color: var(--ac-surface) !important;
+  color: var(--ac-text) !important;
+}
 
 html[data-theme="light"] .topbar,
 html[data-theme="light"] .main-menu-panel,
