@@ -1,5 +1,5 @@
 const QR_LIBRARY_URL = "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js";
-const CACHE_NAME = "anonchat-v135";
+const CACHE_NAME = "anonchat-v136";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -112,6 +112,7 @@ const APP_SHELL = [
   "./e2ee-crypto.mjs",
   "./e2ee-pin.mjs",
   "./e2ee-device-store.mjs",
+  "./e2ee-device-key-store.mjs",
   "./e2ee-identity.js",
   "./e2ee-bootstrap.js",
   "./e2ee-room-keys.js",
