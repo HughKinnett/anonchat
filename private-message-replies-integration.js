@@ -141,9 +141,14 @@ const watchConversation = () => {
   );
 };
 
+const observeStream = () => {
+  observer?.disconnect();
+  observer = stream ? new MutationObserver(() => decorate()) : null;
+  observer?.observe(stream, { childList: true });
+};
+
 ensureComposerPreview();
-observer = stream ? new MutationObserver(() => decorate()) : null;
-observer?.observe(stream, { childList: true });
+observeStream();
 conversation?.addEventListener("change", watchConversation);
 form?.addEventListener("submit", () => window.setTimeout(clearReply, 0));
 
@@ -152,7 +157,16 @@ onAuthStateChanged(auth, (user) => {
   watchConversation();
 });
 
-addEventListener("pagehide", () => {
+addEventListener("pagehide", (event) => {
   stopMessages();
+  stopMessages = () => {};
   observer?.disconnect();
+  if (event.persisted) return;
+  observer = null;
+});
+
+addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  observeStream();
+  watchConversation();
 });
