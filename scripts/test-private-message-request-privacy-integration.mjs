@@ -13,7 +13,7 @@ assert.match(html, /value="people-i-follow"/);
 assert.match(html, /value="none"/);
 assert.match(community, /canCreateMessageRequest/);
 assert.match(community, /messageRequestPrivacy/);
-assert.match(community, /people-i-follow/);
+assert.match(community, /message-request-privacy/);
 assert.match(rules, /match \/messageRequestPrivacy\/\{uid\}/);
 assert.match(rules, /recipientAllowsMessageRequest/);
 assert.match(rules, /people-i-follow/);
