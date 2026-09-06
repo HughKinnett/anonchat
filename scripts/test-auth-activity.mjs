@@ -125,8 +125,11 @@ assert.deepEqual(pageActivityWrite, {
 }, "the shared production writer changes only lastActiveAt");
 
 const loginSource = await readFile(new URL("../loginfirebase.js", import.meta.url), "utf8");
-assert.match(loginSource, /chooseDurablePersistence/, "login uses the durable persistence policy");
-assert.doesNotMatch(loginSource, /inMemoryPersistence/, "login has no memory-only persistence fallback");
+assert.match(loginSource, /chooseDurablePersistence/, "login uses the shared persistence policy");
+assert.match(loginSource, /browserLocalPersistence[\s\S]*browserSessionPersistence[\s\S]*inMemoryPersistence/, "returning-user sign-in uses memory only after both durable browser stores");
+const signupBlock = loginSource.match(/const signUpForm[\s\S]*?createUserWithEmailAndPassword\(/)?.[0] || "";
+assert.ok(signupBlock, "signup persistence block remains discoverable");
+assert.doesNotMatch(signupBlock, /inMemoryPersistence/, "signup remains limited to durable browser-backed persistence");
 const rulesSource = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 assert.match(
   rulesSource,
