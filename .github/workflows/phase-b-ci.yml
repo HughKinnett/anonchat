@@ -33,6 +33,7 @@ jobs:
       - run: node scripts/test-phase-b-discovery-integration.mjs
       - run: node scripts/test-phase-b-admin-edit-history.mjs
       - run: node scripts/test-phase-b-styles.mjs
+      - run: node scripts/test-push-service-worker.mjs
       - run: node --check timeline.js
       - run: node --check profile.js
       - run: node --check admin.js
