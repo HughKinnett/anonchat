@@ -64,7 +64,7 @@
       <p>Choose what other people can see on your profile.</p>
       <div class="profile-privacy-grid">
         <label>Show posts <input type="checkbox" data-profile-privacy="showPosts" checked></label>
-        <label>Show badges <input type="checkbox" data-profile-privacy="showBadges" checked></label>
+        <label>Show badges on my profile <input type="checkbox" data-profile-privacy="showBadges" checked></label>
         <label>Show followers and following <input type="checkbox" data-profile-privacy="showFollowersFollowing" checked></label>
         <label>Show activity <input type="checkbox" data-profile-privacy="showActivity" checked></label>
       </div>
@@ -72,7 +72,10 @@
     </section>
 
     <section id="profile-badges-section" data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-badges-title" hidden>
-      <div class="spotify-card-heading"><div><p class="eyebrow">Achievements</p><h2 id="profile-badges-title">Badges</h2></div></div>
+      <div class="spotify-card-heading">
+        <div><p class="eyebrow">Achievements</p><h2 id="profile-badges-title">Badges</h2></div>
+        <span id="profile-badges-private-note" class="profile-badges-private-note" hidden>Hidden from others</span>
+      </div>
       <div id="profile-badges-list" class="profile-badges-list"></div>
       <button id="profile-badges-view-all" class="secondary-button" type="button" hidden>View all badges</button>
     </section>
@@ -95,11 +98,21 @@
     <p class="install-help" role="status" aria-live="polite"></p>
   </main>
 
+  <dialog id="profile-badges-collection-dialog" class="profile-badge-dialog profile-badges-collection-dialog" aria-labelledby="profile-badges-collection-title">
+    <div class="profile-badges-collection-heading">
+      <div><p class="eyebrow">Achievements</p><h2 id="profile-badges-collection-title">Badge collection</h2></div>
+      <button id="profile-badges-collection-close" class="secondary-button" type="button" aria-label="Close badge collection">Close</button>
+    </div>
+    <div id="profile-badges-collection" class="profile-badges-collection"></div>
+  </dialog>
+
   <dialog id="profile-badge-dialog" class="profile-badge-dialog">
     <button id="profile-badge-dialog-close" class="secondary-button" type="button" aria-label="Close badge details">Close</button>
     <img id="profile-badge-dialog-image" alt="">
     <h2 id="profile-badge-dialog-name"></h2>
+    <p id="profile-badge-dialog-tier"></p>
     <p id="profile-badge-dialog-description"></p>
+    <p id="profile-badge-dialog-requirement"></p>
     <p id="profile-badge-dialog-earned"></p>
   </dialog>
 
