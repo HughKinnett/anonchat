@@ -18,6 +18,7 @@ jobs:
           node-version: "22"
       - run: npm ci
       - run: node scripts/test-private-message-send-readiness.mjs
+      - run: node scripts/test-direct-message-conversation-migration.mjs
       - run: node scripts/test-login-storage-fallback.mjs
       - run: node scripts/test-admin-badges-surface.mjs
       - run: node scripts/test-profile-badge-collection.mjs
