@@ -2,6 +2,7 @@ import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebas
 import { doc, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 import { readFile } from "node:fs/promises";
 
+// Regression coverage for the production New Registrations admin toggle.
 const env = await initializeTestEnvironment({
   projectId: "anonchat-registration-toggle-test",
   firestore: { rules: await readFile(new URL("../firestore.rules", import.meta.url), "utf8") }
