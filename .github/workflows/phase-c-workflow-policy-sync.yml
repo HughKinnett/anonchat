@@ -1,0 +1,32 @@
+name: Phase C workflow policy sync
+
+on:
+  push:
+    branches: [phase-c-inline-implementation]
+    paths: [.phase-c-workflow-policy-sync-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-c-inline-implementation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/apply-workflow-policy-phase-b-sync.mjs
+      - name: Commit policy sync
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add workflow-policy.mjs
+          git commit -m "test: sync workflow policy with Phase B release gates"
+          git push origin HEAD:phase-c-inline-implementation
