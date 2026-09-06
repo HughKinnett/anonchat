@@ -4,71 +4,60 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d12">
-  <meta name="description" content="View an AnonChat user's pseudonymous profile and posts.">
-  <meta property="og:type" content="website">
-  <meta property="og:site_name" content="AnonChat">
-  <meta property="og:title" content="AnonChat — Pseudonymous posts and profiles">
-  <meta property="og:description" content="See pseudonymous posts and conversations on AnonChat.">
-  <meta property="og:image" content="https://anonchatlogin.web.app/anonchat-anonymous.png">
-  <meta property="og:image:alt" content="AnonChat anonymous social sharing artwork">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:image" content="https://anonchatlogin.web.app/anonchat-anonymous.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="AnonChat">
-  <meta name="format-detection" content="telephone=no">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="timeline.css">
-  <link rel="stylesheet" href="premium.css">
-  <link rel="stylesheet" href="mobile-hotfix.css">
+  <link rel="apple-touch-icon" href="anonchat-anonymous.png">
+  <link rel="stylesheet" href="profile.css">
   <link rel="stylesheet" href="profile-phase-a.css">
+  <link rel="stylesheet" href="premium.css">
   <title>AnonChat — Profile</title>
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="timeline.html">AnonChat</a>
     <div class="topbar-actions">
-      <a class="secondary-button nav-button" href="timeline.html">← Timeline</a>
-      <div class="main-menu"><button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button><nav id="main-menu-panel" class="main-menu-panel" hidden><a href="timeline.html">Timeline</a><a href="community.html">Community</a><a href="connections.html">Followers & following</a><button class="install-app menu-install" type="button">Install AnonChat</button><a class="menu-danger" href="delete-account.html">Delete account</a></nav></div>
+      <a class="secondary nav-button" href="timeline.html">← Timeline</a>
+      <div class="main-menu">
+        <button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button>
+        <nav id="main-menu-panel" class="main-menu-panel" hidden>
+          <a href="timeline.html">Timeline</a>
+          <a href="community.html">Community</a>
+          <a href="profile.html" aria-current="page">My profile</a>
+          <a href="connections.html">Followers & following</a>
+          <button class="install-app menu-install" type="button">Install AnonChat</button>
+          <button id="sign-out" class="menu-danger" type="button">Sign out</button>
+          <a class="menu-danger" href="delete-account.html">Delete account</a>
+        </nav>
+      </div>
     </div>
   </header>
 
-  <main class="page-shell profile-page">
-    <section class="view-profile-banner" aria-labelledby="profile-name">
-      <div id="view-profile-cover" class="view-profile-cover" role="img" aria-label="Profile cover" hidden></div>
-      <div class="view-profile-content">
-        <div id="view-profile-avatar" class="view-profile-avatar" role="img" aria-label="Profile picture" hidden></div>
-        <div class="view-profile-identity">
-          <h1 id="profile-name">Loading profile…</h1>
-          <p id="profile-handle"></p>
-          <div class="profile-connections-links" data-profile-private-hidden="true">
-            <a id="profile-followers" href="connections.html">0 followers</a>
-            <a id="profile-following" href="connections.html">0 following</a>
-          </div>
-          <span id="profile-membership-badge" class="my-profile-link membership-badge">Founding Member</span>
-          <a id="profile-admin-link" class="my-profile-link admin-link" href="admin.html" hidden>Admin dashboard</a>
-          <div class="profile-phase-a-actions" aria-label="Profile actions">
-            <button id="profile-share-button" class="secondary-button" type="button">Share profile</button>
-            <button id="profile-qr-button" class="secondary-button" type="button">Profile QR</button>
-            <button id="profile-badges-open" class="secondary-button" type="button" hidden>Badges</button>
-          </div>
+  <main>
+    <section class="profile-card">
+      <img id="profile-photo" class="profile-photo" src="anonchat-anonymous.png" alt="Profile photo">
+      <div class="profile-copy">
+        <p class="eyebrow">AnonChat profile</p>
+        <h1 id="profile-name">Loading profile…</h1>
+        <p id="profile-bio" class="profile-bio"></p>
+        <div id="profile-connections" class="profile-connections-links" data-profile-private-hidden="false"></div>
+        <div class="profile-actions">
+          <button id="follow-button" class="primary" type="button" hidden>Follow</button>
+          <button id="block-user" class="secondary-button" type="button" hidden>Block</button>
+          <button id="report-profile" class="secondary-button" type="button" hidden>Report</button>
+          <button id="profile-share-button" class="secondary-button" type="button">Share</button>
+          <button id="profile-qr-button" class="secondary-button" type="button">Profile QR</button>
+          <button id="profile-badges-open" class="secondary-button" type="button" hidden>Badges</button>
         </div>
-        <div id="profile-social-actions" class="profile-social-actions" hidden>
-          <button id="profile-follow-button" class="follow-button" type="button" hidden>Follow</button>
-          <button id="profile-report-button" class="follow-button report-button" type="button">Report user</button>
-          <button id="profile-block-button" class="secondary-button" type="button">Block user</button>
-        </div>
+        <p id="profile-status" role="status" aria-live="polite"></p>
       </div>
     </section>
 
-    <section id="profile-privacy-controls" class="profile-privacy-controls" aria-labelledby="profile-privacy-title" hidden>
+    <section id="profile-privacy-controls" class="profile-privacy-controls" hidden aria-labelledby="profile-privacy-title">
       <h2 id="profile-privacy-title">Profile privacy</h2>
-      <p>Choose what other people can see on your profile.</p>
-      <div class="profile-privacy-grid">
-        <label>Show posts <input type="checkbox" data-profile-privacy="showPosts" checked></label>
-        <label>Show badges on my profile <input type="checkbox" data-profile-privacy="showBadges" checked></label>
-        <label>Show followers and following <input type="checkbox" data-profile-privacy="showFollowersFollowing" checked></label>
-        <label>Show activity <input type="checkbox" data-profile-privacy="showActivity" checked></label>
-      </div>
+      <label class="switch"><input type="checkbox" data-profile-privacy="showPosts"> Show posts on my profile</label>
+      <label class="switch"><input type="checkbox" data-profile-privacy="showBadges"> Show badges on my profile</label>
+      <label class="switch"><input type="checkbox" data-profile-privacy="showFollowersFollowing"> Show followers and following</label>
+      <label class="switch"><input type="checkbox" data-profile-privacy="showActivity"> Show profile activity</label>
       <p id="profile-private-note" class="profile-private-note" hidden></p>
     </section>
 
@@ -76,37 +65,33 @@
       <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="profile-spotify-title">Playing on Spotify</h2></div></div>
       <div id="profile-spotify-player"></div>
     </section>
-    <section id="profile-playlist-card" data-profile-activity data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-playlist-title" hidden><div class="spotify-card-heading"><div><p class="eyebrow">Premium playlist</p><h2 id="profile-playlist-title">Spotify playlist</h2></div></div><div id="profile-playlist-player"></div></section>
 
-    <section class="profile-posts-section" data-profile-private-hidden="true" aria-labelledby="profile-posts-title">
-      <div class="feed-header">
-        <h2 id="profile-posts-title" class="section-title">Posts</h2>
-        <span id="profile-post-count" class="follower-count"></span>
-      </div>
-      <div id="profile-pinned-post" class="profile-pinned-post" aria-label="Pinned post" hidden></div>
-      <p id="profile-status" role="status" aria-live="polite">Loading posts…</p>
-      <ul class="feed" id="profile-feed"></ul>
+    <section class="profile-posts-section" data-profile-private-hidden="false">
+      <h2>Posts</h2>
+      <div id="profile-posts"></div>
     </section>
-    <p class="install-help" role="status" aria-live="polite"></p>
   </main>
 
-  <dialog id="profile-badges-collection-dialog" class="profile-badge-dialog profile-badges-collection-dialog" aria-labelledby="profile-badges-collection-title">
-    <div class="profile-badges-collection-heading">
-      <div><p class="eyebrow">Achievements</p><h2 id="profile-badges-collection-title">Badge collection</h2></div>
-      <button id="profile-badges-collection-close" class="secondary-button" type="button" aria-label="Close badge collection">Close</button>
+  <dialog id="profile-badges-collection-dialog" class="profile-badge-dialog">
+    <div class="profile-badge-dialog-card">
+      <button id="profile-badges-collection-close" class="secondary-button" type="button">Close</button>
+      <p class="eyebrow">Achievements</p>
+      <h2>Badges</h2>
+      <div id="profile-badges-collection" class="profile-badges-collection"></div>
+      <p id="profile-badges-collection-empty" class="profile-badges-empty" hidden>No badges earned yet.</p>
     </div>
-    <p id="profile-badges-collection-empty" class="profile-badges-empty" hidden>No badges earned yet.</p>
-    <div id="profile-badges-collection" class="profile-badges-collection"></div>
   </dialog>
 
   <dialog id="profile-badge-dialog" class="profile-badge-dialog">
-    <button id="profile-badge-dialog-close" class="secondary-button" type="button" aria-label="Close badge details">Close</button>
-    <img id="profile-badge-dialog-image" alt="">
-    <h2 id="profile-badge-dialog-name"></h2>
-    <p id="profile-badge-dialog-tier"></p>
-    <p id="profile-badge-dialog-description"></p>
-    <p id="profile-badge-dialog-requirement"></p>
-    <p id="profile-badge-dialog-earned"></p>
+    <div class="profile-badge-dialog-card">
+      <button id="profile-badge-dialog-close" class="secondary-button" type="button">Close</button>
+      <img id="profile-badge-dialog-image" src="anonchat-anonymous.png" alt="">
+      <p id="profile-badge-dialog-tier" class="eyebrow"></p>
+      <h2 id="profile-badge-dialog-name"></h2>
+      <p id="profile-badge-dialog-description"></p>
+      <p id="profile-badge-dialog-requirement" class="muted"></p>
+      <p id="profile-badge-dialog-earned" class="muted"></p>
+    </div>
   </dialog>
 
   <dialog id="profile-qr-dialog" class="profile-qr-dialog">
@@ -119,7 +104,6 @@
     </div>
   </dialog>
 
-  <script src="vendor/qrcode.min.js"></script>
   <script type="module" src="profile-bootstrap.js"></script>
   <script type="module" src="post-sharing.js"></script>
   <script src="nav-menu.js" defer></script>
