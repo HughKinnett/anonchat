@@ -14,6 +14,8 @@ assert.match(integration, /Reply/);
 assert.match(integration, /replyToMessageId/);
 assert.match(integration, /Original message unavailable\./);
 assert.match(integration, /data-message-id/);
+assert.match(integration, /originalBubble\?\.hidden/,
+  "a Delete-for-me hidden original must not leak its text through a visible reply quote");
 assert.match(community, /replyToMessageId/);
 assert.match(community, /replyToSenderId/);
 assert.match(rules, /replyToMessageId/);
