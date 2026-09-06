@@ -39,3 +39,5 @@ jobs:
         run: node scripts/test-settings-page-integration.mjs
       - name: Appearance and accessibility policy
         run: node scripts/test-appearance-accessibility-policy.mjs
+      - name: Shared appearance accessibility integration
+        run: node scripts/test-appearance-accessibility-integration.mjs
