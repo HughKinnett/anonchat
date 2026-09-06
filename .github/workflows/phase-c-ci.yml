@@ -29,4 +29,5 @@ jobs:
       - run: for file in community.js sw.js private-message-*.js private-message-*.mjs scripts/test-private-message-*.mjs scripts/test-community-lifecycle.mjs; do node --check "$file"; done
       - run: node scripts/test-push-service-worker.mjs
       - run: node scripts/test-push-auth-integration.mjs
+      - run: npx firebase emulators:exec --only firestore "node scripts/test-firestore-rules.mjs"
       - run: npm run test:firestore-ci
