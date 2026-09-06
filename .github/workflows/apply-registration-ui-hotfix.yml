@@ -1,0 +1,70 @@
+name: Apply registration UI hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-registration-ui-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Apply signup state fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          login = Path('loginfirebase.js')
+          text = login.read_text()
+          text = text.replace(
+              'const signUpForm = document.getElementById("sign-up-form");\nconst signupControls = [...signUpForm.querySelectorAll("input, button")];',
+              'const signUpForm = document.getElementById("sign-up-form");\nconst signupButton = document.getElementById("sign-up");\nconst registrationSummary = document.getElementById("signup-registration-summary");\nconst signupNotice = document.querySelector(".signup-closed-notice");\nconst signupControls = [...signUpForm.querySelectorAll("input, button")];'
+          )
+          text = text.replace(
+              '  signUpForm.setAttribute("aria-disabled", String(!signupsOpen));\n  signupControls.forEach((control) => { control.disabled = !signupsOpen; });',
+              '  signUpForm.setAttribute("aria-disabled", String(!signupsOpen));\n  signUpForm.classList.toggle("signup-locked-form", !signupsOpen);\n  signupControls.forEach((control) => { control.disabled = !signupsOpen; });\n  signupButton.textContent = signupsOpen ? "Create Account" : "Signups Paused";\n  registrationSummary.textContent = signupsOpen ? "New account registration is open." : "New account registration is temporarily closed.";\n  signupNotice.textContent = signupsOpen ? "Create a new AnonChat account below." : "Existing users can continue signing in normally.";'
+          )
+          old = '''const refreshSignupAvailability = async () => {\n  try {\n    const snapshot = await getDoc(doc(db, "siteSettings", "features"));\n    signupsOpen = snapshot.exists() ? snapshot.data().registrationsEnabled === true : false; // registration stays closed until an admin opens it\n  } catch {\n    signupsOpen = false;\n  }\n  setSignupAvailability(signupsOpen);\n  return signupsOpen;\n};'''
+          new = '''const refreshSignupAvailability = async () => {\n  try {\n    const snapshot = await getDoc(doc(db, "siteSettings", "features"));\n    setSignupAvailability(snapshot.exists() && snapshot.data().registrationsEnabled === true);\n    return signupsOpen;\n  } catch (error) {\n    setSignupAvailability(false);\n    setStatus("Could not check whether new registrations are open. Refresh the page and try again.", true);\n    return false;\n  }\n};'''
+          if old not in text:
+              raise SystemExit('registration availability block not found')
+          login.write_text(text.replace(old, new, 1))
+
+          index = Path('index.html')
+          html = index.read_text()
+          html = html.replace('<p>New account registration is temporarily closed.</p>', '<p id="signup-registration-summary">New account registration is temporarily closed.</p>', 1)
+          index.write_text(html)
+
+          sw = Path('sw.js')
+          sw_text = sw.read_text()
+          sw.write_text(sw_text.replace('const CACHE_NAME = "anonchat-v141";', 'const CACHE_NAME = "anonchat-v142";', 1))
+      - name: Verify registration UI regression
+        run: node scripts/test-registration-ui-state.mjs
+      - name: Verify normal regressions
+        run: npm test
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN }}
+          create_credentials_file: true
+      - name: Commit hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-registration-ui-hotfix.yml
+          git add loginfirebase.js index.html sw.js scripts/test-registration-ui-state.mjs
+          git commit -m "Fix registration toggle UI state"
+          git push origin HEAD:main
+      - name: Deploy Firebase Hosting
+        run: npx --no-install firebase deploy --project anonchatlogin --only hosting --non-interactive
