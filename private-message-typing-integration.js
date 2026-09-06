@@ -84,8 +84,16 @@ onAuthStateChanged(auth, (user) => {
   watchConversation();
 });
 
-addEventListener("pagehide", () => {
+addEventListener("pagehide", (event) => {
   stopRemoteTyping();
+  stopRemoteTyping = () => {};
   window.clearInterval(refreshTimer);
+  refreshTimer = 0;
   void clearOwnTyping();
+  if (event.persisted && status) { status.textContent = ""; status.hidden = true; }
+});
+
+addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  watchConversation();
 });
