@@ -19,3 +19,4 @@ jobs:
       - run: node scripts/test-private-message-reply-policy.mjs
       - run: node scripts/test-private-message-visibility-policy.mjs
       - run: node scripts/test-private-message-request-policy.mjs
+      - run: node scripts/test-private-message-typing-policy.mjs
