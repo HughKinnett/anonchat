@@ -4,6 +4,8 @@ import fs from "node:fs";
 const community = fs.readFileSync(new URL("../community.js", import.meta.url), "utf8");
 const navMenu = fs.readFileSync(new URL("../nav-menu.js", import.meta.url), "utf8");
 const upload = fs.readFileSync(new URL("../upload.js", import.meta.url), "utf8");
+const bootstrap = fs.readFileSync(new URL("../e2ee-bootstrap.js", import.meta.url), "utf8");
+const requestReadiness = fs.readFileSync(new URL("../private-message-request-readiness.js", import.meta.url), "utf8");
 
 assert.doesNotMatch(
   navMenu,
@@ -15,6 +17,18 @@ assert.doesNotMatch(
   upload,
   /e2ee-bootstrap\.js/,
   "timeline/profile upload startup must not initialize encryption"
+);
+
+assert.doesNotMatch(
+  bootstrap,
+  /ensureE2eeIdentity\s*\(/,
+  "global bootstrap must never prompt for encryption setup"
+);
+
+assert.doesNotMatch(
+  requestReadiness,
+  /ensureE2eeIdentity\s*\(/,
+  "private message request readiness must not prompt for encryption setup"
 );
 
 assert.doesNotMatch(
