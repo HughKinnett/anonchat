@@ -46,8 +46,8 @@ assert.doesNotMatch(adminJs, /stripe.*(?:setDoc|updateDoc|addDoc)|(?:setDoc|upda
 assert.match(stripeConfig, /checkoutEnabled:\s*false/, "Stripe checkout remains disabled");
 assert.match(stripeConfig, /checkoutMode:\s*["']disabled["']/, "Stripe checkout mode remains disabled");
 assert.doesNotMatch(androidGradle, /com\.android\.billingclient|stripe-android|com\.stripe/i, "Android has no Play Billing or Stripe SDK dependency");
-assert.match(androidGradle, /versionCode\s+4\b/, "Android package version is advanced for the refreshed release");
-assert.match(androidGradle, /versionName\s+["']1\.0\.3["']/, "Android package version name is refreshed");
+assert.match(androidGradle, /versionCode\s+5\b/, "Android package version is advanced for the parity release");
+assert.match(androidGradle, /versionName\s+["']1\.0\.4["']/, "Android package version name is refreshed");
 assert.match(androidMain, /extends\s+LauncherActivity/, "Android remains a Trusted Web Activity wrapper");
 
 console.log("Payment preparation UI contract passed");
