@@ -1,6 +1,6 @@
 import { normalizeUserSettings } from "./user-settings-policy.mjs";
 
-export const userSettingsPath = (uid) => ["users", uid, "private", "settings", "preferences"];
+export const userSettingsPath = (uid) => ["users", uid, "private", "settings"];
 
 export const loadUserSettings = async (db, uid, firestore = {}) => {
   if (!db || !uid) return normalizeUserSettings();
