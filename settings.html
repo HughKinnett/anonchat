@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="description" content="Manage AnonChat privacy, notifications, appearance, and accessibility settings.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="timeline.css">
+  <link rel="stylesheet" href="mobile-hotfix.css">
+  <link rel="stylesheet" href="settings.css">
+  <title>AnonChat — Settings</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="timeline.html">AnonChat</a>
+    <div class="topbar-actions">
+      <a class="secondary-button nav-button" href="timeline.html">← Timeline</a>
+      <div class="main-menu">
+        <button id="main-menu-button" class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu-panel"><span></span><span></span><span></span></button>
+        <nav id="main-menu-panel" class="main-menu-panel" hidden>
+          <a href="timeline.html">Timeline</a>
+          <a href="community.html">Community</a>
+          <a href="connections.html">Followers & following</a>
+          <button class="install-app menu-install" type="button">Install AnonChat</button>
+          <a class="menu-danger" href="delete-account.html">Delete account</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="page-shell settings-page">
+    <section class="settings-hero">
+      <p class="eyebrow">Account preferences</p>
+      <h1>Settings</h1>
+      <p>Manage how AnonChat works for your account across the web app and Android app.</p>
+      <p id="settings-status" role="status" aria-live="polite">Loading settings…</p>
+    </section>
+
+    <form id="settings-form" class="settings-grid">
+      <section class="settings-card" aria-labelledby="privacy-title">
+        <h2 id="privacy-title">Privacy &amp; Messaging</h2>
+        <label class="settings-field">
+          <span>Who can send new private message requests?</span>
+          <select id="message-request-mode" name="messageRequestMode">
+            <option value="everyone">Everyone</option>
+            <option value="following">People I follow</option>
+            <option value="none">No new requests</option>
+          </select>
+        </label>
+        <p class="settings-help">Existing accepted conversations remain available if you make this stricter.</p>
+      </section>
+
+      <section class="settings-card" aria-labelledby="notifications-title">
+        <h2 id="notifications-title">Notifications</h2>
+        <label class="settings-switch"><span>Pause all notifications</span><input id="pause-all-notifications" type="checkbox"></label>
+        <div class="settings-switch-list" aria-label="Notification categories">
+          <label class="settings-switch"><span>Reactions</span><input data-notification-setting="reactions" type="checkbox"></label>
+          <label class="settings-switch"><span>Comments</span><input data-notification-setting="comments" type="checkbox"></label>
+          <label class="settings-switch"><span>Private Messages</span><input data-notification-setting="privateMessages" type="checkbox"></label>
+          <label class="settings-switch"><span>Message Requests</span><input data-notification-setting="messageRequests" type="checkbox"></label>
+          <label class="settings-switch"><span>Community Chatrooms</span><input data-notification-setting="communityChatrooms" type="checkbox"></label>
+          <label class="settings-switch"><span>Mentions</span><input data-notification-setting="mentions" type="checkbox"></label>
+          <label class="settings-switch"><span>Mutual Reveal Requests</span><input data-notification-setting="mutualRevealRequests" type="checkbox"></label>
+        </div>
+        <div class="quiet-hours-panel">
+          <label class="settings-switch"><span>Quiet hours</span><input id="quiet-hours-enabled" type="checkbox"></label>
+          <div class="quiet-hours-times">
+            <label>Start <input id="quiet-hours-start" type="time" value="22:00"></label>
+            <label>End <input id="quiet-hours-end" type="time" value="07:00"></label>
+          </div>
+          <p class="settings-help">Push alerts are suppressed during quiet hours. In-app notification history remains available, and suppressed alerts are not sent later in a flood.</p>
+        </div>
+      </section>
+
+      <section class="settings-card" aria-labelledby="appearance-title">
+        <h2 id="appearance-title">Appearance</h2>
+        <label class="settings-field">
+          <span>Theme</span>
+          <select id="theme-setting">
+            <option value="system">System default</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <label class="settings-switch"><span>Reduce motion</span><input id="reduce-motion-setting" type="checkbox"></label>
+      </section>
+
+      <section class="settings-card" aria-labelledby="accessibility-title">
+        <h2 id="accessibility-title">Accessibility</h2>
+        <label class="settings-field">
+          <span>Text size</span>
+          <select id="text-size-setting">
+            <option value="small">Small</option>
+            <option value="default">Default</option>
+            <option value="large">Large</option>
+            <option value="extra-large">Extra Large</option>
+          </select>
+        </label>
+        <label class="settings-switch"><span>High contrast</span><input id="high-contrast-setting" type="checkbox"></label>
+      </section>
+
+      <div class="settings-actions">
+        <button id="settings-save" class="primary-button" type="submit">Save settings</button>
+      </div>
+    </form>
+  </main>
+
+  <script type="module" src="settings.js"></script>
+  <script src="nav-menu.js" defer></script>
+  <script src="pwa.js" defer></script>
+</body>
+</html>
