@@ -2342,7 +2342,7 @@ service cloud.firestore {
         && featureEnabled('privateMessagingEnabled')
         && request.resource.data.keys().hasOnly([
           'participants', 'senderId', 'text', 'imageData', 'encrypted', 'cipherVersion',
-          'bodyCipher', 'imageCipher', 'createdAt', 'expiresAt'
+          'bodyCipher', 'imageCipher', 'replyToMessageId', 'replyToSenderId', 'createdAt', 'expiresAt'
         ])
         && acceptedConversationMessageAfter(requestId, request.resource.data)
         && request.resource.data.encrypted == true
@@ -2351,6 +2351,15 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['imageCipher'])
           || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
         && !request.resource.data.keys().hasAny(['text', 'imageData'])
+        && ((!request.resource.data.keys().hasAny(['replyToMessageId', 'replyToSenderId']))
+          || (request.resource.data.keys().hasAll(['replyToMessageId', 'replyToSenderId'])
+            && request.resource.data.replyToMessageId is string
+            && request.resource.data.replyToMessageId.size() > 0
+            && request.resource.data.replyToMessageId.size() <= 128
+            && request.resource.data.replyToSenderId is string
+            && request.resource.data.replyToSenderId.size() > 0
+            && exists(/databases/$(database)/documents/messageRequests/$(requestId)/messages/$(request.resource.data.replyToMessageId))
+            && get(/databases/$(database)/documents/messageRequests/$(requestId)/messages/$(request.resource.data.replyToMessageId)).data.senderId == request.resource.data.replyToSenderId))
         && request.resource.data.createdAt == request.time
         && (!request.resource.data.keys().hasAny(['expiresAt'])
           || (request.resource.data.expiresAt is timestamp
