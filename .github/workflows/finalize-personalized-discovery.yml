@@ -1,0 +1,58 @@
+name: Finalize personalized discovery rollout
+
+on:
+  push:
+    branches:
+      - feature/personalized-discovery-ranking
+    paths:
+      - '.github/workflows/finalize-personalized-discovery.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/personalized-discovery-ranking
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Bump service-worker cache safely
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('sw.js')
+          s = p.read_text()
+          old = 'const CACHE_NAME = "anonchat-v148";'
+          new = 'const CACHE_NAME = "anonchat-v149";'
+          if s.count(old) != 1:
+              raise SystemExit('Expected exactly one v148 cache marker')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          test "$(wc -l < sw.js)" -gt 200
+          grep -q 'self.addEventListener("fetch"' sw.js
+          grep -q 'self.addEventListener("push"' sw.js
+      - name: Run focused discovery verification
+        run: |
+          node scripts/test-suggested-follow-policy.mjs
+          node scripts/test-feed-ranking-policy.mjs
+          node scripts/test-hashtag-discovery-policy.mjs
+          node scripts/test-timeline-recommendation-context.mjs
+          node scripts/test-phase-b-ui.mjs
+          node scripts/test-feed-mode-policy.mjs
+          node scripts/test-phase-b-package.mjs
+          node scripts/test-phase-b-listener-order.mjs
+          node scripts/test-phase-b-reference-loading.mjs
+          node scripts/test-phase-b-discovery-integration.mjs
+          node scripts/test-push-service-worker.mjs
+          node --check timeline.js
+      - name: Commit cache bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sw.js
+          git commit -m "chore: bump cache for personalized discovery rollout"
+          git push
