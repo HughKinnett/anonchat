@@ -18,7 +18,10 @@ const [nav, sw, timeline, community] = await Promise.all([
   read("community.html")
 ]);
 
-assert.doesNotMatch(nav, /groups\.html/i, "shared navigation must not expose Groups");
+assert.doesNotMatch(nav, /\[\s*["']groups\.html["']\s*,\s*["']Groups["']\s*\]/i,
+  "shared navigation must not expose Groups");
+assert.match(nav, /querySelectorAll\([^\n]*groups\.html/i,
+  "shared navigation removes stale page-level Groups links");
 assert.doesNotMatch(sw, /groups\.html|group-detail\.html|group-detail\.js|private-group-detail\.js|group-firestore\.mjs|private-group-firestore\.mjs|group-policy\.mjs/i,
   "service worker must not cache Groups runtime files");
 assert.doesNotMatch(timeline, /groups\.html|group-detail\.html|collection\([^\n]*[\"']groups[\"']/i,
