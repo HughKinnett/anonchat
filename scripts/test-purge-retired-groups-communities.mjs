@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { purgeRetiredCollections } from "./purge-retired-groups-communities.mjs";
 
+const doc = (path, data = {}) => ({ ref: { path }, data: () => data });
 const documents = {
-  groups: [{ ref: { path: "groups/g1" } }, { ref: { path: "groups/g2" } }],
-  communities: [{ ref: { path: "communities/c1" } }],
-  rooms: [{ ref: { path: "rooms/r1" } }],
-  users: [{ ref: { path: "users/u1" } }]
+  groups: [doc("groups/g1"), doc("groups/g2")],
+  communities: [doc("communities/c1")],
+  communityPosts: [
+    doc("communityPosts/group-post", { groupId: "g1" }),
+    doc("communityPosts/community-post", { communityId: "c1" }),
+    doc("communityPosts/unrelated", { category: "Question" })
+  ],
+  rooms: [doc("rooms/r1")],
+  users: [doc("users/u1")]
 };
 const requestedCollections = [];
 const deleted = [];
@@ -18,11 +24,20 @@ const db = {
 };
 
 const result = await purgeRetiredCollections({ db, logger: { log() {} } });
-assert.deepEqual(requestedCollections, ["groups", "communities"], "purge queries only retired top-level collections");
-assert.deepEqual(deleted, ["groups/g1", "groups/g2", "communities/c1"], "purge recursively deletes only retired roots");
+assert.deepEqual(requestedCollections, ["groups", "communities", "communityPosts"],
+  "purge reads only retired roots plus the shared post collection needed for marker filtering");
+assert.deepEqual(deleted, [
+  "groups/g1",
+  "groups/g2",
+  "communities/c1",
+  "communityPosts/group-post",
+  "communityPosts/community-post"
+], "purge recursively deletes retired roots and only posts marked with group/community IDs");
 assert.equal(result.deletedRoots, 3);
+assert.equal(result.retiredCommunityPosts, 2);
 assert.equal(result.collections.groups, 2);
 assert.equal(result.collections.communities, 1);
+assert.equal(deleted.includes("communityPosts/unrelated"), false, "unrelated shared community posts remain untouched");
 assert.equal(deleted.some((path) => path.startsWith("rooms/")), false, "Temporary Rooms are never purged");
 assert.equal(deleted.some((path) => path.startsWith("users/")), false, "user profiles are never purged");
 
