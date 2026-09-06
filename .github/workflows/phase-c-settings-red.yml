@@ -7,6 +7,7 @@ on:
       - 'appearance-accessibility-*.mjs'
       - 'appearance-accessibility*.js'
       - 'user-appearance.mjs'
+      - 'notification-preference-policy.mjs'
       - 'settings.html'
       - 'settings.js'
       - 'settings.css'
@@ -14,6 +15,7 @@ on:
       - 'scripts/test-user-settings-*.mjs'
       - 'scripts/test-settings-page-integration.mjs'
       - 'scripts/test-appearance-accessibility-*.mjs'
+      - 'scripts/test-notification-preference-policy.mjs'
       - 'scripts/apply-phase-c-settings-rules-patch.mjs'
       - 'firestore.rules'
       - '.github/workflows/phase-c-settings-red.yml'
@@ -41,3 +43,5 @@ jobs:
         run: node scripts/test-appearance-accessibility-policy.mjs
       - name: Shared appearance accessibility integration
         run: node scripts/test-appearance-accessibility-integration.mjs
+      - name: Notification preference policy
+        run: node scripts/test-notification-preference-policy.mjs
