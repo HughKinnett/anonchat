@@ -6,8 +6,14 @@ on:
     branches: [main]
     paths:
       - 'android/**'
+      - 'e2ee-device-key-store.mjs'
+      - 'e2ee-identity.js'
+      - 'appearance-accessibility.css'
+      - 'appearance-accessibility.js'
+      - 'controls.css'
       - 'profile.html'
       - 'profile.js'
+      - 'profile-badges.js'
       - 'profile-phase-a.js'
       - 'profile-phase-a.css'
       - 'profile-privacy-policy.mjs'
