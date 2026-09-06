@@ -39,5 +39,9 @@ assert.match(html, /id="profile-badges-collection-empty"[^>]*>No badges earned y
   "badge collection itself has an empty state so the Badges button always opens something useful");
 assert.doesNotMatch(badges, /openBadgeCollection[\s\S]{0,250}!allBadges\.length/,
   "badge collection opening is not blocked just because the user has zero badges");
+assert.match(css, /\.profile-badge-dialog\{[^}]*background\s*:\s*var\(--surface\)[^}]*color\s*:\s*var\(--text\)/,
+  "badge collection and detail dialogs use the same dark AnonChat surface and text tokens as the rest of the site");
+assert.match(css, /\.profile-badge-collection-card\{[^}]*background\s*:\s*var\(--surface-2\)[^}]*border\s*:\s*1px solid var\(--border\)/,
+  "badge cards use the same themed card background and border tokens as other AnonChat cards");
 
 console.log("profile badge target and discoverability contract passed");
