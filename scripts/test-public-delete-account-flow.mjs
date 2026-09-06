@@ -20,8 +20,13 @@ assert.match(
 );
 assert.match(
   source,
-  /getDoc\(doc\(db,\s*"users",\s*currentUser\.uid\)\)/,
+  /const loadDeletionProfile=async\(user\)=>\{[\s\S]*getDoc\(doc\(db,"users",user\.uid\)\)/,
   "the authenticated account profile must be loaded before deletion"
+);
+assert.match(
+  source,
+  /await loadDeletionProfile\(currentUser\)/,
+  "signed-out deletion must load the authenticated profile before continuing"
 );
 
 console.log("public delete-account flow regression passed");
