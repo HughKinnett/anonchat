@@ -117,23 +117,31 @@ signInForm.addEventListener("submit", async (event) => {
 
 let signupsOpen = false;
 const signUpForm = document.getElementById("sign-up-form");
+const signupButton = document.getElementById("sign-up");
+const registrationSummary = document.getElementById("signup-registration-summary");
+const signupNotice = document.querySelector(".signup-closed-notice");
 const signupControls = [...signUpForm.querySelectorAll("input, button")];
 const setSignupAvailability = (enabled) => {
   signupsOpen = enabled === true;
   signUpForm.hidden = false;
   signUpForm.setAttribute("aria-hidden", "false");
   signUpForm.setAttribute("aria-disabled", String(!signupsOpen));
+  signUpForm.classList.toggle("signup-locked-form", !signupsOpen);
   signupControls.forEach((control) => { control.disabled = !signupsOpen; });
+  signupButton.textContent = signupsOpen ? "Create Account" : "Signups Paused";
+  registrationSummary.textContent = signupsOpen ? "New account registration is open." : "New account registration is temporarily closed.";
+  signupNotice.textContent = signupsOpen ? "Create a new AnonChat account below." : "Existing users can continue signing in normally.";
 };
 const refreshSignupAvailability = async () => {
   try {
     const snapshot = await getDoc(doc(db, "siteSettings", "features"));
-    signupsOpen = snapshot.exists() ? snapshot.data().registrationsEnabled === true : false; // registration stays closed until an admin opens it
-  } catch {
-    signupsOpen = false;
+    setSignupAvailability(snapshot.exists() && snapshot.data().registrationsEnabled === true);
+    return signupsOpen;
+  } catch (error) {
+    setSignupAvailability(false);
+    setStatus("Could not check whether new registrations are open. Refresh the page and try again.", true);
+    return false;
   }
-  setSignupAvailability(signupsOpen);
-  return signupsOpen;
 };
 setSignupAvailability(false);
 void refreshSignupAvailability();
