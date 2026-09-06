@@ -1,6 +1,7 @@
 import { ANONCHAT_BADGE_CATALOG } from "./badge-policy.mjs";
 
-export const EARLY_MEMBER_CUTOFF = Date.parse("2026-09-05T23:59:59.999Z");
+export const FOUNDING_MEMBER_CUTOFF = Date.parse("2026-09-05T23:59:59.999Z");
+export const EARLY_MEMBER_CUTOFF = Date.parse("2026-10-05T23:59:59.999Z");
 
 export const INITIAL_AUTOMATIC_BADGES = Object.freeze(
   ANONCHAT_BADGE_CATALOG.map((badge) => Object.freeze({
@@ -17,6 +18,11 @@ export const qualifiesForBadge = (definition = {}, metrics = {}) => {
 
   const metric = definition.milestoneMetric;
   if (metric === "premium_active") return metrics.premium_active === true;
+  if (metric === "founder") return metrics.founder === true;
+  if (metric === "founding_member") {
+    if (typeof metrics.founding_member === "boolean") return metrics.founding_member;
+    return finiteNumber(metrics.account_created_at_ms) && metrics.account_created_at_ms <= FOUNDING_MEMBER_CUTOFF;
+  }
   if (metric === "early_member") {
     if (typeof metrics.early_member === "boolean") return metrics.early_member;
     return finiteNumber(metrics.account_created_at_ms) && metrics.account_created_at_ms <= EARLY_MEMBER_CUTOFF;
