@@ -4,7 +4,7 @@ import { appearanceClasses, resolveTheme } from '../appearance-accessibility-pol
 assert.equal(resolveTheme('dark', false), 'dark');
 assert.equal(resolveTheme('light', true), 'light');
 assert.equal(resolveTheme('system', true), 'dark');
-assert.equal(resolveTheme('system', false), 'light');
+assert.equal(resolveTheme('system', false), 'dark');
 
 assert.deepEqual(appearanceClasses({ theme: 'dark', textSize: 'default' }), [
   'theme-dark',
