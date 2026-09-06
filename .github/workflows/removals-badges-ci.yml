@@ -1,0 +1,37 @@
+name: Removals and Badges CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'nav-menu.js'
+      - 'sw.js'
+      - 'timeline.js'
+      - 'community.html'
+      - 'groups*.html'
+      - 'groups*.js'
+      - 'group-*.mjs'
+      - 'private-group-*.js'
+      - 'private-group-*.mjs'
+      - 'communities*.html'
+      - 'communities*.js'
+      - 'community-detail.*'
+      - 'community-interest-*.mjs'
+      - 'badge-*.mjs'
+      - 'profile-badges.js'
+      - 'admin-badges.js'
+      - 'firestore.rules'
+      - 'scripts/test-*.mjs'
+      - '.github/workflows/removals-badges-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Groups removal contract
+        run: node scripts/test-groups-removed.mjs
