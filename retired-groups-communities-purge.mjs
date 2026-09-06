@@ -12,6 +12,7 @@ export const purgeRetiredCollections = async ({ db, logger = console }) => {
     collections: {},
     deletedRoots: 0,
     retiredCommunityPosts: 0,
+    retiredCommunityVotes: 0,
     privateGroupEnvelopes: 0
   };
 
@@ -25,13 +26,24 @@ export const purgeRetiredCollections = async ({ db, logger = console }) => {
     logger.log(`PURGE_RETIRED_COLLECTION name=${collectionName} roots=${snapshot.size}`);
   }
 
+  const retiredPostIds = new Set();
   const communityPosts = await db.collection("communityPosts").get();
   for (const document of communityPosts.docs) {
     if (!isRetiredCommunityPost(document.data() || {})) continue;
+    retiredPostIds.add(document.id ?? String(document.ref?.path || "").split("/").at(-1));
     await db.recursiveDelete(document.ref);
     result.retiredCommunityPosts += 1;
   }
   logger.log(`PURGE_RETIRED_COMMUNITY_POSTS deleted=${result.retiredCommunityPosts}`);
+
+  const communityVotes = await db.collection("communityVotes").get();
+  for (const document of communityVotes.docs) {
+    const data = document.data() || {};
+    if (data.postCollection !== "communityPosts" || !retiredPostIds.has(data.postId)) continue;
+    await db.recursiveDelete(document.ref);
+    result.retiredCommunityVotes += 1;
+  }
+  logger.log(`PURGE_RETIRED_COMMUNITY_VOTES deleted=${result.retiredCommunityVotes}`);
 
   const envelopes = await db.collection("e2eeRoomKeyEnvelopes").get();
   for (const document of envelopes.docs) {
