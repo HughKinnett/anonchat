@@ -2,7 +2,7 @@ import { normalizeUserSettings } from './user-settings-policy.mjs';
 
 export const resolveTheme = (theme = 'system', prefersDark = true) => {
   if (theme === 'light' || theme === 'dark') return theme;
-  return prefersDark ? 'dark' : 'light';
+  return 'dark';
 };
 
 export const appearanceClasses = value => {
