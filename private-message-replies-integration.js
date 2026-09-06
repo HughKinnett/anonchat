@@ -77,9 +77,10 @@ const renderReplyQuote = (bubble, message, byId, bubbleById) => {
   if (!data.replyToMessageId) return;
   const originalMessage = byId.get(data.replyToMessageId);
   const originalBubble = bubbleById.get(data.replyToMessageId);
-  const originalText = originalBubble?.querySelector(":scope > span:not(.private-message-actions)")?.textContent?.trim() || "";
-  const originalSender = originalBubble?.querySelector("small")?.textContent || data.replyToSenderId || "";
-  const preview = resolveReplyPreview(data, originalMessage ? {
+  const originalHidden = originalBubble?.hidden === true;
+  const originalText = originalHidden ? "" : originalBubble?.querySelector(":scope > span:not(.private-message-actions)")?.textContent?.trim() || "";
+  const originalSender = originalHidden ? "" : originalBubble?.querySelector("small")?.textContent || data.replyToSenderId || "";
+  const preview = resolveReplyPreview(data, originalMessage && !originalHidden ? {
     senderId: originalSender,
     text: originalText,
     unsentAt: originalMessage.data().unsentAt || null
