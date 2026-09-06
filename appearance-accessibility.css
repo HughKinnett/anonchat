@@ -39,6 +39,11 @@ html[data-text-size="extra-large"] { --ac-text-scale: 1.25; }
 html { font-size: calc(16px * var(--ac-text-scale)); }
 body { background-color: var(--ac-page-bg) !important; color: var(--ac-text) !important; }
 .topbar,
+.main-menu-panel {
+  background-color: var(--ac-surface) !important;
+  color: var(--ac-text) !important;
+}
+.topbar,
 .main-menu-panel,
 .settings-card,
 .settings-hero,
@@ -48,11 +53,7 @@ body { background-color: var(--ac-page-bg) !important; color: var(--ac-text) !im
 .room-card,
 .profile-card,
 .spotify-profile-card,
-.feed > li {
-  border-color: var(--ac-border) !important;
-  background-color: var(--ac-surface) !important;
-  color: var(--ac-text) !important;
-}
+.feed > li { border-color: var(--ac-border) !important; }
 
 html[data-theme="light"] .topbar,
 html[data-theme="light"] .main-menu-panel,
