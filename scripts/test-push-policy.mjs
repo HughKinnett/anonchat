@@ -50,6 +50,7 @@ const record = await createPushSubscriptionRecord({
   uid: "user-a",
   subscription,
   timestamp,
+  timezoneOffsetMinutes: 300,
   subtle: webcrypto.subtle
 });
 assert.deepEqual(record, {
@@ -60,6 +61,7 @@ assert.deepEqual(record, {
     expirationTime: null,
     p256dh: "BNc9_fR0-valid-p256dh",
     auth: "valid_auth-key",
+    timezoneOffsetMinutes: 300,
     createdAt: timestamp,
     updatedAt: timestamp
   }
@@ -68,43 +70,54 @@ const recordWithoutExpiration = await createPushSubscriptionRecord({
   uid: "user-a",
   subscription: { ...subscription, expirationTime: undefined },
   timestamp,
+  timezoneOffsetMinutes: -240,
   subtle: webcrypto.subtle
 });
 assert.equal(recordWithoutExpiration.data.expirationTime, null,
   "mobile browsers that omit expirationTime are normalized to null");
+assert.equal(recordWithoutExpiration.data.timezoneOffsetMinutes, -240,
+  "the device timezone offset is retained for local quiet-hour evaluation");
 
 assert.deepEqual(
   Object.keys(record.data).sort(),
-  ["auth", "createdAt", "endpoint", "expirationTime", "p256dh", "uid", "updatedAt"],
-  "serialization cannot retain PII, content, device names, or browser metadata"
+  ["auth", "createdAt", "endpoint", "expirationTime", "p256dh", "timezoneOffsetMinutes", "uid", "updatedAt"],
+  "serialization retains only push delivery metadata needed by the service"
 );
 
 await assert.rejects(
-  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, endpoint: "http://push.example/device" }, timestamp, subtle: webcrypto.subtle }),
+  createPushSubscriptionRecord({ uid: "user-a", subscription, timestamp, timezoneOffsetMinutes: 841, subtle: webcrypto.subtle }),
+  /timezone/i
+);
+await assert.rejects(
+  createPushSubscriptionRecord({ uid: "user-a", subscription, timestamp, timezoneOffsetMinutes: 1.5, subtle: webcrypto.subtle }),
+  /timezone/i
+);
+await assert.rejects(
+  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, endpoint: "http://push.example/device" }, timestamp, timezoneOffsetMinutes: 0, subtle: webcrypto.subtle }),
   /HTTPS/i
 );
 await assert.rejects(
-  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, endpoint: `https://push.example/${"x".repeat(2049)}` }, timestamp, subtle: webcrypto.subtle }),
+  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, endpoint: `https://push.example/${"x".repeat(2049)}` }, timestamp, timezoneOffsetMinutes: 0, subtle: webcrypto.subtle }),
   /2048/
 );
 await assert.rejects(
-  createPushSubscriptionRecord({ uid: "user-a", subscription: { endpoint, expirationTime: -1, toJSON: subscription.toJSON }, timestamp, subtle: webcrypto.subtle }),
+  createPushSubscriptionRecord({ uid: "user-a", subscription: { endpoint, expirationTime: -1, toJSON: subscription.toJSON }, timestamp, timezoneOffsetMinutes: 0, subtle: webcrypto.subtle }),
   /expiration/i
 );
 await assert.rejects(
-  createPushSubscriptionRecord({ uid: "user-a", subscription: { endpoint, expirationTime: 1.5, toJSON: subscription.toJSON }, timestamp, subtle: webcrypto.subtle }),
+  createPushSubscriptionRecord({ uid: "user-a", subscription: { endpoint, expirationTime: 1.5, toJSON: subscription.toJSON }, timestamp, timezoneOffsetMinutes: 0, subtle: webcrypto.subtle }),
   /expiration/i
 );
 await assert.rejects(
-  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "bad+key", auth: "valid" } }) }, timestamp, subtle: webcrypto.subtle }),
+  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "bad+key", auth: "valid" } }) }, timestamp, timezoneOffsetMinutes: 0, subtle: webcrypto.subtle }),
   /p256dh/i
 );
 await assert.rejects(
-  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "a".repeat(129), auth: "valid" } }) }, timestamp, subtle: webcrypto.subtle }),
+  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "a".repeat(129), auth: "valid" } }) }, timestamp, timezoneOffsetMinutes: 0, subtle: webcrypto.subtle }),
   /p256dh/i
 );
 await assert.rejects(
-  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "valid", auth: "a".repeat(65) } }) }, timestamp, subtle: webcrypto.subtle }),
+  createPushSubscriptionRecord({ uid: "user-a", subscription: { ...subscription, toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "valid", auth: "a".repeat(65) } }) }, timestamp, timezoneOffsetMinutes: 0, subtle: webcrypto.subtle }),
   /auth/i
 );
 
