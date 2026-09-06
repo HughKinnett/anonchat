@@ -13,11 +13,17 @@ assert.match(css, /:root\s*\{[\s\S]*--ac-page-bg:\s*#0b0d12/i,
 assert.match(css, /body\s*\{[^}]*background-color:\s*var\(--ac-page-bg\)/s,
   "page background uses the shared appearance token before settings load");
 
-const defaultSurfaceRule = css.match(/\.topbar,\s*\n\.main-menu-panel,[\s\S]*?\{([^}]*)\}/)?.[1] || "";
-assert.match(defaultSurfaceRule, /background-color:\s*var\(--ac-surface\)/,
-  "default shared surfaces explicitly use the dark AnonChat surface before settings load");
-assert.match(defaultSurfaceRule, /color:\s*var\(--ac-text\)/,
-  "default shared surfaces explicitly use readable AnonChat text before settings load");
+const shellSurfaceRule = css.match(/\.topbar,\s*\n\.main-menu-panel\s*\{([^}]*)\}/)?.[1] || "";
+assert.match(shellSurfaceRule, /background-color:\s*var\(--ac-surface\)/,
+  "topbar and hamburger explicitly use the dark AnonChat surface before settings load");
+assert.match(shellSurfaceRule, /color:\s*var\(--ac-text\)/,
+  "topbar and hamburger explicitly use readable AnonChat text before settings load");
+
+const broadBorderRule = css.match(/\.topbar,\s*\n\.main-menu-panel,\s*\n\.settings-card,[\s\S]*?\{([^}]*)\}/)?.[1] || "";
+assert.match(broadBorderRule, /border-color:\s*var\(--ac-border\)/,
+  "shared cards retain the appearance border token");
+assert.doesNotMatch(broadBorderRule, /background-color:/,
+  "default appearance must not force card/composer backgrounds over Premium customization");
 
 const lightSurfaceRule = css.match(/html\[data-theme="light"\] \.topbar,[\s\S]*?\{([^}]*)\}/)?.[1] || "";
 assert.match(lightSurfaceRule, /background-color:\s*var\(--ac-surface\)/,
