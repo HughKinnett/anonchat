@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
+// Keep profile navigation from treating an unverified email as an authentication loss.
 const source = fs.readFileSync(new URL("../profile.js", import.meta.url), "utf8");
 
 assert.doesNotMatch(
