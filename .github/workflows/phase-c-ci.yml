@@ -1,0 +1,21 @@
+name: Phase C CI
+
+on:
+  push:
+    branches: [phase-c-inline-implementation]
+  pull_request:
+    branches: [main]
+
+jobs:
+  messaging-policy-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: node scripts/test-private-message-reaction-policy.mjs
+      - run: node scripts/test-private-message-reply-policy.mjs
+      - run: node scripts/test-private-message-visibility-policy.mjs
+      - run: node scripts/test-private-message-request-policy.mjs
