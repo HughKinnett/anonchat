@@ -1,4 +1,8 @@
 (() => {
+  import("./appearance-accessibility.js").catch(error => {
+    console.warn("Unable to apply account appearance settings", error);
+  });
+
   const button = document.getElementById("main-menu-button");
   const panel = document.getElementById("main-menu-panel");
   if (!button || !panel) return;
