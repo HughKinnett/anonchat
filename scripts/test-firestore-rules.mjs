@@ -34,6 +34,20 @@ try {
     fromId: "user-a", toId: "user-b", status: "pending", createdAt: serverTimestamp()
   }));
 
+  // A declined sender cannot bypass a recipient who later disables new requests.
+  await testEnv.clearFirestore();
+  await seed();
+  await testEnv.withSecurityRulesDisabled(async (context) => setDoc(
+    doc(context.firestore(), "messageRequestPrivacy", "user-b"),
+    { uid: "user-b", mode: "none", updatedAt: new Date(2) }
+  ));
+  await assertFails(updateDoc(doc(userA, requestPath), {
+    status: "pending", respondedAt: serverTimestamp()
+  }), "same-direction retry must re-check recipient privacy");
+  await assertFails(updateDoc(doc(userA, requestPath), {
+    fromId: "user-a", toId: "user-b", status: "pending", createdAt: serverTimestamp()
+  }), "rewritten declined retry must re-check recipient privacy");
+
   await testEnv.clearFirestore();
   await seed({ ...declinedRequest, status: "accepted" });
   await assertFails(updateDoc(doc(userB, requestPath), {
