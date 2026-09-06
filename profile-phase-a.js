@@ -7,6 +7,7 @@ const targetUserId = new URLSearchParams(location.search).get("uid");
 const controls = document.getElementById("profile-privacy-controls");
 const privacyInputs = [...document.querySelectorAll("[data-profile-privacy]")];
 const privateNote = document.getElementById("profile-private-note");
+const badgePrivateNote = document.getElementById("profile-badges-private-note");
 const shareButton = document.getElementById("profile-share-button");
 const qrButton = document.getElementById("profile-qr-button");
 const qrDialog = document.getElementById("profile-qr-dialog");
@@ -51,6 +52,11 @@ const applyVisibility = () => {
   markPrivate(document.getElementById("profile-badges-section"), !visibility.badges);
   markPrivate(document.querySelector(".profile-connections-links"), !visibility.followersFollowing);
   document.querySelectorAll("[data-profile-activity]").forEach((node) => markPrivate(node, !visibility.activity));
+
+  if (badgePrivateNote) {
+    const badgesHiddenFromOthers = ownerView && privacy.showBadges === false;
+    badgePrivateNote.hidden = !badgesHiddenFromOthers;
+  }
 
   if (qrButton) {
     const enabled = featureSettings.profileQrEnabled !== false;
