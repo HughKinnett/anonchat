@@ -1,0 +1,57 @@
+html[data-user-theme="light"] body { background:#f5f7fb; color:#111827; }
+html[data-user-theme="light"] .topbar,
+html[data-user-theme="light"] .settings-card,
+html[data-user-theme="light"] .settings-hero { background:#ffffff; color:#111827; border-color:#d6dbe5; }
+html[data-user-theme="light"] select,
+html[data-user-theme="light"] input[type="time"] { background:#ffffff; color:#111827; border-color:#c7ceda; }
+html[data-user-theme="light"] .settings-help { color:#4b5563; }
+html[data-user-theme="dark"] body { background:#0b0d12; color:#f5f7fb; }
+
+html[data-user-text-size="small"] { font-size:14px; }
+html[data-user-text-size="default"] { font-size:16px; }
+html[data-user-text-size="large"] { font-size:18px; }
+html[data-user-text-size="extra-large"] { font-size:20px; }
+html.user-reduce-motion *,
+html.user-reduce-motion *::before,
+html.user-reduce-motion *::after { animation-duration:0.001ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:0.001ms !important; }
+html.user-high-contrast { filter:contrast(1.18); }
+
+.settings-page { width:min(980px, calc(100% - 24px)); margin:0 auto; padding:24px 0 48px; }
+.settings-hero,
+.settings-card { border:1px solid rgba(255,255,255,.12); border-radius:18px; background:rgba(20,23,31,.94); box-shadow:0 12px 34px rgba(0,0,0,.18); }
+.settings-hero { padding:24px; margin-bottom:18px; }
+.settings-hero h1 { margin:.2rem 0 .5rem; }
+.settings-grid { display:grid; gap:18px; }
+.settings-card { padding:22px; }
+.settings-card h2 { margin-top:0; }
+.settings-field,
+.settings-switch { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:12px 0; }
+.settings-field { flex-wrap:wrap; }
+.settings-field select,
+.quiet-hours-times input { min-width:190px; }
+.settings-switch-list { border-top:1px solid rgba(255,255,255,.1); margin-top:8px; padding-top:4px; }
+.settings-switch input[type="checkbox"] { width:22px; height:22px; accent-color:#6d7cff; }
+.settings-field select,
+.quiet-hours-times input { border:1px solid rgba(255,255,255,.16); border-radius:10px; padding:10px 12px; background:#121722; color:inherit; }
+.quiet-hours-panel { margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,.1); }
+.quiet-hours-times { display:flex; flex-wrap:wrap; gap:14px; }
+.quiet-hours-times label { display:flex; align-items:center; gap:8px; }
+.settings-help { margin:.35rem 0 0; color:#aeb7c7; font-size:.92em; line-height:1.45; }
+.settings-actions { display:flex; justify-content:flex-end; }
+.settings-actions button { min-width:160px; }
+#settings-status[data-state="success"] { font-weight:700; }
+#settings-status[data-state="error"] { font-weight:700; }
+
+@media (max-width: 680px) {
+  .settings-page { width:min(100% - 16px, 980px); padding-top:12px; }
+  .settings-hero,
+  .settings-card { border-radius:14px; padding:18px; }
+  .settings-field,
+  .settings-switch { align-items:flex-start; }
+  .settings-field select,
+  .quiet-hours-times input { min-width:0; width:100%; }
+  .settings-field { display:grid; grid-template-columns:1fr; }
+  .quiet-hours-times { display:grid; grid-template-columns:1fr 1fr; }
+  .quiet-hours-times label { display:grid; gap:6px; }
+  .settings-actions button { width:100%; }
+}

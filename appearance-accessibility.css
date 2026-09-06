@@ -1,0 +1,96 @@
+:root {
+  --ac-page-bg: #0b0d12;
+  --ac-surface: #14171f;
+  --ac-surface-raised: #1a1f2a;
+  --ac-text: #f5f7fb;
+  --ac-muted: #aeb7c7;
+  --ac-border: rgba(255,255,255,.14);
+  --ac-focus: #9aa6ff;
+  --ac-text-scale: 1;
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] {
+  --ac-page-bg: #0b0d12;
+  --ac-surface: #14171f;
+  --ac-surface-raised: #1a1f2a;
+  --ac-text: #f5f7fb;
+  --ac-muted: #aeb7c7;
+  --ac-border: rgba(255,255,255,.14);
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --ac-page-bg: #f5f7fb;
+  --ac-surface: #ffffff;
+  --ac-surface-raised: #f0f3f8;
+  --ac-text: #111827;
+  --ac-muted: #4b5563;
+  --ac-border: #cfd6e2;
+  --ac-focus: #3346d3;
+  color-scheme: light;
+}
+
+html[data-text-size="small"] { --ac-text-scale: .875; }
+html[data-text-size="default"] { --ac-text-scale: 1; }
+html[data-text-size="large"] { --ac-text-scale: 1.125; }
+html[data-text-size="extra-large"] { --ac-text-scale: 1.25; }
+
+html { font-size: calc(16px * var(--ac-text-scale)); }
+body { background-color: var(--ac-page-bg) !important; color: var(--ac-text) !important; }
+.topbar,
+.main-menu-panel,
+.settings-card,
+.settings-hero,
+.card,
+.panel,
+.composer,
+.room-card,
+.profile-card,
+.spotify-profile-card,
+.feed > li { border-color: var(--ac-border) !important; }
+
+html[data-theme="light"] .topbar,
+html[data-theme="light"] .main-menu-panel,
+html[data-theme="light"] .settings-card,
+html[data-theme="light"] .settings-hero,
+html[data-theme="light"] .card,
+html[data-theme="light"] .panel,
+html[data-theme="light"] .composer,
+html[data-theme="light"] .room-card,
+html[data-theme="light"] .profile-card,
+html[data-theme="light"] .spotify-profile-card,
+html[data-theme="light"] .feed > li {
+  background-color: var(--ac-surface) !important;
+  color: var(--ac-text) !important;
+}
+
+html[data-theme="light"] input,
+html[data-theme="light"] textarea,
+html[data-theme="light"] select,
+html[data-theme="light"] button:not(.primary-button):not(.follow-button) {
+  background-color: var(--ac-surface-raised);
+  color: var(--ac-text);
+  border-color: var(--ac-border);
+}
+
+html[data-theme="light"] a { color: inherit; }
+html[data-theme="light"] .muted,
+html[data-theme="light"] .settings-help,
+html[data-theme="light"] .eyebrow { color: var(--ac-muted) !important; }
+
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: .001ms !important;
+}
+
+html.high-contrast {
+  --ac-border: currentColor;
+  --ac-focus: #ffffff;
+}
+html.high-contrast body { filter: contrast(1.16); }
+html.high-contrast :focus-visible { outline: 3px solid var(--ac-focus) !important; outline-offset: 3px; }

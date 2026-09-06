@@ -77,9 +77,12 @@ function validatedSubscription(subscription) {
   return { endpoint, expirationTime, p256dh, auth };
 }
 
-export async function createPushSubscriptionRecord({ uid, subscription, timestamp, subtle }) {
+export async function createPushSubscriptionRecord({ uid, subscription, timestamp, timezoneOffsetMinutes, subtle }) {
   if (typeof uid !== "string" || !uid) throw new Error("A signed-in user is required.");
   if (!timestamp) throw new Error("A trusted server timestamp is required.");
+  if (!Number.isInteger(timezoneOffsetMinutes) || timezoneOffsetMinutes < -840 || timezoneOffsetMinutes > 840) {
+    throw new Error("The timezone offset must be an integer from -840 to 840 minutes.");
+  }
   const validated = validatedSubscription(subscription);
   return {
     id: await pushSubscriptionId(validated.endpoint, subtle),
@@ -89,6 +92,7 @@ export async function createPushSubscriptionRecord({ uid, subscription, timestam
       expirationTime: validated.expirationTime,
       p256dh: validated.p256dh,
       auth: validated.auth,
+      timezoneOffsetMinutes,
       createdAt: timestamp,
       updatedAt: timestamp
     }

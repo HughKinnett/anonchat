@@ -1,4 +1,8 @@
 (() => {
+  import("./appearance-accessibility.js").catch(error => {
+    console.warn("Unable to apply account appearance settings", error);
+  });
+
   const button = document.getElementById("main-menu-button");
   const panel = document.getElementById("main-menu-panel");
   if (!button || !panel) return;
@@ -7,7 +11,8 @@
     ["community.html", "Temporary Rooms"],
     ["communities.html", "Communities"],
     ["groups.html", "Groups"],
-    ["premium-rooms.html", "Premium Rooms"]
+    ["premium-rooms.html", "Premium Rooms"],
+    ["settings.html", "Settings"]
   ];
   for (const [href, label] of products) {
     const existing = panel.querySelector(`a[href="${href}"]`);

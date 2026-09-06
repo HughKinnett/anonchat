@@ -28,6 +28,7 @@ export function createPushAlertsClient({
   isStandalone = false,
   subtle = globalThis.crypto?.subtle,
   timestamp,
+  timezoneOffsetMinutes = () => new Date().getTimezoneOffset(),
   persist,
   remove = async () => {},
   onState = () => {},
@@ -84,6 +85,7 @@ export function createPushAlertsClient({
       uid: user.uid,
       subscription,
       timestamp: timestamp(),
+      timezoneOffsetMinutes: timezoneOffsetMinutes(),
       subtle
     });
     await persist(record);

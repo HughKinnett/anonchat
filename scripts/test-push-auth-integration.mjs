@@ -5,6 +5,7 @@ const root = new URL("../", import.meta.url);
 const exitPolicy = {
   "admin-badges.js": { authenticated: 0, authLoss: 1 },
   "admin.js": { authenticated: 1, authLoss: 1 },
+  "appearance-accessibility.js": { authenticated: 0, authLoss: 0 },
   "communities.js": { authenticated: 1, authLoss: 1 },
   "community-detail.js": { authenticated: 1, authLoss: 1 },
   "community.js": { authenticated: 2, authLoss: 1 },
@@ -28,6 +29,7 @@ const exitPolicy = {
   "private-message-visibility-integration.js": { authenticated: 0, authLoss: 0 },
   "profile-style.js": { authenticated: 0, authLoss: 1 },
   "profile.js": { authenticated: 2, authLoss: 1 },
+  "settings.js": { authenticated: 0, authLoss: 1 },
   "timeline.js": { authenticated: 2, authLoss: 1 },
   "upload.js": { authenticated: 0, authLoss: 1 }
 };
