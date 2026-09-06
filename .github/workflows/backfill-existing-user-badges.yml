@@ -37,3 +37,8 @@ jobs:
         env:
           GCLOUD_PROJECT: anonchatlogin
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+
+      - run: node scripts/verify-founder-founding-badges.mjs
+        env:
+          GCLOUD_PROJECT: anonchatlogin
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}

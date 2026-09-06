@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { resolveTheme } from "../appearance-accessibility-policy.mjs";
 
 const root = new URL("../", import.meta.url);
-const [css, bootstrap, controls] = await Promise.all([
+const [css, bootstrap, controls, sw] = await Promise.all([
   readFile(new URL("appearance-accessibility.css", root), "utf8"),
   readFile(new URL("appearance-accessibility.js", root), "utf8"),
-  readFile(new URL("controls.css", root), "utf8")
+  readFile(new URL("controls.css", root), "utf8"),
+  readFile(new URL("sw.js", root), "utf8")
 ]);
+
+assert.equal(resolveTheme("system", false), "dark",
+  "AnonChat system/default appearance stays dark even when desktop OS prefers light");
+assert.equal(resolveTheme("system", true), "dark",
+  "AnonChat system/default appearance stays dark when mobile OS prefers dark");
+assert.equal(resolveTheme("light", true), "light",
+  "an explicitly selected Light appearance remains available");
 
 assert.match(css, /:root\s*\{[\s\S]*--ac-page-bg:\s*#0b0d12/i,
   "shared appearance defaults to the AnonChat dark page background");
@@ -34,5 +43,7 @@ assert.match(bootstrap, /ensureSharedStyles\(\);[\s\S]*onAuthStateChanged/,
   "shared appearance CSS is installed before asynchronous auth/settings resolution");
 assert.match(controls, /\.main-menu-panel[^\n]*background:var\(--ac-menu-bg\)/,
   "hamburger controls remain tied to the existing AnonChat control theme");
+assert.match(sw, /CACHE_NAME\s*=\s*["']anonchat-v137["']/,
+  "service-worker cache advances so existing desktop and Android installs receive the live fixes");
 
 console.log("desktop dark baseline and hamburger contrast contract passed");
