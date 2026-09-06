@@ -19,6 +19,7 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/apply-phase-c-messaging-patches.mjs
+      - run: node scripts/apply-phase-c-visibility-patch.mjs
       - name: Commit Phase C messaging patches
         run: |
           if git diff --quiet; then
