@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 
-assert.match(rules, /match \/users\/\{userId\}\/private\/settings\/preferences/,
-  "settings preferences have a dedicated nested rule");
+assert.match(rules, /match \/users\/\{userId\}\/private\/settings/,
+  "settings preferences have a dedicated owner-private document rule");
+assert.doesNotMatch(rules, /match \/users\/\{userId\}\/private\/settings\/preferences/,
+  "settings rule must not end on a collection segment");
 assert.match(rules, /allow read:\s*if signedIn\(\)\s*&& request\.auth\.uid == userId/,
   "only the owning user can read settings");
 assert.match(rules, /allow create, update:\s*if activeUserAfter\(\)\s*&& request\.auth\.uid == userId/,
