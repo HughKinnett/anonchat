@@ -41,3 +41,5 @@ jobs:
         run: node scripts/test-interest-communities-removed.mjs
       - name: GIF URL composer removal contract
         run: node scripts/test-gif-url-composer-removed.mjs
+      - name: Automatic immutable badge contract
+        run: node scripts/test-automatic-badges.mjs
