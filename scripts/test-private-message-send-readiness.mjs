@@ -30,7 +30,7 @@ assert.match(acceptedReadiness, /sendButton\.disabled = !ready/,
   "Send is disabled only while the accepted recipient lacks encryption readiness");
 assert.match(acceptedReadiness, /messageInput\.disabled = !ready/,
   "the composer cannot submit plaintext while recipient encryption is unavailable");
-assert.match(acceptedReadiness, /conversation\.addEventListener\("change", refresh\)/,
+assert.match(acceptedReadiness, /conversation\?\.addEventListener\("change", refresh\)/,
   "changing accepted conversations refreshes encryption readiness");
 assert.match(acceptedReadiness, /window\.addEventListener\("focus", refresh\)/,
   "returning to AnonChat rechecks readiness after the recipient has opened the app");
