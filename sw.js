@@ -1,4 +1,4 @@
-const CACHE_NAME = "anonchat-v139";
+const CACHE_NAME = "anonchat-v140";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -84,7 +84,9 @@ const APP_SHELL = [
   "./profile-privacy-policy.mjs",
   "./profile-phase-a.js",
   "./profile-phase-a.css",
-  "./vendor/qrcode.min.js",
+  "./profile-qr-renderer.mjs",
+  "./vendor/qrcode.mjs",
+  "./vendor/dijkstrajs.mjs",
   "./badge-policy.mjs",
   "./badge-firestore.mjs",
   "./forgot-password.js",
@@ -92,6 +94,7 @@ const APP_SHELL = [
   "./connections-target.mjs",
   "./community.js",
   "./message-request-policy.mjs",
+  "./private-conversation-id.mjs",
   "./private-message-reaction-policy.mjs",
   "./private-message-reply-policy.mjs",
   "./private-message-visibility-policy.mjs",
