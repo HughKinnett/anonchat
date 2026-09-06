@@ -1,6 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
 import { canCreateMessageRequest } from "./private-message-request-policy.mjs";
+import { canonicalConversationId } from "./private-conversation-id.mjs";
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS, isRoomActive, roomExpiry } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
@@ -697,7 +698,7 @@ const acceptedUsers = () => state.users.filter((user) =>
 );
 
 const createMessageRequest = async (to) => {
-  const id = [state.user.uid, to].sort().join("_");
+  const id = canonicalConversationId(state.user.uid, to);
   const [outgoingFollow, incomingFollow] = await Promise.all([
     getDoc(doc(db, "follows", `${state.user.uid}_${to}`)),
     getDoc(doc(db, "follows", `${to}_${state.user.uid}`))
@@ -984,9 +985,15 @@ $("direct-message-form").addEventListener("submit", async (event) => {
       setStatus("This conversation request is no longer accepted.", true);
       return;
     }
-    const messageRef = doc(collection(db, "messageRequests", acceptedRequest.id, "messages"));
+    const canonicalId = canonicalConversationId(state.user.uid, other);
+    const canonicalRequest = await getDoc(doc(db, "messageRequests", canonicalId));
+    if (!canonicalRequest.exists() || canonicalRequest.data().status !== "accepted") {
+      setStatus("This older conversation is being upgraded. Reopen Messages after the migration completes.", true);
+      return;
+    }
+    const messageRef = doc(collection(db, "messageRequests", canonicalId, "messages"));
     const key = await directKeyFor(other);
-    const context = `direct-message:${acceptedRequest.id}:${messageRef.id}`;
+    const context = `direct-message:${canonicalId}:${messageRef.id}`;
     const bodyCipher = await encryptPayload(key, { text }, `${context}:body`);
     const imageCipher = pendingDirectImage
       ? await encryptPayload(key, { imageData: pendingDirectImage }, `${context}:image`)
@@ -1200,7 +1207,9 @@ onAuthStateChanged(auth, async (user) => {
         : data.toId === user.uid
           ? data.fromId
           : "";
-      if (otherId && !isBlockedUid(otherId)) acceptedRequests.set(otherId, request.id);
+      if (otherId && !isBlockedUid(otherId)) {
+        acceptedRequests.set(otherId, canonicalConversationId(user.uid, otherId));
+      }
     });
 
     const selectedOther = $("conversation-user").value;
