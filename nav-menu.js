@@ -26,7 +26,8 @@
 
   const close = () => { panel.hidden = true; button.setAttribute("aria-expanded", "false"); };
 
-  const temporaryRoomsLink = panel.querySelector('a[href="community.html"]');
+  const temporaryRoomsLink = [...panel.querySelectorAll("a")]
+    .find((link) => link.getAttribute("href") === "community.html");
   temporaryRoomsLink?.addEventListener("click", async (event) => {
     event.preventDefault();
     close();
