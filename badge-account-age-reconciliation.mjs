@@ -51,16 +51,19 @@ export const reconcileAccountAgeBadges = async ({
       const premiumSnapshot = await adapter.db.collection("premiumAccess").doc(document.id).get();
       const premium = premiumSnapshot.exists ? premiumSnapshot.data() || {} : {};
       const accountAgeDays = Math.max(0, Math.floor((now - createdAt) / DAY_MS));
+      const founder = isAnonChatFounder(profile.username);
+      const foundingMember = !founder && createdAt <= FOUNDING_MEMBER_CUTOFF;
+      const premiumEntitled = isPaidSubscriber(premium) || founder || foundingMember;
       const metrics = {
         account_age_days: accountAgeDays,
         account_created_at_ms: createdAt,
-        founder: isAnonChatFounder(profile.username),
-        founding_member: createdAt <= FOUNDING_MEMBER_CUTOFF,
+        founder,
+        founding_member: foundingMember,
         early_member: createdAt <= EARLY_MEMBER_CUTOFF,
         early_supporter: isEarlyPaidSupporter(premium),
         verified_admin: isProtectedAdministrator(profile.username),
         verified_moderator: false,
-        premium_active: isPaidSubscriber(premium)
+        premium_active: premiumEntitled
       };
       await processBadgeAwards({
         adapter,
@@ -77,6 +80,9 @@ export const reconcileAccountAgeBadges = async ({
         ],
         metrics
       });
+      if (founder && typeof adapter.removeStatusBadge === "function") {
+        await adapter.removeStatusBadge(document.id, "founding-member");
+      }
       evaluated += 1;
     }
 
