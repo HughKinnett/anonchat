@@ -1,6 +1,6 @@
 # AnonChat Android
 
-AnonChat is packaged as a Trusted Web App using package ID `com.anonchat.app`. It opens `https://anonchatlogin.web.app/`, so Android uses the same hosted accounts, profiles, badges, posts, messaging, moderation, admin dashboard, settings, Premium screens, and other current web features rather than maintaining duplicate native product code.
+AnonChat is packaged as a Trusted Web App using package ID `com.hughkinnett.anonchat`. It opens `https://anonchatlogin.web.app/`, so Android uses the same hosted accounts, profiles, badges, posts, messaging, moderation, admin dashboard, settings, Premium screens, and other current web features rather than maintaining duplicate native product code.
 
 Release `1.0.4` (`versionCode 5`) refreshes the Android package against the current AnonChat web release. This parity release includes the same-device trusted E2EE auto-unlock flow, profile badge discovery and privacy, desktop/mobile appearance fixes, private-message readiness, sign-in fallback, current automatic badges, Temporary/Premium Rooms, and the rest of the hosted feature set.
 
