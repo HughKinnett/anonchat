@@ -27,7 +27,7 @@ const validator = `    function validUserSettings(settings) {
 
 `;
 
-const settingsRule = `    match /users/{userId}/private/settings/preferences {
+const settingsRule = `    match /users/{userId}/private/settings {
       allow read: if signedIn() && request.auth.uid == userId;
       allow create, update: if activeUserAfter() && request.auth.uid == userId && validUserSettings(request.resource.data);
       allow delete: if signedIn() && request.auth.uid == userId;
@@ -41,7 +41,11 @@ if (!rules.includes('function validUserSettings(settings)')) {
   rules = rules.replace(anchor, validator + anchor);
 }
 
-if (!rules.includes('match /users/{userId}/private/settings/preferences')) {
+if (rules.includes('match /users/{userId}/private/settings/preferences')) {
+  rules = rules.replace('match /users/{userId}/private/settings/preferences', 'match /users/{userId}/private/settings');
+}
+
+if (!rules.includes('match /users/{userId}/private/settings')) {
   const anchor = '    match /users/{userId} {';
   if (!rules.includes(anchor)) throw new Error('settings rule insertion anchor not found');
   rules = rules.replace(anchor, settingsRule + anchor);
