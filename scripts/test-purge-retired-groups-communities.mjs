@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { purgeRetiredCollections } from "./purge-retired-groups-communities.mjs";
+import { purgeRetiredCollections } from "../retired-groups-communities-purge.mjs";
 
 const doc = (path, data = {}) => ({ ref: { path }, data: () => data });
 const documents = {
