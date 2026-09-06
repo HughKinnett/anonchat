@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 const modulePath = new URL("../feed-mode-policy.mjs", import.meta.url);
-const { FEED_MODES, normalizeFeedMode, filterFeedPosts, sortFeedPosts } = await import(modulePath);
+const { FEED_MODES, normalizeFeedMode, filterFeedPosts, sortFeedPosts, sortScoredFeedPosts } = await import(modulePath);
 
 const ts = (ms) => ({ toMillis: () => ms });
 const now = 1_800_000_000_000;
@@ -30,6 +30,11 @@ assert.deepEqual(filterFeedPosts(posts, { ...context, mode: "temporary" }).map((
 assert.deepEqual(filterFeedPosts(posts, { ...context, mode: "latest" }).map((post) => post.id), ["a", "b", "d"]);
 
 assert.deepEqual(sortFeedPosts(posts, "latest", context).map((post) => post.id), ["a", "b", "c", "d"]);
+assert.deepEqual(
+  sortScoredFeedPosts(posts, (post) => post.score).map((post) => post.id),
+  ["b", "c", "d", "a"],
+  "score-ranked discovery feeds sort through the feed policy"
+);
 
 const rankedWithoutPremium = sortFeedPosts(posts, "for-you", { ...context, premiumAccessUids: new Set() }).map((post) => post.id);
 const rankedWithPremium = sortFeedPosts(posts, "for-you", { ...context, premiumAccessUids: new Set(["other", "followed"]) }).map((post) => post.id);
