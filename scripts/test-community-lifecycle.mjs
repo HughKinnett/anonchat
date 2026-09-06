@@ -5,6 +5,7 @@ const { REPORT_BUTTON_CLASS, isRoomActive, roomExpiry } = moderationPolicy;
 import { formatDisappearsAt } from "../temporary-room-timer-policy.mjs";
 
 const source = await readFile(new URL("../community.js", import.meta.url), "utf8");
+const visibilityIntegration = await readFile(new URL("../private-message-visibility-integration.js", import.meta.url), "utf8");
 const css = await readFile(new URL("../community.css", import.meta.url), "utf8");
 const rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
 const indexes = JSON.parse(await readFile(new URL("../firestore.indexes.json", import.meta.url), "utf8"));
@@ -72,15 +73,21 @@ assert.doesNotMatch(source, /Photo sent in this temporary room[\s\S]{0,160}consu
   "temporary-room photos are not view-once");
 assert.match(source, /viewPhoto\.textContent = "View photo once"[\s\S]{0,520}revealedPrivatePhotos\.set\(message\.id, image\)[\s\S]{0,160}consumeViewedPhoto\(message\)/,
   "a recipient deliberately opens a private photo before it is consumed");
-assert.match(source, /const imageData = data\.senderId === state\.user\.uid \? \(decrypted\?\.imageData \|\| data\.imageData\) : revealedImage/,
-  "an opened photo remains visible from session memory after its stored copy is consumed");
+assert.match(source, /const imageData = data\.unsentAt \? "" : \(data\.senderId === state\.user\.uid \? \(decrypted\?\.imageData \|\| data\.imageData\) : revealedImage\)/,
+  "an opened photo remains visible from session memory after its stored copy is consumed unless the sender unsent it");
 assert.doesNotMatch(source, /photo\.addEventListener\("load", \(\) => consumeViewedPhoto/,
   "private photos are never consumed merely because the browser preloaded them");
-assert.match(source, /remove\.textContent = "Delete for everyone"[\s\S]{0,260}await deleteDoc\(message\.ref\)/,
-  "individual private-message deletion targets the current stored message directly");
-assert.match(source, /const references = chatMessages\.map\(\(message\) => message\.ref\)[\s\S]{0,500}This conversation remains accepted, so no new request is needed/,
-  "deleting a chat removes its messages while preserving the accepted conversation");
-assert.doesNotMatch(source, /await deleteDoc\(acceptedRequest\.ref\)/,
+assert.doesNotMatch(source, /remove\.textContent = "Delete for everyone"/,
+  "the legacy destructive private-message action is removed");
+assert.doesNotMatch(source, /await deleteDoc\(message\.ref\)/,
+  "private-message UI never hard-deletes the canonical message for both participants");
+assert.match(visibilityIntegration, /hide\.textContent = "Delete for me"/,
+  "individual private-message deletion is participant-local");
+assert.match(visibilityIntegration, /unsend\.textContent = "Unsend for everyone"[\s\S]{0,420}unsendForEveryone\(message\)/,
+  "sender-owned unsend is a distinct action from participant-local deletion");
+assert.match(visibilityIntegration, /batch\.set\(doc\(db, "messageRequests", pairIdFor\(otherUid\), "messageVisibility", visibilityIdFor\(message\.id\)\)/,
+  "deleting a chat for me writes participant-local visibility records instead of deleting canonical messages");
+assert.doesNotMatch(visibilityIntegration, /deleteDoc\(acceptedRequest\.ref\)/,
   "chat deletion never removes the accepted request record");
 assert.doesNotMatch(source, /collection\(db, "directMessages"\)/,
   "private deletion no longer depends on the retired legacy collection");

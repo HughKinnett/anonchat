@@ -248,6 +248,14 @@ service cloud.firestore {
         && existsAfter(/databases/$(database)/documents/follows/$(right + '_' + left));
     }
 
+    function recipientAllowsMessageRequest(recipientUid, senderUid) {
+      let privacyPath = /databases/$(database)/documents/messageRequestPrivacy/$(recipientUid);
+      return !exists(privacyPath)
+        || get(privacyPath).data.get('mode', 'everyone') == 'everyone'
+        || (get(privacyPath).data.get('mode', 'everyone') == 'people-i-follow'
+          && exists(/databases/$(database)/documents/follows/$(recipientUid + '_' + senderUid)));
+    }
+
     function visibleOrAdmin() {
       return isAdmin() || resource.data.get('moderationState', 'visible') != 'hidden';
     }
@@ -2246,6 +2254,17 @@ service cloud.firestore {
         && linkedRoomAvailable(resource.data.roomId));
     }
 
+    match /messageRequestPrivacy/{uid} {
+      allow read: if signedIn() && accountAvailable(uid);
+      allow create, update: if activeUserAfter()
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'mode', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.mode in ['everyone', 'people-i-follow', 'none']
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if activeUser() && uid == request.auth.uid;
+    }
+
     match /messageRequests/{requestId} {
       allow read: if signedIn()
         && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
@@ -2256,6 +2275,7 @@ service cloud.firestore {
         && request.resource.data.fromId == request.auth.uid
         && request.resource.data.toId != request.auth.uid
         && !pairIsBlocked(request.auth.uid, request.resource.data.toId)
+        && recipientAllowsMessageRequest(request.resource.data.toId, request.resource.data.fromId)
         && (request.resource.data.status == 'pending'
           || (request.resource.data.status == 'accepted'
             && mutuallyFollowAfter(request.resource.data.fromId, request.resource.data.toId)
@@ -2278,7 +2298,8 @@ service cloud.firestore {
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
             && resource.data.fromId == request.auth.uid
             && resource.data.status == 'declined'
-            && request.resource.data.status == 'pending')
+            && request.resource.data.status == 'pending'
+            && recipientAllowsMessageRequest(resource.data.toId, resource.data.fromId))
           ||
           (request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['fromId', 'toId', 'status', 'createdAt'])
@@ -2288,13 +2309,70 @@ service cloud.firestore {
             && request.resource.data.toId == (resource.data.fromId == request.auth.uid
               ? resource.data.toId : resource.data.fromId)
             && request.resource.data.status == 'pending'
-            && request.resource.data.createdAt == request.time)
+            && request.resource.data.createdAt == request.time
+            && recipientAllowsMessageRequest(request.resource.data.toId, request.resource.data.fromId))
         )
         && (!request.resource.data.keys().hasAny(['respondedAt'])
           || request.resource.data.respondedAt == resource.data.get('respondedAt', null)
           || request.resource.data.respondedAt == request.time);
       allow delete: if signedIn()
         && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid);
+    }
+
+    match /messageRequests/{requestId}/typing/{uid} {
+      allow read: if activeUser()
+        && acceptedConversation(requestId);
+      allow create, update: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
+        && acceptedConversation(requestId)
+        && uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'expiresAt', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(10, 's')
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if activeUser()
+        && acceptedConversation(requestId)
+        && uid == request.auth.uid;
+    }
+
+    match /messageRequests/{requestId}/messageReactions/{reactionId} {
+      allow read: if activeUser()
+        && acceptedConversation(requestId);
+      allow create, update: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
+        && acceptedConversation(requestId)
+        && request.resource.data.keys().hasOnly(['messageId', 'uid', 'type', 'updatedAt'])
+        && request.resource.data.messageId is string
+        && request.resource.data.messageId.size() > 0
+        && request.resource.data.uid == request.auth.uid
+        && reactionId == request.resource.data.messageId + '_' + request.auth.uid
+        && request.resource.data.type in ['👍', '❤️', '😂', '😮', '😢', '😡', '🖕']
+        && exists(/databases/$(database)/documents/messageRequests/$(requestId)/messages/$(request.resource.data.messageId))
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if activeUser()
+        && acceptedConversation(requestId)
+        && resource.data.uid == request.auth.uid
+        && reactionId == resource.data.messageId + '_' + request.auth.uid;
+    }
+
+    match /messageRequests/{requestId}/messageVisibility/{visibilityId} {
+      allow read: if activeUser()
+        && acceptedConversation(requestId)
+        && resource.data.uid == request.auth.uid;
+      allow create, update: if activeUserAfter()
+        && acceptedConversation(requestId)
+        && request.resource.data.keys().hasOnly(['messageId', 'uid', 'hiddenAt'])
+        && request.resource.data.messageId is string
+        && request.resource.data.messageId.size() > 0
+        && request.resource.data.uid == request.auth.uid
+        && visibilityId == request.resource.data.messageId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/messageRequests/$(requestId)/messages/$(request.resource.data.messageId))
+        && request.resource.data.hiddenAt == request.time;
+      allow delete: if activeUser()
+        && acceptedConversation(requestId)
+        && resource.data.uid == request.auth.uid;
     }
 
     match /messageRequests/{requestId}/messages/{messageId} {
@@ -2304,7 +2382,7 @@ service cloud.firestore {
         && featureEnabled('privateMessagingEnabled')
         && request.resource.data.keys().hasOnly([
           'participants', 'senderId', 'text', 'imageData', 'encrypted', 'cipherVersion',
-          'bodyCipher', 'imageCipher', 'createdAt', 'expiresAt'
+          'bodyCipher', 'imageCipher', 'replyToMessageId', 'replyToSenderId', 'createdAt', 'expiresAt'
         ])
         && acceptedConversationMessageAfter(requestId, request.resource.data)
         && request.resource.data.encrypted == true
@@ -2313,6 +2391,15 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['imageCipher'])
           || validEncryptedEnvelope(request.resource.data.imageCipher, 230000))
         && !request.resource.data.keys().hasAny(['text', 'imageData'])
+        && ((!request.resource.data.keys().hasAny(['replyToMessageId', 'replyToSenderId']))
+          || (request.resource.data.keys().hasAll(['replyToMessageId', 'replyToSenderId'])
+            && request.resource.data.replyToMessageId is string
+            && request.resource.data.replyToMessageId.size() > 0
+            && request.resource.data.replyToMessageId.size() <= 128
+            && request.resource.data.replyToSenderId is string
+            && request.resource.data.replyToSenderId.size() > 0
+            && exists(/databases/$(database)/documents/messageRequests/$(requestId)/messages/$(request.resource.data.replyToMessageId))
+            && get(/databases/$(database)/documents/messageRequests/$(requestId)/messages/$(request.resource.data.replyToMessageId)).data.senderId == request.resource.data.replyToSenderId))
         && request.resource.data.createdAt == request.time
         && (!request.resource.data.keys().hasAny(['expiresAt'])
           || (request.resource.data.expiresAt is timestamp
@@ -2342,9 +2429,16 @@ service cloud.firestore {
             && !request.resource.data.keys().hasAny(['text', 'imageData'])
             && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['text', 'imageData', 'encrypted', 'cipherVersion', 'bodyCipher', 'imageCipher']))
+          ||
+          (resource.data.senderId == request.auth.uid
+            && !resource.data.keys().hasAny(['unsentAt', 'unsentBy'])
+            && request.resource.data.unsentAt == request.time
+            && request.resource.data.unsentBy == request.auth.uid
+            && !request.resource.data.keys().hasAny(['bodyCipher', 'imageCipher', 'text', 'imageData'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['bodyCipher', 'imageCipher', 'text', 'imageData', 'unsentAt', 'unsentBy']))
         );
-      allow delete: if signedIn()
-        && request.auth.uid in resource.data.participants;
+      allow delete: if false;
     }
 
     match /directMessages/{messageId} {

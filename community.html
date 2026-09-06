@@ -86,6 +86,7 @@
           <h2>Accepted conversations</h2>
           <label>Conversation<select id="conversation-user"></select></label>
           <div id="direct-messages" class="message-stream"></div>
+          <p id="direct-typing-status" class="muted" role="status" aria-live="polite" hidden></p>
           <form id="direct-message-form" class="direct-message-composer">
             <div class="direct-message-entry-row">
               <input id="direct-message" maxlength="500" placeholder="End-to-end encrypted private message">
@@ -115,6 +116,7 @@
           <label>Region (optional)<input id="privacy-region" maxlength="60" placeholder="Southeast US"></label>
           <label>Age range (optional)<select id="privacy-age"><option value="">Keep private</option><option>18–24</option><option>25–34</option><option>35–44</option><option>45–54</option><option>55+</option></select></label>
           <label>Muted keywords<input id="muted-keywords" maxlength="200" placeholder="Separate words with commas"></label>
+          <label>Who can send me new message requests<select id="message-request-privacy"><option value="everyone">Everyone</option><option value="people-i-follow">People I follow</option><option value="none">No new requests</option></select></label>
           <label class="switch"><input id="context-check" type="checkbox" checked> Pause before sending potentially aggressive messages</label>
           <button class="primary" type="submit">Save privacy choices</button>
         </form>
@@ -129,6 +131,10 @@
     </section>
   </main>
   <script type="module" src="community.js"></script>
+  <script type="module" src="private-message-typing-integration.js"></script>
+  <script type="module" src="private-message-reactions-integration.js"></script>
+  <script type="module" src="private-message-replies-integration.js"></script>
+  <script type="module" src="private-message-visibility-integration.js"></script>
   <script src="nav-menu.js" defer></script>
   <script type="module" src="premium-menu.js"></script>
   <script type="module" src="online-followers.js"></script>

@@ -1,5 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { messageRequestButtonAction, messageRequestButtonState } from "./message-request-policy.mjs";
+import { canCreateMessageRequest } from "./private-message-request-policy.mjs";
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS, isRoomActive, roomExpiry } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
@@ -21,7 +22,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   user: null, profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
   roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
-  messages: [], reveals: [], preferences: null, activeRoom: "",
+  messages: [], reveals: [], preferences: null, requestPrivacyMode: "everyone", activeRoom: "",
   blockTracker: createViewerBlockTracker(), viewerBlocks: null, moderation: null, e2eeIdentity: null
 };
 state.viewerBlocks = state.blockTracker.current();
@@ -701,7 +702,17 @@ const createMessageRequest = async (to) => {
     getDoc(doc(db, "follows", `${state.user.uid}_${to}`)),
     getDoc(doc(db, "follows", `${to}_${state.user.uid}`))
   ]);
+  const privacySnapshot = await getDoc(doc(db, "messageRequestPrivacy", to));
+  const requestMode = privacySnapshot.exists() ? privacySnapshot.data().mode : "everyone";
   const mutual = outgoingFollow.exists() && incomingFollow.exists();
+  if (!canCreateMessageRequest({
+    mode: requestMode,
+    followsRecipient: incomingFollow.exists(),
+    blocked: isBlockedUid(to),
+    alreadyAccepted: false
+  })) {
+    throw Object.assign(new Error("This user is not accepting a new message request from you."), { code: "request-privacy" });
+  }
   await setDoc(doc(db, "messageRequests", id), {
     fromId: state.user.uid, toId: to, status: mutual ? "accepted" : "pending",
     createdAt: serverTimestamp(), ...(mutual ? { respondedAt: serverTimestamp() } : {})
@@ -816,7 +827,7 @@ $("request-chat").addEventListener("click", async () => {
     setRequestStatus("Request sent. Waiting for this user to accept or decline.");
   } catch (error) {
     console.error("Message request failed", error);
-    setRequestStatus("Could not send request. Please try again.", true);
+    setRequestStatus(error?.code === "request-privacy" ? "This user is not accepting a new message request from you." : "Could not send request. Please try again.", true);
   } finally {
     state.requestBusy = false;
     $("message-user").disabled = false;
@@ -890,7 +901,7 @@ const renderDirectMessages = () => {
     && !isBlockedUid(message.data().senderId)
     && (!message.data().expiresAt?.toMillis || message.data().expiresAt.toMillis() > currentTime)
   ).sort(compareOldestFirst);
-  messages.forEach(message => message.data().encrypted ? void decryptDirectMessage(message, other) : void migrateDirectMessage(message, other));
+  messages.forEach(message => { if (!message.data().unsentAt) message.data().encrypted ? void decryptDirectMessage(message, other) : void migrateDirectMessage(message, other); });
   $("direct-messages").replaceChildren(...messages.map((message) => {
     const data = message.data();
     const decrypted = data.encrypted ? decryptedDirectMessages.get(message.id) : data;
@@ -899,7 +910,7 @@ const renderDirectMessages = () => {
     const sender = document.createElement("small");
     sender.textContent = `@${userName(data.senderId)}`;
     const text = document.createElement("span");
-    text.textContent = decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : "");
+    text.textContent = data.unsentAt ? "Message unsent" : (decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : ""));
     const actions = document.createElement("span");
     actions.className = "private-message-actions";
     if (data.expiresAt?.toDate) {
@@ -907,26 +918,10 @@ const renderDirectMessages = () => {
       expiry.textContent = `Disappears ${data.expiresAt.toDate().toLocaleString()}`;
       actions.append(expiry);
     }
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "private-message-delete";
-    remove.textContent = "Delete for everyone";
-    remove.addEventListener("click", async () => {
-      remove.disabled = true;
-      try {
-        await deleteDoc(message.ref);
-        revealedPrivatePhotos.delete(message.id);
-        setStatus("Private message deleted permanently.");
-      } catch {
-        remove.disabled = false;
-        setStatus("Could not delete that private message.", true);
-      }
-    });
-    actions.append(remove);
     item.append(sender);
-    if (data.text || data.bodyCipher) item.append(text);
+    if (data.unsentAt || data.text || data.bodyCipher) item.append(text);
     const revealedImage = revealedPrivatePhotos.get(message.id);
-    const imageData = data.senderId === state.user.uid ? (decrypted?.imageData || data.imageData) : revealedImage;
+    const imageData = data.unsentAt ? "" : (data.senderId === state.user.uid ? (decrypted?.imageData || data.imageData) : revealedImage);
     if (imageData) {
       const photo = document.createElement("img");
       photo.className = "message-photo";
@@ -934,7 +929,7 @@ const renderDirectMessages = () => {
       photo.src = imageData;
       photo.alt = "Photo sent in this private conversation";
       item.append(photo);
-    } else if ((data.imageData || data.imageCipher) && data.senderId !== state.user.uid) {
+    } else if (!data.unsentAt && (data.imageData || data.imageCipher) && data.senderId !== state.user.uid) {
       const viewPhoto = document.createElement("button");
       viewPhoto.type = "button";
       viewPhoto.className = "view-once-photo-button";
@@ -952,7 +947,7 @@ const renderDirectMessages = () => {
         } catch { setStatus("That encrypted photo could not be opened.", true); }
       }, { once: true });
       item.append(viewPhoto);
-    } else if (data.photoViewedAt) {
+    } else if (!data.unsentAt && data.photoViewedAt) {
       const viewed = document.createElement("small");
       viewed.className = "view-once-photo-status";
       viewed.textContent = "View-once photo opened";
@@ -971,40 +966,12 @@ const renderDirectMessages = () => {
   }
 };
 
-$("delete-chat").addEventListener("click", async () => {
-  const other = $("conversation-user").value;
-  if (!other) {
-    setStatus("Choose an accepted conversation first.", true);
-    return;
-  }
-  const chatMessages = state.messages.filter((message) =>
-    message.data().participants.includes(state.user.uid)
-    && message.data().participants.includes(other)
-  );
-  if (!window.confirm("Delete every message in this chat for both users? You will remain connected and can message again without another request.")) return;
-  const control = $("delete-chat");
-  control.disabled = true;
-  control.textContent = "Deleting chat…";
-  try {
-    const references = chatMessages.map((message) => message.ref);
-    for (let offset = 0; offset < references.length; offset += 400) {
-      const batch = writeBatch(db);
-      references.slice(offset, offset + 400).forEach((reference) => batch.delete(reference));
-      await batch.commit();
-    }
-    setStatus("Chat messages deleted. This conversation remains accepted, so no new request is needed.");
-  } catch {
-    setStatus("Could not delete the entire chat.", true);
-  } finally {
-    control.disabled = false;
-    control.textContent = "Delete chat";
-  }
-});
-
 $("direct-message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const other = $("conversation-user").value;
   const text = $("direct-message").value.trim();
+  const replyToMessageId = event.target.dataset.replyToMessageId || "";
+  const replyToSenderId = event.target.dataset.replyToSenderId || "";
   if (!other || (!text && !pendingDirectImage) || (text && !safeToSend(text))) return;
   if (isBlockedUid(other)) {
     setStatus("Could not send to a blocked user.", true);
@@ -1031,11 +998,14 @@ $("direct-message-form").addEventListener("submit", async (event) => {
       cipherVersion: 1,
       bodyCipher,
       ...(imageCipher ? { imageCipher } : {}),
+      ...(replyToMessageId && replyToSenderId ? { replyToMessageId, replyToSenderId } : {}),
       createdAt: serverTimestamp(),
       ...(disappear ? { expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) } : {})
     });
     event.target.reset();
     clearDirectPhoto();
+    delete event.target.dataset.replyToMessageId;
+    delete event.target.dataset.replyToSenderId;
   } catch {
     setStatus("Could not send private message.", true);
   }
@@ -1109,6 +1079,10 @@ $("privacy-form").addEventListener("submit", async (event) => {
       uid: state.user.uid, interests: $("privacy-interests").value.trim(), region: $("privacy-region").value.trim(),
       ageRange: $("privacy-age").value, updatedAt: serverTimestamp()
     }, { merge: true });
+    await setDoc(doc(db, "messageRequestPrivacy", state.user.uid), {
+      uid: state.user.uid, mode: $("message-request-privacy").value, updatedAt: serverTimestamp()
+    }, { merge: true });
+    state.requestPrivacyMode = $("message-request-privacy").value;
     setStatus("Privacy choices saved.");
   } catch {
     setStatus("Could not save privacy choices.", true);
@@ -1122,6 +1096,7 @@ const loadPrivacy = () => {
   $("privacy-interests").value = state.privateDetails.interests || "";
   $("privacy-region").value = state.privateDetails.region || "";
   $("privacy-age").value = state.privateDetails.ageRange || "";
+  $("message-request-privacy").value = state.requestPrivacyMode || "everyone";
 };
 
 const refreshViewerBlocks = () => {
@@ -1173,7 +1148,7 @@ const stopCommunityResources = () => {
   Object.assign(state, {
     profile: null, privateDetails: {}, users: [], rooms: [], roomMessages: [],
     roomMemberships: [], requests: [], requestsLoaded: false, requestBusy: false,
-    messages: [], reveals: [], preferences: null, activeRoom: "", moderation: null, e2eeIdentity: null
+    messages: [], reveals: [], preferences: null, requestPrivacyMode: "everyone", activeRoom: "", moderation: null, e2eeIdentity: null
   });
   state.blockTracker.reset(state.user?.uid);
   state.viewerBlocks = state.blockTracker.current();
@@ -1287,6 +1262,9 @@ onAuthStateChanged(auth, async (user) => {
   const privateSnapshot = await getDoc(doc(db, "userPrivate", user.uid));
   if (!sessionIsCurrent()) return;
   state.privateDetails = privateSnapshot.exists() ? privateSnapshot.data() : {};
+  const requestPrivacySnapshot = await getDoc(doc(db, "messageRequestPrivacy", user.uid));
+  if (!sessionIsCurrent()) return;
+  state.requestPrivacyMode = requestPrivacySnapshot.exists() ? requestPrivacySnapshot.data().mode : "everyone";
   loadPrivacy();
   renderIdentity();
 
