@@ -1,0 +1,22 @@
+name: Temporary room encryption gate CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - community.js
+      - nav-menu.js
+      - upload.js
+      - scripts/test-temporary-room-encryption-gate.mjs
+      - .github/workflows/temporary-room-encryption-gate-ci.yml
+  workflow_dispatch:
+
+jobs:
+  encryption-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/test-temporary-room-encryption-gate.mjs
