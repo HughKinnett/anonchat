@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { ensureE2eeIdentity, getE2eePublicIdentity } from "./e2ee-identity.js";
+import { getE2eePublicIdentity } from "./e2ee-identity.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const requestButton = document.getElementById("request-chat");
@@ -50,7 +50,11 @@ requestButton?.addEventListener("click", async (event) => {
   checking = true;
 
   try {
-    await ensureE2eeIdentity(db, user);
+    const ownIdentity = await getE2eePublicIdentity(db, user.uid);
+    if (!ownIdentity?.publicJwk) {
+      setStatus("Set up encryption in Temporary Rooms before starting private messages.", true);
+      return;
+    }
     if (await needsOtherIdentity(user, otherUid)) {
       const otherIdentity = await getE2eePublicIdentity(db, otherUid);
       if (!otherIdentity?.publicJwk) {

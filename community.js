@@ -118,8 +118,16 @@ const userName = (uid) => !isBlockedUid(uid)
   ? state.users.find((entry) => entry.id === uid)?.data().username || "anonymous"
   : "anonymous";
 const now = () => Date.now();
+const ensureTemporaryRoomEncryptionReady = async () => {
+  if (!state.user) throw new Error("Sign in before entering a temporary room.");
+  const identity = state.e2eeIdentity || await ensureE2eeIdentity(db, state.user);
+  state.e2eeIdentity = identity;
+  return identity;
+};
 const directKeyFor = async otherUid => {
   if (directKeyCache.has(otherUid)) return directKeyCache.get(otherUid);
+  const ownPublicIdentity = await getE2eePublicIdentity(db, state.user.uid);
+  if (!ownPublicIdentity?.publicJwk) throw new Error("Set up encryption in Temporary Rooms before using private messages.");
   const identity = state.e2eeIdentity || await ensureE2eeIdentity(db, state.user);
   state.e2eeIdentity = identity;
   const other = await getE2eePublicIdentity(db, otherUid);
@@ -496,6 +504,7 @@ const renderRooms = () => {
 const openRoom = async (id, name) => {
   let roomOwnerId = "";
   try {
+    await ensureTemporaryRoomEncryptionReady();
     const currentRoom = await getDoc(doc(db, "rooms", id));
     if (!currentRoom.exists() || !isRoomActive(currentRoom.data(), now())) throw new Error("room-unavailable");
     if (isBlockedUid(currentRoom.data().ownerId)) throw new Error("room-blocked");
@@ -504,8 +513,10 @@ const openRoom = async (id, name) => {
     await setDoc(doc(db, "roomMembers", `${id}_${state.user.uid}`), {
       roomId: id, uid: state.user.uid, joinedAt: serverTimestamp()
     }, { merge: true });
-  } catch {
-    setStatus("Could not join that room.", true);
+  } catch (error) {
+    setStatus(error?.message === "Encrypted chats remain locked."
+      ? "Encryption setup is required before entering temporary rooms."
+      : "Could not join that room.", true);
     return;
   }
   state.activeRoom = id;
@@ -633,6 +644,7 @@ const reportRoomControl = (room) => {
 $("room-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
+    await ensureTemporaryRoomEncryptionReady();
     const made = doc(collection(db, "rooms"));
     const key = await createRoomKeyEnvelope(db, state.e2eeIdentity, "temporary", made.id);
     const batch = writeBatch(db);
@@ -648,8 +660,10 @@ $("room-form").addEventListener("submit", async (event) => {
     await batch.commit();
     event.target.reset();
     setStatus("Temporary room started.");
-  } catch {
-    setStatus("Could not start room.", true);
+  } catch (error) {
+    setStatus(error?.message === "Encrypted chats remain locked."
+      ? "Encryption setup is required before starting a temporary room."
+      : "Could not start room.", true);
   }
 });
 
@@ -1256,11 +1270,6 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   state.profile = profile.data();
-  try {
-    state.e2eeIdentity = await ensureE2eeIdentity(db, user);
-  } catch (error) {
-    setStatus(error?.message || "Encrypted chats remain locked.", true);
-  }
   void recordPageActivity({
     surface: "community",
     profile: state.profile,
