@@ -2298,7 +2298,8 @@ service cloud.firestore {
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
             && resource.data.fromId == request.auth.uid
             && resource.data.status == 'declined'
-            && request.resource.data.status == 'pending')
+            && request.resource.data.status == 'pending'
+            && recipientAllowsMessageRequest(resource.data.toId, resource.data.fromId))
           ||
           (request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['fromId', 'toId', 'status', 'createdAt'])
@@ -2308,7 +2309,8 @@ service cloud.firestore {
             && request.resource.data.toId == (resource.data.fromId == request.auth.uid
               ? resource.data.toId : resource.data.fromId)
             && request.resource.data.status == 'pending'
-            && request.resource.data.createdAt == request.time)
+            && request.resource.data.createdAt == request.time
+            && recipientAllowsMessageRequest(request.resource.data.toId, request.resource.data.fromId))
         )
         && (!request.resource.data.keys().hasAny(['respondedAt'])
           || request.resource.data.respondedAt == resource.data.get('respondedAt', null)
