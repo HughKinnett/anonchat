@@ -14,14 +14,26 @@ assert.match(workflow, /workflow_run\.conclusion\s*==\s*["']success["']/, "autom
 assert.match(workflow, /google-github-actions\/auth@v3/, "backfill authenticates with Google using the existing deployment pattern");
 assert.match(workflow, /FIREBASE_SERVICE_ACCOUNT_ANONCHATLOGIN/, "backfill uses the existing Firebase service-account secret");
 assert.match(workflow, /node scripts\/badge-full-backfill\.mjs/, "backfill executes the trusted full-user badge CLI");
-assert.match(workflow, /node scripts\/verify-founder-founding-badges\.mjs/, "backfill verifies existing founders and founding members actually received their badges");
+assert.match(workflow, /node scripts\/verify-founder-founding-badges\.mjs/, "backfill verifies founder/founding Premium state");
 assert.match(workflow, /GCLOUD_PROJECT:\s*anonchatlogin/, "backfill targets the AnonChat Firebase project");
 assert.match(workflow, /GOOGLE_APPLICATION_CREDENTIALS:/, "backfill passes authenticated credentials to Firebase Admin");
 
 assert.match(verifier, /isAnonChatFounder\(/, "verifier uses the trusted founder identity source");
 assert.match(verifier, /FOUNDING_MEMBER_CUTOFF/, "verifier uses the same founding-member cutoff as awarding");
-assert.match(verifier, /collection\("badges"\)\.doc\("founder"\)/, "verifier checks the persistent Founder badge document");
-assert.match(verifier, /collection\("badges"\)\.doc\("founding-member"\)/, "verifier checks the persistent Founding Member badge document");
-assert.match(verifier, /process\.exitCode\s*=\s*1/, "verifier fails the rollout when an eligible existing account is missing a badge");
+assert.match(verifier, /const foundingMember = !founder &&/, "verifier excludes founders from Founding Member eligibility");
+for (const badgeId of ["founder", "founding-member", "premium-member"]) {
+  assert.match(verifier, new RegExp(`collection\\(["']badges["']\\)\\.doc\\(["']${badgeId}["']\\)`),
+    `verifier checks ${badgeId}`);
+}
+for (const counter of [
+  "foundersMissingFounder",
+  "foundersWithFoundingMember",
+  "foundersMissingPremium",
+  "foundingMembersMissingFounding",
+  "foundingMembersMissingPremium"
+]) {
+  assert.match(verifier, new RegExp(counter), `verifier reports ${counter}`);
+}
+assert.match(verifier, /process\.exitCode\s*=\s*1/, "verifier fails rollout on overlap or missing entitlement");
 
-console.log("Existing-user badge production backfill workflow contract passed.");
+console.log("Existing-user founder/founding Premium backfill contract passed.");

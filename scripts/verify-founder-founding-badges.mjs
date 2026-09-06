@@ -16,32 +16,66 @@ const app = initializeApp({ credential: applicationDefault(), projectId }, `veri
 try {
   const db = getFirestore(app);
   const users = await db.collection("users").get();
-  const missing = [];
   let founders = 0;
   let foundingMembers = 0;
+  let foundersMissingFounder = 0;
+  let foundersWithFoundingMember = 0;
+  let foundersMissingPremium = 0;
+  let foundingMembersMissingFounding = 0;
+  let foundingMembersMissingPremium = 0;
+  const failures = [];
 
   for (const user of users.docs) {
     const profile = user.data() || {};
     const createdAt = timestampMillis(profile.createdAt);
     const founder = isAnonChatFounder(profile.username);
-    const foundingMember = Number.isFinite(createdAt) && createdAt <= FOUNDING_MEMBER_CUTOFF;
+    const foundingMember = !founder && Number.isFinite(createdAt) && createdAt <= FOUNDING_MEMBER_CUTOFF;
+    if (!founder && !foundingMember) continue;
+
+    const [founderBadge, foundingBadge, premiumBadge] = await Promise.all([
+      user.ref.collection("badges").doc("founder").get(),
+      user.ref.collection("badges").doc("founding-member").get(),
+      user.ref.collection("badges").doc("premium-member").get()
+    ]);
 
     if (founder) {
       founders += 1;
-      const badge = await user.ref.collection("badges").doc("founder").get();
-      if (!badge.exists) missing.push(`${user.id}:founder`);
+      if (!founderBadge.exists) {
+        foundersMissingFounder += 1;
+        failures.push(`${user.id}:missing-founder`);
+      }
+      if (foundingBadge.exists) {
+        foundersWithFoundingMember += 1;
+        failures.push(`${user.id}:unexpected-founding-member`);
+      }
+      if (!premiumBadge.exists) {
+        foundersMissingPremium += 1;
+        failures.push(`${user.id}:missing-premium`);
+      }
+      continue;
     }
 
-    if (foundingMember) {
-      foundingMembers += 1;
-      const badge = await user.ref.collection("badges").doc("founding-member").get();
-      if (!badge.exists) missing.push(`${user.id}:founding-member`);
+    foundingMembers += 1;
+    if (!foundingBadge.exists) {
+      foundingMembersMissingFounding += 1;
+      failures.push(`${user.id}:missing-founding-member`);
+    }
+    if (!premiumBadge.exists) {
+      foundingMembersMissingPremium += 1;
+      failures.push(`${user.id}:missing-premium`);
     }
   }
 
-  console.log(`FOUNDER_BADGE_VERIFICATION founders=${founders} foundingMembers=${foundingMembers} missing=${missing.length}`);
-  if (missing.length) {
-    console.error(`FOUNDER_BADGE_VERIFICATION_MISSING ${missing.join(",")}`);
+  console.log(
+    `FOUNDER_BADGE_VERIFICATION founders=${founders} foundingMembers=${foundingMembers} `
+    + `foundersMissingFounder=${foundersMissingFounder} `
+    + `foundersWithFoundingMember=${foundersWithFoundingMember} `
+    + `foundersMissingPremium=${foundersMissingPremium} `
+    + `foundingMembersMissingFounding=${foundingMembersMissingFounding} `
+    + `foundingMembersMissingPremium=${foundingMembersMissingPremium}`
+  );
+  if (failures.length) {
+    console.error(`FOUNDER_BADGE_VERIFICATION_FAILURES ${failures.join(",")}`);
     process.exitCode = 1;
   }
 } finally {

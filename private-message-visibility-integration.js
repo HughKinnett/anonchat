@@ -1,5 +1,6 @@
 import { auth, db } from "./firebase-config.js";
 import { canUnsendMessage } from "./private-message-visibility-policy.mjs";
+import { canonicalConversationId } from "./private-conversation-id.mjs";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   collection, deleteField, doc, limit, onSnapshot, orderBy, query, serverTimestamp,
@@ -18,7 +19,6 @@ let stopMessages = () => {};
 let stopVisibility = () => {};
 let observer = null;
 
-const pairIdFor = (otherUid) => [currentUser?.uid, otherUid].filter(Boolean).sort().join("_");
 const visibilityIdFor = (messageId) => `${messageId}_${currentUser.uid}`;
 
 const activeMessages = () => {
@@ -36,7 +36,7 @@ const activeMessages = () => {
 const hideMessageForMe = async (messageId) => {
   const otherUid = conversation?.value;
   if (!currentUser || !otherUid || !messageId) return;
-  await setDoc(doc(db, "messageRequests", pairIdFor(otherUid), "messageVisibility", visibilityIdFor(messageId)), {
+  await setDoc(doc(db, "messageRequests", canonicalConversationId(currentUser.uid, otherUid), "messageVisibility", visibilityIdFor(messageId)), {
     messageId,
     uid: currentUser.uid,
     hiddenAt: serverTimestamp()
@@ -104,7 +104,7 @@ const hideLoadedChatForMe = async () => {
   for (let offset = 0; offset < visible.length; offset += 400) {
     const batch = writeBatch(db);
     visible.slice(offset, offset + 400).forEach((message) => {
-      batch.set(doc(db, "messageRequests", pairIdFor(otherUid), "messageVisibility", visibilityIdFor(message.id)), {
+      batch.set(doc(db, "messageRequests", canonicalConversationId(currentUser.uid, otherUid), "messageVisibility", visibilityIdFor(message.id)), {
         messageId: message.id,
         uid: currentUser.uid,
         hiddenAt: serverTimestamp()
@@ -123,7 +123,7 @@ const watchConversation = () => {
   hiddenMessageIds = new Set();
   const otherUid = conversation?.value;
   if (!currentUser || !otherUid) return;
-  const pairId = pairIdFor(otherUid);
+  const pairId = canonicalConversationId(currentUser.uid, otherUid);
   stopMessages = onSnapshot(
     query(collection(db, "messageRequests", pairId, "messages"), orderBy("createdAt", "desc"), limit(100)),
     (snapshot) => { messageDocs = snapshot.docs; decorate(); },

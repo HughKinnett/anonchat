@@ -9,39 +9,28 @@ const [badges, phaseA, html, css] = await Promise.all([
   readFile(new URL("profile-phase-a.css", root), "utf8")
 ]);
 
-assert.match(badges, /import\s*\{[^}]*auth[^}]*db[^}]*\}\s*from\s*["']\.\/firebase-config\.js["']/s,
-  "badge controller can resolve the signed-in owner when no uid query is present");
-assert.match(badges, /auth\.authStateReady\(\)|onAuthStateChanged/,
-  "badge controller waits for authentication before resolving an own-profile target");
-assert.match(badges, /targetUserId\s*=\s*queryUserId\s*\|\|\s*auth\.currentUser\?\.uid\s*\|\|\s*null/,
-  "badge controller resolves query uid or authenticated owner");
-
 assert.match(html, /id="profile-badges-open"[^>]*class="[^"]*secondary-button[^\"]*"[^>]*>Badges<\/button>/,
   "profile action row exposes a clearly labeled themed Badges button");
 assert.match(badges, /profile-badges-open/,
   "badge controller wires the profile Badges entry button to the collection dialog");
 assert.match(badges, /entryButton\.hidden\s*=\s*false/,
-  "badge controller reveals the Badges entry point after the viewer successfully reads the target badge collection");
-assert.match(badges, /entryButton\.hidden\s*=\s*true/,
-  "badge controller keeps the Badges entry point hidden when the badge collection is unavailable or private");
+  "badge controller can reveal the Badges action");
 assert.doesNotMatch(phaseA, /badgeEntryButton|profile-badges-open/,
-  "profile privacy controller no longer independently owns badge entry visibility");
+  "profile privacy controller does not independently own badge entry visibility");
 
-assert.match(html, /id="profile-badges-section"/,
-  "profile keeps a clearly labeled Badges section");
-assert.match(html, /id="profile-badges-empty"[^>]*class="[^"]*profile-badges-empty/,
-  "profile includes a themed empty badge state for owners with zero awards");
-assert.match(css, /\.profile-badges-empty/,
-  "empty badge state uses the existing profile stylesheet");
-assert.match(html, /id="profile-badges-view-all"[^>]*class="[^"]*secondary-button/,
-  "badge collection action uses the existing AnonChat secondary button theme");
+assert.doesNotMatch(html, /id="profile-badges-section"/,
+  "earned badges are not displayed inline above Spotify");
+assert.doesNotMatch(html, /id="profile-badges-list"/,
+  "profile does not render an inline badge preview list");
+assert.doesNotMatch(html, /id="profile-badges-view-all"/,
+  "profile does not render a second View all badges action outside the dialog");
+assert.match(html, /id="profile-badges-collection-dialog"/,
+  "badge collection remains available behind the Badges action");
 assert.match(html, /id="profile-badges-collection-empty"[^>]*>No badges earned yet\.<\/p>/,
-  "badge collection itself has an empty state so the Badges button always opens something useful");
-assert.doesNotMatch(badges, /openBadgeCollection[\s\S]{0,250}!allBadges\.length/,
-  "badge collection opening is not blocked just because the user has zero badges");
+  "badge collection has an empty state for owners with zero awards");
 assert.match(css, /\.profile-badge-dialog\{[^}]*background\s*:\s*var\(--surface\)[^}]*color\s*:\s*var\(--text\)/,
-  "badge collection and detail dialogs use the same dark AnonChat surface and text tokens as the rest of the site");
+  "badge collection and detail dialogs use the AnonChat surface and text tokens");
 assert.match(css, /\.profile-badge-collection-card\{[^}]*background\s*:\s*var\(--surface-2\)[^}]*border\s*:\s*1px solid var\(--border\)/,
-  "badge cards use the same themed card background and border tokens as other AnonChat cards");
+  "badge cards use themed card background and border tokens");
 
-console.log("profile badge target and discoverability contract passed");
+console.log("profile badge button-only access contract passed");

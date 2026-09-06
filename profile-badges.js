@@ -1,14 +1,8 @@
 import { auth, db } from "./firebase-config.js";
 import { listBadgeTypes, listUserBadges } from "./badge-firestore.mjs";
-import { PROFILE_BADGE_PREVIEW_LIMIT, previewEarnedBadges, sortEarnedBadges } from "./badge-policy.mjs";
+import { sortEarnedBadges } from "./badge-policy.mjs";
 
-const searchParams = new URLSearchParams(window.location.search);
-const queryUserId = searchParams.get("uid");
-let targetUserId = queryUserId;
-const section = document.getElementById("profile-badges-section");
-const list = document.getElementById("profile-badges-list");
-const empty = document.getElementById("profile-badges-empty");
-const viewAll = document.getElementById("profile-badges-view-all");
+const targetUserId = new URLSearchParams(window.location.search).get("uid");
 const entryButton = document.getElementById("profile-badges-open");
 const collectionDialog = document.getElementById("profile-badges-collection-dialog");
 const collection = document.getElementById("profile-badges-collection");
@@ -25,22 +19,17 @@ const dialogClose = document.getElementById("profile-badge-dialog-close");
 const profileName = document.getElementById("profile-name");
 const PLACEHOLDER_BADGE = "anonchat-anonymous.png";
 let allBadges = [];
+let ownerView = false;
 
 const profileUnavailable = () => profileName?.textContent === "Unavailable profile";
-const hideGallery = () => {
-  if (list) list.replaceChildren();
-  if (collection) collection.replaceChildren();
-  if (section) section.hidden = true;
+const hideEntry = () => {
   if (entryButton) entryButton.hidden = true;
-  if (empty) empty.hidden = true;
-  if (viewAll) viewAll.hidden = true;
-  if (collectionEmpty) collectionEmpty.hidden = true;
   collectionDialog?.close?.();
   dialog?.close?.();
 };
 
 const earnedLabel = (badge) => {
-  if (badge.id === "premium-member") return "Shown while paid Premium is active";
+  if (badge.id === "premium-member") return "Premium badge entitlement is active";
   const earnedAt = badge.earnedAt;
   const date = earnedAt?.toDate?.() || (earnedAt instanceof Date ? earnedAt : null);
   return date ? `Earned ${date.toLocaleDateString()}` : "Earned date unavailable";
@@ -63,25 +52,6 @@ const openBadgeDetail = (badge) => {
   if (dialogRequirement) dialogRequirement.textContent = `Requirement: ${requirementLabel(badge)}`;
   if (dialogEarned) dialogEarned.textContent = earnedLabel(badge);
   dialog.showModal?.();
-};
-
-const badgeButton = (badge) => {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "profile-badge-card";
-  button.setAttribute("aria-label", `View ${badge.name} badge details`);
-
-  const image = document.createElement("img");
-  image.src = badge.imageUrl || PLACEHOLDER_BADGE;
-  image.alt = "";
-  image.loading = "lazy";
-  image.addEventListener("error", () => { image.src = PLACEHOLDER_BADGE; }, { once: true });
-
-  const name = document.createElement("span");
-  name.textContent = badge.name;
-  button.append(image, name);
-  button.addEventListener("click", () => openBadgeDetail(badge));
-  return button;
 };
 
 const collectionCard = (badge) => {
@@ -116,18 +86,6 @@ const collectionCard = (badge) => {
   return card;
 };
 
-const render = () => {
-  if (!section || !list || profileUnavailable()) {
-    hideGallery();
-    return;
-  }
-  const visible = previewEarnedBadges(allBadges);
-  list.replaceChildren(...visible.map(badgeButton));
-  section.hidden = false;
-  if (empty) empty.hidden = allBadges.length !== 0;
-  if (viewAll) viewAll.hidden = allBadges.length === 0;
-};
-
 const openBadgeCollection = () => {
   if (!collectionDialog || !collection || profileUnavailable()) return;
   collection.replaceChildren(...sortEarnedBadges(allBadges).map(collectionCard));
@@ -136,10 +94,14 @@ const openBadgeCollection = () => {
 };
 
 const load = async () => {
-  hideGallery();
+  hideEntry();
   await auth.authStateReady();
-  targetUserId = queryUserId || auth.currentUser?.uid || null;
+  const viewerUid = auth.currentUser?.uid || "";
+  ownerView = Boolean(viewerUid && targetUserId === viewerUid);
   if (!targetUserId || profileUnavailable()) return;
+
+  if (ownerView && entryButton) entryButton.hidden = false;
+
   try {
     const [assignments, definitions] = await Promise.all([
       listUserBadges(db, targetUserId),
@@ -154,14 +116,13 @@ const load = async () => {
       })
       .filter(Boolean);
     if (entryButton) entryButton.hidden = false;
-    render();
   } catch {
-    hideGallery();
+    allBadges = [];
+    if (!ownerView) hideEntry();
   }
 };
 
 entryButton?.addEventListener("click", openBadgeCollection);
-viewAll?.addEventListener("click", openBadgeCollection);
 collectionClose?.addEventListener("click", () => collectionDialog?.close?.());
 collectionDialog?.addEventListener("click", (event) => {
   if (event.target === collectionDialog) collectionDialog.close?.();
@@ -177,7 +138,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 const observer = profileName ? new MutationObserver(() => {
-  if (profileUnavailable()) hideGallery();
+  if (profileUnavailable()) hideEntry();
 }) : null;
 observer?.observe(profileName, { childList: true, characterData: true, subtree: true });
 

@@ -1,6 +1,7 @@
 import { auth, db } from "./firebase-config.js";
 import { normalizeProfilePrivacy, resolveProfileVisibility } from "./profile-privacy-policy.mjs";
 import { buildProfileShareData, safeProfileQrPayload } from "./profile-share.mjs";
+import { renderProfileQr } from "./profile-qr-renderer.mjs";
 import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 const queryUserId = new URLSearchParams(location.search).get("uid");
@@ -145,8 +146,7 @@ const renderQr = async () => {
   qrCanvas.replaceChildren();
   const canvas = document.createElement("canvas");
   qrCanvas.append(canvas);
-  if (!globalThis.QRCode?.toCanvas) throw new Error("QR renderer unavailable");
-  await globalThis.QRCode.toCanvas(canvas, payload, { width: 280, margin: 2 });
+  await renderProfileQr(canvas, payload);
 };
 
 qrButton?.addEventListener("click", async () => {

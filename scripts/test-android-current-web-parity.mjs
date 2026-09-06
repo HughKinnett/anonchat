@@ -9,6 +9,8 @@ const [
   manifest,
   assetLinks,
   profileHtml,
+  profileBootstrap,
+  profileTarget,
   profileBadges,
   profilePhaseA,
   communityHtml,
@@ -25,6 +27,8 @@ const [
   "android/app/src/main/AndroidManifest.xml",
   ".well-known/assetlinks.json",
   "profile.html",
+  "profile-bootstrap.js",
+  "profile-target.mjs",
   "profile-badges.js",
   "profile-phase-a.js",
   "community.html",
@@ -49,20 +53,25 @@ assert.match(assetLinks, /"package_name"\s*:\s*"com\.anonchat\.app"/,
 assert.doesNotMatch(gradle, /com\.android\.billingclient|stripe-android|com\.stripe/i,
   "Android parity release adds no Play Billing or Stripe SDK");
 
-assert.match(gradle, /versionCode\s+5\b/, "Android parity release advances versionCode to 5");
-assert.match(gradle, /versionName\s+["']1\.0\.4["']/, "Android parity release advances versionName to 1.0.4");
+assert.match(gradle, /versionCode\s+5\b/, "Android parity release remains versionCode 5");
+assert.match(gradle, /versionName\s+["']1\.0\.4["']/, "Android parity release remains versionName 1.0.4");
 
 for (const id of [
-  "profile-badges-section",
-  "profile-badges-view-all",
+  "profile-badges-open",
   "profile-badges-collection-dialog",
   "profile-badge-dialog"
 ]) {
   assert.match(profileHtml, new RegExp(`id=["']${id}["']`), `TWA profile includes ${id}`);
 }
+assert.doesNotMatch(profileHtml, /id=["']profile-badges-section["']|id=["']profile-badges-view-all["']/,
+  "TWA profile keeps earned badges behind the Badges action instead of an inline preview");
 assert.match(profileHtml, /data-profile-privacy="showBadges"/, "TWA profile exposes badge privacy");
-assert.match(profileBadges, /auth\.authStateReady\(\)/, "own-profile badges resolve authenticated user state");
-assert.match(profilePhaseA, /queryUserId\s*\|\|\s*viewer\.uid/, "profile privacy resolves owner and visitor targets consistently");
+assert.match(profileHtml, /src="profile-bootstrap\.js"/, "TWA profile normalizes the owner target before loading profile controllers");
+assert.match(profileBootstrap, /resolveProfileTarget\s*\(/, "profile bootstrap uses the shared target resolver");
+assert.match(profileTarget, /return queryUid \|\| ownerUid \|\| null/,
+  "shared target resolver prefers explicit profile uid then authenticated owner");
+assert.match(profileBadges, /auth\.authStateReady\(\)/, "own-profile badges wait for authenticated user state");
+assert.match(profilePhaseA, /queryUserId\s*\|\|\s*viewer\.uid/, "profile privacy resolves owner and visitor targets consistently after bootstrap normalization");
 assert.match(communityHtml, /id="direct-message-form"/, "TWA includes private-message composer");
 assert.match(communityJs, /That user has not enabled encrypted chats yet\./,
   "TWA retains encrypted-message readiness behavior");
@@ -78,7 +87,7 @@ assert.doesNotMatch(profileHtml + communityHtml, /GIF URL|post-gif-url/i,
 
 assert.match(controls, /--ac-control-bg/);
 assert.match(controls, /\.secondary-button/);
-for (const controlId of ["profile-badges-view-all", "profile-badges-collection-close", "profile-badge-dialog-close"]) {
+for (const controlId of ["profile-badges-open", "profile-badges-collection-close", "profile-badge-dialog-close"]) {
   assert.match(profileHtml, new RegExp(`id=["']${controlId}["'][^>]*class=["'][^"']*secondary-button`),
     `${controlId} reuses current AnonChat button styling`);
 }
@@ -91,6 +100,8 @@ for (const path of [
   "appearance-accessibility.css",
   "appearance-accessibility.js",
   "profile.html",
+  "profile-bootstrap.js",
+  "profile-target.mjs",
   "profile-badges.js",
   "profile-phase-a.js",
   "profile-phase-a.css",

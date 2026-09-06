@@ -72,16 +72,6 @@
       <p id="profile-private-note" class="profile-private-note" hidden></p>
     </section>
 
-    <section id="profile-badges-section" data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-badges-title" hidden>
-      <div class="spotify-card-heading">
-        <div><p class="eyebrow">Achievements</p><h2 id="profile-badges-title">Badges</h2></div>
-        <span id="profile-badges-private-note" class="profile-badges-private-note" hidden>Hidden from others</span>
-      </div>
-      <div id="profile-badges-list" class="profile-badges-list"></div>
-      <p id="profile-badges-empty" class="profile-badges-empty" hidden>No badges earned yet.</p>
-      <button id="profile-badges-view-all" class="secondary-button" type="button" hidden>View all badges</button>
-    </section>
-
     <section id="profile-spotify-card" data-profile-activity data-profile-private-hidden="true" class="spotify-profile-card profile-spotify-card" aria-labelledby="profile-spotify-title" hidden>
       <div class="spotify-card-heading"><div><p class="eyebrow">Profile soundtrack</p><h2 id="profile-spotify-title">Playing on Spotify</h2></div></div>
       <div id="profile-spotify-player"></div>
@@ -129,10 +119,7 @@
     </div>
   </dialog>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js" defer></script>
-  <script type="module" src="profile.js"></script>
-  <script type="module" src="profile-badges.js"></script>
-  <script type="module" src="profile-phase-a.js"></script>
+  <script type="module" src="profile-bootstrap.js"></script>
   <script type="module" src="post-sharing.js"></script>
   <script src="nav-menu.js" defer></script>
   <script type="module" src="premium-menu.js"></script>

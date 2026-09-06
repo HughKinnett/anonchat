@@ -16,6 +16,7 @@ on:
       - 'sw.js'
       - 'scripts/test-e2ee-auto-unlock.mjs'
       - 'scripts/test-desktop-dark-baseline.mjs'
+      - 'scripts/test-profile-target-resolution.mjs'
       - 'scripts/test-profile-badge-target-resolution.mjs'
       - 'scripts/test-android-current-web-parity.mjs'
       - '.github/workflows/android-parity-ci.yml'
@@ -35,6 +36,8 @@ jobs:
         run: node scripts/test-e2ee-auto-unlock.mjs
       - name: Desktop dark baseline contract
         run: node scripts/test-desktop-dark-baseline.mjs
+      - name: Profile target resolution contract
+        run: node scripts/test-profile-target-resolution.mjs
       - name: Profile badge discoverability contract
         run: node scripts/test-profile-badge-target-resolution.mjs
       - name: Android current-web parity contract

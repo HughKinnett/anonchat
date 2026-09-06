@@ -39,7 +39,7 @@ assert.match(requestReadiness, /messageRequests/,
   "request readiness distinguishes existing incoming requests from new request creation");
 assert.match(requestReadiness, /follows/,
   "request readiness detects mutual-follow auto-accept cases");
-assert.match(sw, /CACHE_NAME\s*=\s*["']anonchat-v138["']/,
-  "service-worker cache advances so installed mobile clients receive the corrected send integration");
+assert.match(sw, /CACHE_NAME\s*=\s*["']anonchat-v140["']/,
+  "service-worker cache advances so installed mobile clients receive the canonical conversation and QR fixes");
 
 console.log("Private-message send readiness contract passed.");
