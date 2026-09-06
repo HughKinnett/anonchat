@@ -37,3 +37,5 @@ jobs:
         run: node scripts/test-desktop-dark-baseline.mjs
       - name: Profile badge discoverability contract
         run: node scripts/test-profile-badge-target-resolution.mjs
+      - name: Android current-web parity contract
+        run: node scripts/test-android-current-web-parity.mjs
