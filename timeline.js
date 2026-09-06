@@ -24,7 +24,7 @@ import { buildInAppNotifications, notificationUiId } from "./notification-ui-pol
 import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
-import { filterFeedPosts, sortFeedPosts } from "./feed-mode-policy.mjs";
+import { filterFeedPosts, sortFeedPosts, sortScoredFeedPosts } from "./feed-mode-policy.mjs";
 import { normalizeTopic, postTopics } from "./topic-policy.mjs";
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
 import { pollVoteDocumentId as voteDocumentId } from "./poll-vote-policy.mjs";
@@ -113,6 +113,8 @@ let currentUserIsPremium = false;
 let currentPremiumSettings = null;
 let notificationReads = [];
 let communityPostDocs = [];
+let discoveryPostDocs = [];
+let discoveryCommunityPostDocs = [];
 let pollVotes = [];
 let pollVoteListeners = [];
 let pollVoteGeneration = 0;
@@ -133,6 +135,7 @@ let clearNotificationExpiryTimer = () => {};
 let showingProfile = false;
 let feedMode = "for-you";
 let selectedTopics = new Set();
+const TIMELINE_POST_LIMIT = 20;
 const DISCOVERY_POST_LIMIT = 100;
 const listeners = [];
 const notificationButton = document.getElementById("notification-button");
@@ -171,8 +174,8 @@ const pendingPostDeletes = new Set();
 const postDeleteStatuses = new Map();
 
 const blockedUid = (uid) => isBlockedActor(uid, viewerBlocks);
-const visibleTimelinePosts = () => [...new Map([
-  ...allTimelinePosts(),
+const visibleTimelinePosts = (posts = allTimelinePosts()) => [...new Map([
+  ...posts,
   ...referencedPostDocs.values()
 ].map((post) => [post.ref.path, post])).values()]
   .filter((post) => !post.data().expiresAt?.toMillis?.() || post.data().expiresAt.toMillis() > Date.now())
@@ -731,6 +734,7 @@ const mentionsCurrentUser = (value) => {
 };
 
 const allTimelinePosts = () => [...postDocs, ...communityPostDocs];
+const discoveryTimelinePosts = () => [...discoveryPostDocs, ...discoveryCommunityPostDocs];
 const allNotificationPosts = () => {
   const byPath = new Map(allTimelinePosts().map((post) => [post.ref.path, post]));
   interactionSubscriptions.forEach((entry) => {
@@ -1652,7 +1656,9 @@ const renderFeed = () => {
     setStatus("Loading privacy choices…");
     return;
   }
-  const unexpiredPosts = visibleTimelinePosts().sort(compareNewestFirst);
+  const activeFeedPosts = ["trending", "popular-today", "topics"].includes(feedMode) ? discoveryTimelinePosts() : allTimelinePosts();
+  const unexpiredPosts = visibleTimelinePosts(activeFeedPosts).sort(compareNewestFirst);
+  const suggestionPosts = visibleTimelinePosts(discoveryTimelinePosts()).sort(compareNewestFirst);
   const reactionCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postReactions(post).length]));
   const commentCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postComments(post).length]));
   const followedUids = new Set(visibleFollows().filter(follow => follow.data().followerId === currentUser?.uid).map(follow => follow.data().followingId));
@@ -1668,11 +1674,11 @@ const renderFeed = () => {
       });
   let phaseBPosts = filteredPosts;
   if (feedMode === "trending") {
-    phaseBPosts = [...filteredPosts].filter((post) => trendingScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).filter((c) => !c.data().parentCommentId).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()) > -Infinity)
-      .sort((a, b) => trendingScore({ createdAtMs: b.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(b).length, commentCount: postComments(b).length, replyCount: postComments(b).filter((c) => c.data().parentCommentId).length }, Date.now()) - trendingScore({ createdAtMs: a.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(a).length, commentCount: postComments(a).length, replyCount: postComments(a).filter((c) => c.data().parentCommentId).length }, Date.now()));
+    const trendingPosts = [...filteredPosts].filter((post) => trendingScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).filter((c) => !c.data().parentCommentId).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()) > -Infinity);
+    phaseBPosts = sortScoredFeedPosts(trendingPosts, (post) => trendingScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()));
   } else if (feedMode === "popular-today") {
-    phaseBPosts = [...filteredPosts].filter((post) => { const data = post.data(); const score = popularTodayScore({ createdAtMs: data.createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()); return score > -Infinity; })
-      .sort((a, b) => popularTodayScore({ createdAtMs: b.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(b).length, commentCount: postComments(b).length, replyCount: postComments(b).filter((c) => c.data().parentCommentId).length }, Date.now()) - popularTodayScore({ createdAtMs: a.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(a).length, commentCount: postComments(a).length, replyCount: postComments(a).filter((c) => c.data().parentCommentId).length }, Date.now()));
+    const popularPosts = [...filteredPosts].filter((post) => { const data = post.data(); const score = popularTodayScore({ createdAtMs: data.createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()); return score > -Infinity; });
+    phaseBPosts = sortScoredFeedPosts(popularPosts, (post) => popularTodayScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()));
   } else if (feedMode === "saved-posts") phaseBPosts = filteredPosts.filter((post) => savedPostPaths.has(interactionParentForPost(post).path));
   else if (feedMode === "history") phaseBPosts = viewedPostPaths.map((path) => filteredPosts.find((post) => interactionParentForPost(post).path === path)).filter(Boolean);
   const orderedPosts = showingProfile
@@ -1692,10 +1698,10 @@ const renderFeed = () => {
   if (suggestedFollowsList) {
     const followedUidsForSuggestions = new Set(visibleFollows().filter((follow) => follow.data().followerId === currentUser?.uid).map((follow) => follow.data().followingId));
     const viewerFollowingSet = new Set(followedUidsForSuggestions);
-    const viewerTopicSet = new Set(unexpiredPosts
+    const viewerTopicSet = new Set(suggestionPosts
       .filter((post) => post.data().authorId === currentUser?.uid)
       .flatMap((post) => postTopics(post.data())));
-    const publicInteractionCountForCandidate = (candidateUid) => unexpiredPosts.reduce((total, post) => {
+    const publicInteractionCountForCandidate = (candidateUid) => suggestionPosts.reduce((total, post) => {
       const authorId = post.data().authorId;
       if (authorId !== candidateUid && authorId !== currentUser?.uid) return total;
       const counterpartUid = authorId === candidateUid ? currentUser?.uid : candidateUid;
@@ -1704,7 +1710,7 @@ const renderFeed = () => {
       return total + reactionMatches + commentMatches;
     }, 0);
     const candidates = visibleUsers().map((profile) => {
-      const candidateTopics = [...new Set(unexpiredPosts
+      const candidateTopics = [...new Set(suggestionPosts
         .filter((post) => post.data().authorId === profile.id)
         .flatMap((post) => postTopics(post.data())))];
       return {
@@ -1872,7 +1878,8 @@ const syncInteractionListeners = () => {
     queueInteractionRender();
     return;
   }
-  const posts = visibleTimelinePosts().sort(compareNewestFirst);
+  const interactionFeedPosts = ["trending", "popular-today", "topics"].includes(feedMode) ? discoveryTimelinePosts() : allTimelinePosts();
+  const posts = visibleTimelinePosts(interactionFeedPosts).sort(compareNewestFirst);
   const visibleParents = new Map(posts.map((post) => [interactionParentForPost(post).path, post]));
   const desired = new Map(timelineInteractionPlan(posts, MAX_INTERACTION_PARENTS)
     .map((parent) => [parent.path, parent]));
@@ -2053,6 +2060,7 @@ chosenTopicInput?.addEventListener("keydown", (event) => {
 
 const setFeedView = (mode) => {
   feedMode = mode;
+  syncInteractionListeners();
   showingProfile = mode === "profile";
   allPostsButton.setAttribute("aria-pressed", String(mode === "for-you"));
   latestPostsButton.setAttribute("aria-pressed", String(mode === "latest"));
@@ -2098,6 +2106,8 @@ const stopTimelineResources = () => {
   clearInteractionListeners();
   postDocs = [];
   communityPostDocs = [];
+  discoveryPostDocs = [];
+  discoveryCommunityPostDocs = [];
   savedPostPaths = new Set();
   viewedPostPaths = [];
   recentSearches = [];
@@ -2251,12 +2261,32 @@ onAuthStateChanged(auth, async (user) => {
     () => setStatus("Could not load viewed history.", true)
   ));
   listeners.push(listenForSession(
+    query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(DISCOVERY_POST_LIMIT)),
+    (snapshot) => {
+      discoveryPostDocs = snapshot.docs;
+      if (["trending", "popular-today", "topics"].includes(feedMode)) syncInteractionListeners();
+      renderPosts();
+    },
+    () => setStatus("Could not load discovery posts.", true)
+  ));
+
+  listeners.push(listenForSession(
+    query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(DISCOVERY_POST_LIMIT)),
+    (snapshot) => {
+      discoveryCommunityPostDocs = snapshot.docs;
+      if (["trending", "popular-today", "topics"].includes(feedMode)) syncInteractionListeners();
+      renderPosts();
+    },
+    () => setStatus("Could not load discovery community posts.", true)
+  ));
+
+  listeners.push(listenForSession(
     query(collection(db, "users", user.uid, "recentSearches"), orderBy("searchedAt", "desc"), limit(20)),
     (snapshot) => { recentSearches = snapshot.docs.map((entry) => normalizeRecentSearch(entry.data().value)).filter(Boolean); renderRecentSearches(); },
     () => setStatus("Could not load recent searches.", true)
   ));
   listeners.push(listenForSession(
-    query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(DISCOVERY_POST_LIMIT)),
+    query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(TIMELINE_POST_LIMIT)),
     (snapshot) => {
       syncReportedHolds("posts", snapshot.docs);
       postDocs = snapshot.docs;
@@ -2270,7 +2300,7 @@ onAuthStateChanged(auth, async (user) => {
   ));
 
   listeners.push(listenForSession(
-    query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(DISCOVERY_POST_LIMIT)),
+    query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(TIMELINE_POST_LIMIT)),
     (snapshot) => {
       syncReportedHolds("communityPosts", snapshot.docs);
       communityPostDocs = snapshot.docs;
