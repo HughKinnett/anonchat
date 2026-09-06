@@ -19,6 +19,8 @@ assert.match(deploy, /qrcode@1\.5\.4\/build\/qrcode\.min\.js/,
   "production deploy pins the approved QR renderer version");
 assert.match(deploy, /vendor\/qrcode\.min\.js/,
   "production deploy stages the QR renderer into the hosted vendor path");
+assert.match(deploy, /[a-f0-9]{64}\s+vendor\/qrcode\.min\.js[\s\S]*sha256sum\s+-c/,
+  "production deploy verifies the exact QR bundle checksum before hosting it");
 assert.match(sw, /\.\/vendor\/qrcode\.min\.js/,
   "service worker caches the locally hosted QR renderer");
 
