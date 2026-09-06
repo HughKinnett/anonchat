@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [awardSource, firestoreSource, processorSource, adapterSource, routingSource, reconciliationSource, reconciliationWorkflow, packageSource] = await Promise.all([
+const [awardSource, firestoreSource, processorSource, adapterSource, routingSource, reconciliationSource, reconciliationWorkflow, packageSource, policySource, founderSource] = await Promise.all([
   readFile(new URL("../badge-awards.mjs", import.meta.url), "utf8").catch(() => ""),
   readFile(new URL("../badge-firestore.mjs", import.meta.url), "utf8"),
   readFile(new URL("../badge-award-processor.mjs", import.meta.url), "utf8").catch(() => ""),
@@ -9,7 +9,9 @@ const [awardSource, firestoreSource, processorSource, adapterSource, routingSour
   readFile(new URL("../badge-activity-routing.mjs", import.meta.url), "utf8").catch(() => ""),
   readFile(new URL("../badge-account-age-reconciliation.mjs", import.meta.url), "utf8").catch(() => ""),
   readFile(new URL("../.github/workflows/process-badge-account-age.yml", import.meta.url), "utf8").catch(() => ""),
-  readFile(new URL("../package.json", import.meta.url), "utf8")
+  readFile(new URL("../package.json", import.meta.url), "utf8"),
+  readFile(new URL("../badge-policy.mjs", import.meta.url), "utf8"),
+  readFile(new URL("../founder-identities.mjs", import.meta.url), "utf8")
 ]);
 
 assert.match(awardSource, /evaluateBadgeMilestones/, "automatic badge award service exports evaluateBadgeMilestones");
@@ -19,45 +21,47 @@ assert.doesNotMatch(awardSource, /users["']\s*,\s*uid\s*,\s*["']badges["']/, "br
 
 assert.match(processorSource, /processBadgeAwards/, "trusted badge processor exports processBadgeAwards");
 assert.match(processorSource, /matchingAutomaticBadges/, "trusted processor uses the milestone evaluator");
-assert.match(processorSource, /already-earned/, "trusted processor preserves existing badge assignments");
-assert.match(processorSource, /changedMetrics/, "trusted processor evaluates only changed metrics");
-assert.match(processorSource, /CANONICAL_BADGE_SOURCES/, "trusted processor declares canonical activity sources");
-assert.match(processorSource, /posts/, "trusted processor observes committed posts");
-assert.match(processorSource, /comments/, "trusted processor observes committed comments");
-assert.match(processorSource, /reactions/, "trusted processor observes committed reactions");
-assert.match(processorSource, /follows/, "trusted processor observes committed follow changes");
-assert.match(processorSource, /premiumAccess/, "trusted processor observes committed premium state");
-assert.match(processorSource, /users/, "trusted processor observes committed profile state");
-assert.match(processorSource, /badgeMetricsForActivity/, "canonical activity is routed through the shared metric mapping");
-assert.match(processorSource, /processCanonicalBadgeActivity/, "trusted processor exposes canonical source processing");
-assert.match(processorSource, /metricsForCanonicalSource/, "trusted processor derives metrics from canonical stored data instead of client claims");
+assert.match(processorSource, /already-earned/, "trusted processor preserves existing permanent badge assignments");
+assert.match(processorSource, /changedMetrics/, "trusted processor evaluates only requested metrics");
+assert.match(processorSource, /premium_active[\s\S]*removeStatusBadge|removeStatusBadge[\s\S]*premium-member/, "trusted processor revokes Premium Member when paid Premium becomes inactive");
 
-assert.match(adapterSource, /users.*badges|badges.*users/s, "trusted Firestore adapter owns user badge assignment writes");
+assert.match(adapterSource, /ANONCHAT_BADGE_CATALOG/, "trusted adapter reads the fixed code-owned badge catalog");
+assert.doesNotMatch(adapterSource, /collection\(["']badgeTypes["']|collection\("badgeTypes"\)|\.collection\("badgeTypes"\)/, "trusted adapter does not read mutable badge definitions from Firestore");
 assert.match(adapterSource, /runTransaction/, "trusted adapter performs idempotent badge assignment writes transactionally");
-assert.match(adapterSource, /badgeTypes/, "trusted adapter reads badge definitions");
-assert.match(adapterSource, /assignedBy\s*:\s*["']system["']/, "trusted adapter records system as the assigning actor");
 assert.match(adapterSource, /awardSource\s*:\s*["']automatic["']/, "trusted adapter records automatic award source");
+assert.match(adapterSource, /removeStatusBadge/, "trusted adapter can remove revocable system status badges only through server processing");
+
+assert.match(policySource, /founder/, "fixed catalog includes Founder");
+assert.match(policySource, /founding-member/, "fixed catalog includes Founding Member");
+assert.match(policySource, /premium-member[\s\S]*persistent:\s*false/, "Premium Member is the revocable paid-status badge");
+assert.match(founderSource, /FOUNDER_USERNAMES/, "Founder eligibility is centralized in trusted product-owned code");
 
 assert.match(routingSource, /posts_created/, "post creation routes to posts_created");
 assert.match(routingSource, /single_post_interactions/, "post interaction routes to single_post_interactions");
-assert.match(routingSource, /total_interactions_received/, "post interaction routes to total_interactions_received");
-assert.match(routingSource, /comments_received/, "comment receipt routes to comments_received");
 assert.match(routingSource, /comments_or_replies_created/, "comment or reply creation routes to comments_or_replies_created");
 assert.match(routingSource, /followers_count/, "follow changes route to followers_count");
 assert.match(routingSource, /premium_active/, "premium reconciliation routes to premium_active");
 assert.match(routingSource, /early_member/, "profile initialization routes to early_member");
 assert.match(routingSource, /account_age_days/, "profile initialization routes to account_age_days");
 
-assert.match(reconciliationSource, /ACCOUNT_AGE_BATCH_SIZE/, "account-age reconciliation declares a bounded batch size");
-assert.match(reconciliationSource, /\.limit\s*\(/, "account-age reconciliation uses a bounded Firestore query");
-assert.match(reconciliationSource, /startAfter/, "account-age reconciliation supports cursor pagination");
-assert.match(reconciliationSource, /account_age_days/, "account-age reconciliation evaluates account age");
-assert.doesNotMatch(reconciliationSource, /posts_created|followers_count|premium_active/, "account-age reconciliation does not evaluate unrelated metrics");
-assert.match(reconciliationSource, /processBadgeAwards/, "account-age reconciliation uses the trusted award processor");
-assert.match(reconciliationWorkflow, /schedule:/, "account-age reconciliation is scheduled");
-assert.match(reconciliationWorkflow, /badge-account-age:process/, "account-age workflow invokes the bounded processor command");
-assert.match(packageSource, /"badge-account-age:process"/, "package exposes account-age reconciliation command");
+assert.match(reconciliationSource, /ACCOUNT_AGE_BATCH_SIZE/, "automatic identity/status reconciliation declares a bounded batch size");
+assert.match(reconciliationSource, /\.limit\s*\(/, "automatic reconciliation uses a bounded Firestore user query");
+assert.match(reconciliationSource, /startAfter/, "automatic reconciliation supports cursor pagination");
+for (const metric of [
+  "founder",
+  "founding_member",
+  "early_member",
+  "early_supporter",
+  "verified_admin",
+  "premium_active",
+  "account_age_days"
+]) assert.match(reconciliationSource, new RegExp(metric), `scheduled reconciliation evaluates ${metric}`);
+assert.match(reconciliationSource, /tier\s*===\s*["']subscriber["']/, "Premium Member reconciliation requires the paid subscriber tier");
+assert.match(reconciliationSource, /processBadgeAwards/, "scheduled reconciliation uses the trusted award processor");
+assert.match(reconciliationWorkflow, /schedule:/, "automatic identity/status reconciliation is scheduled");
+assert.match(reconciliationWorkflow, /badge-account-age:process/, "scheduled workflow invokes the bounded trusted processor command");
+assert.match(packageSource, /"badge-account-age:process"/, "package exposes the trusted reconciliation command");
 
-assert.match(firestoreSource, /awardSource/, "badge Firestore helper preserves assignment source metadata");
+assert.doesNotMatch(firestoreSource, /saveBadgeType|setUserBadge|removeUserBadge|setBadgeFeatured/, "browser Firestore helper exposes no badge mutation API");
 
 console.log("badge award contract tests passed");
