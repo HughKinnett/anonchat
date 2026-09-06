@@ -2315,6 +2315,26 @@ service cloud.firestore {
         && uid == request.auth.uid;
     }
 
+    match /messageRequests/{requestId}/messageReactions/{reactionId} {
+      allow read: if activeUser()
+        && acceptedConversation(requestId);
+      allow create, update: if activeUserAfter()
+        && featureEnabled('privateMessagingEnabled')
+        && acceptedConversation(requestId)
+        && request.resource.data.keys().hasOnly(['messageId', 'uid', 'type', 'updatedAt'])
+        && request.resource.data.messageId is string
+        && request.resource.data.messageId.size() > 0
+        && request.resource.data.uid == request.auth.uid
+        && reactionId == request.resource.data.messageId + '_' + request.auth.uid
+        && request.resource.data.type in ['👍', '❤️', '😂', '😮', '😢', '😡', '🖕']
+        && exists(/databases/$(database)/documents/messageRequests/$(requestId)/messages/$(request.resource.data.messageId))
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if activeUser()
+        && acceptedConversation(requestId)
+        && resource.data.uid == request.auth.uid
+        && reactionId == resource.data.messageId + '_' + request.auth.uid;
+    }
+
     match /messageRequests/{requestId}/messages/{messageId} {
       allow read: if activeUser()
         && acceptedConversation(requestId);
