@@ -7,6 +7,8 @@
   const panel = document.getElementById("main-menu-panel");
   if (!button || !panel) return;
 
+  panel.querySelectorAll('a[href="groups.html"], a[href="communities.html"], a[href="group-detail.html"], a[href="community-detail.html"]').forEach((link) => link.remove());
+
   const products = [
     ["community.html", "Temporary Rooms"],
     ["premium-rooms.html", "Premium Rooms"],
