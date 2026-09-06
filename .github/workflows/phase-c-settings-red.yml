@@ -4,7 +4,12 @@ on:
     branches: [main]
     paths:
       - 'user-settings-*.mjs'
+      - 'settings.html'
+      - 'settings.js'
+      - 'settings.css'
+      - 'nav-menu.js'
       - 'scripts/test-user-settings-*.mjs'
+      - 'scripts/test-settings-page-integration.mjs'
       - 'scripts/apply-phase-c-settings-rules-patch.mjs'
       - 'firestore.rules'
       - '.github/workflows/phase-c-settings-red.yml'
@@ -24,3 +29,5 @@ jobs:
         run: node scripts/test-user-settings-policy.mjs
       - name: Firestore settings rules contract
         run: node scripts/test-user-settings-rules.mjs
+      - name: Settings page integration
+        run: node scripts/test-settings-page-integration.mjs
