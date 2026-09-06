@@ -20,7 +20,12 @@ export const processBadgeAwards = async ({ adapter, uid, changedMetrics = [], me
 
   if (changed.has("premium_active") && metrics.premium_active === false
     && typeof adapter.removeStatusBadge === "function") {
-    results.push(await adapter.removeStatusBadge(uid, "premium-member"));
+    const trustedPremiumEntitlement = typeof adapter.trustedPremiumEntitlement === "function"
+      ? await adapter.trustedPremiumEntitlement(uid)
+      : metrics.founder === true || metrics.founding_member === true;
+    if (!trustedPremiumEntitlement) {
+      results.push(await adapter.removeStatusBadge(uid, "premium-member"));
+    }
   }
 
   const definitions = await adapter.listActiveDefinitions();
