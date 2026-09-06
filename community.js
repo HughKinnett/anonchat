@@ -568,9 +568,9 @@ const renderRoomMessages = () => {
     const sender = document.createElement("small");
     sender.textContent = data.tempName;
     const text = document.createElement("span");
-    text.textContent = data.unsentAt ? "Message unsent" : (decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : ""));
+    text.textContent = decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : "");
     item.append(sender);
-    if (data.unsentAt || data.text || data.bodyCipher) item.append(text);
+    if (data.text || data.bodyCipher) item.append(text);
     const roomImage = decrypted?.imageData || data.imageData;
     if (roomImage) {
       const photo = document.createElement("img");
@@ -899,7 +899,7 @@ const renderDirectMessages = () => {
     const sender = document.createElement("small");
     sender.textContent = `@${userName(data.senderId)}`;
     const text = document.createElement("span");
-    text.textContent = decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : "");
+    text.textContent = data.unsentAt ? "Message unsent" : (decrypted?.error || decrypted?.text || (data.encrypted ? "Unlocking encrypted message…" : ""));
     const actions = document.createElement("span");
     actions.className = "private-message-actions";
     if (data.expiresAt?.toDate) {
@@ -908,7 +908,7 @@ const renderDirectMessages = () => {
       actions.append(expiry);
     }
     item.append(sender);
-    if (data.text || data.bodyCipher) item.append(text);
+    if (data.unsentAt || data.text || data.bodyCipher) item.append(text);
     const revealedImage = revealedPrivatePhotos.get(message.id);
     const imageData = data.unsentAt ? "" : (data.senderId === state.user.uid ? (decrypted?.imageData || data.imageData) : revealedImage);
     if (imageData) {
