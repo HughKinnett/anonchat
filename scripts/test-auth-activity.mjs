@@ -13,22 +13,31 @@ import { recordPageActivity, signedInActivitySurfaces } from "../activity-integr
 const auth = { uid: "user-a" };
 const local = { name: "local" };
 const session = { name: "session" };
+const memory = { name: "memory" };
 
 const localCalls = [];
-await chooseDurablePersistence(async (_auth, candidate) => localCalls.push(candidate), auth, [local, session]);
-assert.deepEqual(localCalls, [local], "local persistence succeeds without trying session persistence");
+await chooseDurablePersistence(async (_auth, candidate) => localCalls.push(candidate), auth, [local, session, memory]);
+assert.deepEqual(localCalls, [local], "local persistence succeeds without trying later persistence modes");
 
-const fallbackCalls = [];
+const sessionCalls = [];
 await chooseDurablePersistence(async (_auth, candidate) => {
-  fallbackCalls.push(candidate);
+  sessionCalls.push(candidate);
   if (candidate === local) throw new Error("local storage blocked");
-}, auth, [local, session]);
-assert.deepEqual(fallbackCalls, [local, session], "session persistence follows a local storage failure");
+}, auth, [local, session, memory]);
+assert.deepEqual(sessionCalls, [local, session], "session persistence follows a local storage failure");
+
+const memoryCalls = [];
+const selectedMemory = await chooseDurablePersistence(async (_auth, candidate) => {
+  memoryCalls.push(candidate);
+  if (candidate !== memory) throw new Error("browser-backed storage blocked");
+}, auth, [local, session, memory]);
+assert.equal(selectedMemory, memory, "in-memory persistence keeps returning-user sign-in available when durable stores are blocked");
+assert.deepEqual(memoryCalls, [local, session, memory], "memory persistence is attempted only after both browser-backed stores fail");
 
 await assert.rejects(
-  chooseDurablePersistence(async () => { throw new Error("storage blocked"); }, auth, [local, session]),
+  chooseDurablePersistence(async () => { throw new Error("storage blocked"); }, auth, [local, session, memory]),
   (error) => error.code === "auth/storage-unavailable",
-  "both durable stores failing produces the durable-storage error"
+  "all persistence modes failing produces the authentication-storage error"
 );
 
 const now = 10 * ACTIVITY_WRITE_INTERVAL_MS;
