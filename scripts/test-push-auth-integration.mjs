@@ -22,6 +22,10 @@ const exitPolicy = {
   "premium-rooms.js": { authenticated: 0, authLoss: 1 },
   "premium.js": { authenticated: 0, authLoss: 1 },
   "private-group-detail.js": { authenticated: 0, authLoss: 1 },
+  "private-message-reactions-integration.js": { authenticated: 0, authLoss: 0 },
+  "private-message-replies-integration.js": { authenticated: 0, authLoss: 0 },
+  "private-message-typing-integration.js": { authenticated: 0, authLoss: 0 },
+  "private-message-visibility-integration.js": { authenticated: 0, authLoss: 0 },
   "profile-style.js": { authenticated: 0, authLoss: 1 },
   "profile.js": { authenticated: 2, authLoss: 1 },
   "timeline.js": { authenticated: 2, authLoss: 1 },
@@ -41,7 +45,7 @@ const actualSignedPages = [...runtimeSources]
   .filter(([, source]) => /\bonAuthStateChanged\s*\(/.test(source))
   .map(([name]) => name)
   .sort();
-assert.deepEqual(actualSignedPages, Object.keys(exitPolicy).sort(), "every runtime auth-state page is explicitly covered by the push-exit policy");
+assert.deepEqual(actualSignedPages, Object.keys(exitPolicy).sort(), "every runtime auth-state page or companion is explicitly covered by the push-exit policy");
 
 for (const [name, expected] of Object.entries(exitPolicy)) {
   const source = runtimeSources.get(name);
