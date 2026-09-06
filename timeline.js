@@ -9,7 +9,7 @@ import { buildEditHistorySnapshot, canEditOwnedContent, nextEditMetadata } from 
 import { groupCommentThreads, threadRootId } from "./threaded-reply-policy.mjs";
 import { normalizePostMedia, validatePostMedia } from "./post-media-policy.mjs";
 import { canonicalPostPathParts, historyEntryId, savedPostEntryId } from "./saved-history-policy.mjs";
-import { applicationDayBounds, popularTodayScore, trendingScore } from "./hashtag-discovery-policy.mjs";
+import { trendingScore } from "./hashtag-discovery-policy.mjs";
 import { suggestFollowCandidates } from "./suggested-follow-policy.mjs";
 import { mergeRecentSearches, normalizeRecentSearch, removeRecentSearch } from "./recent-search-policy.mjs";
 import { ensureUserProfile } from "./legacy-profile.js";
@@ -25,6 +25,7 @@ import { createModerationClient } from "./moderation-client.mjs";
 import { REPORT_BUTTON_CLASS, REPORT_REASONS } from "./moderation-policy.mjs";
 import { compareNewestFirst, compareOldestFirst } from "./content-ordering.mjs";
 import { filterFeedPosts, sortFeedPosts, sortScoredFeedPosts } from "./feed-mode-policy.mjs";
+import { blendRecommendedPosts, rankFeedPosts } from "./feed-ranking-policy.mjs";
 import { normalizeTopic, postTopics } from "./topic-policy.mjs";
 import { interactionParentForPost } from "./interaction-parent-policy.mjs";
 import { pollVoteDocumentId as voteDocumentId } from "./poll-vote-policy.mjs";
@@ -77,9 +78,7 @@ const temporaryPostsButton = document.getElementById("show-temporary-posts");
 const savedFilterPostsButton = document.getElementById("show-saved-filter-posts");
 const profilePostsButton = document.getElementById("show-profile-posts");
 const trendingPostsButton = document.getElementById("show-trending-posts");
-const popularTodayPostsButton = document.getElementById("show-popular-today-posts");
 const savedPostsButton = document.getElementById("show-saved-posts");
-const historyPostsButton = document.getElementById("show-history-posts");
 const postGifUrl = document.getElementById("post-gif-url");
 const suggestedFollowsList = document.getElementById("suggested-follows-list");
 const recentSearchList = document.getElementById("recent-search-list");
@@ -1656,12 +1655,36 @@ const renderFeed = () => {
     setStatus("Loading privacy choices…");
     return;
   }
-  const activeFeedPosts = ["trending", "popular-today", "topics"].includes(feedMode) ? discoveryTimelinePosts() : allTimelinePosts();
+  const activeFeedPosts = ["trending", "topics"].includes(feedMode) ? discoveryTimelinePosts() : allTimelinePosts();
   const unexpiredPosts = visibleTimelinePosts(activeFeedPosts).sort(compareNewestFirst);
   const suggestionPosts = visibleTimelinePosts(discoveryTimelinePosts()).sort(compareNewestFirst);
   const reactionCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postReactions(post).length]));
   const commentCounts = new Map(unexpiredPosts.map(post => [post.ref.path, postComments(post).length]));
   const followedUids = new Set(visibleFollows().filter(follow => follow.data().followerId === currentUser?.uid).map(follow => follow.data().followingId));
+  const rankingPosts = [...new Map([...unexpiredPosts, ...suggestionPosts].map((post) => [post.ref.path, post])).values()];
+  const rankingReactionCounts = new Map(rankingPosts.map((post) => [post.ref.path, postReactions(post).length]));
+  const rankingCommentCounts = new Map(rankingPosts.map((post) => [post.ref.path, postComments(post).length]));
+  const authorAffinity = new Map();
+  const lastAffinityByAuthor = new Map();
+  for (const post of suggestionPosts) {
+    const authorId = post.data().type === "repost" ? post.data().originalAuthorId : post.data().authorId;
+    if (!authorId || authorId === currentUser?.uid) continue;
+    const viewerReactions = postReactions(post).filter((reaction) => reaction.data().uid === currentUser?.uid);
+    const viewerComments = postComments(post).filter((comment) => comment.data().uid === currentUser?.uid);
+    const affinity = viewerComments.length * 1.5 + viewerReactions.length;
+    if (affinity > 0) authorAffinity.set(authorId, Math.min(6, (authorAffinity.get(authorId) || 0) + affinity));
+    for (const signal of [...viewerReactions, ...viewerComments]) {
+      const signalMs = signal.data().createdAt?.toMillis?.() || signal.data().updatedAt?.toMillis?.() || 0;
+      if (signalMs > (lastAffinityByAuthor.get(authorId) || 0)) lastAffinityByAuthor.set(authorId, signalMs);
+    }
+  }
+  const similarAuthorAffinity = new Map();
+  for (const post of suggestionPosts) {
+    const authorId = post.data().type === "repost" ? post.data().originalAuthorId : post.data().authorId;
+    if (!authorId || followedUids.has(authorId) || authorId === currentUser?.uid || similarAuthorAffinity.has(authorId)) continue;
+    const mutualSocial = visibleFollows().filter((follow) => follow.data().followingId === authorId && followedUids.has(follow.data().followerId)).length;
+    if (mutualSocial) similarAuthorAffinity.set(authorId, Math.min(3, mutualSocial));
+  }
   const filteredPosts = showingProfile
     ? unexpiredPosts
     : filterFeedPosts(unexpiredPosts, {
@@ -1676,23 +1699,45 @@ const renderFeed = () => {
   if (feedMode === "trending") {
     const trendingPosts = [...filteredPosts].filter((post) => trendingScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).filter((c) => !c.data().parentCommentId).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()) > -Infinity);
     phaseBPosts = sortScoredFeedPosts(trendingPosts, (post) => trendingScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()));
-  } else if (feedMode === "popular-today") {
-    const popularPosts = [...filteredPosts].filter((post) => { const data = post.data(); const score = popularTodayScore({ createdAtMs: data.createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()); return score > -Infinity; });
-    phaseBPosts = sortScoredFeedPosts(popularPosts, (post) => popularTodayScore({ createdAtMs: post.data().createdAt?.toMillis?.() || 0, uniqueInteractions: postReactions(post).length, commentCount: postComments(post).length, replyCount: postComments(post).filter((c) => c.data().parentCommentId).length }, Date.now()));
   } else if (feedMode === "saved-posts") phaseBPosts = filteredPosts.filter((post) => savedPostPaths.has(interactionParentForPost(post).path));
-  else if (feedMode === "history") phaseBPosts = viewedPostPaths.map((path) => filteredPosts.find((post) => interactionParentForPost(post).path === path)).filter(Boolean);
   const orderedPosts = showingProfile
     ? phaseBPosts
-    : ["trending", "popular-today", "saved-posts", "history"].includes(feedMode) ? phaseBPosts : sortFeedPosts(phaseBPosts, feedMode, {
+    : ["trending", "saved-posts"].includes(feedMode) ? phaseBPosts : sortFeedPosts(phaseBPosts, feedMode, {
         viewerUid: currentUser?.uid,
         followedUids,
         reactionCounts,
         commentCounts,
         now: Date.now()
       });
-  const visiblePosts = showingProfile
+  let visiblePosts = showingProfile
     ? orderedPosts.filter((post) => post.data().authorId === currentUser.uid)
     : orderedPosts;
+  if (!showingProfile && feedMode === "for-you") {
+    const rankingContext = {
+      viewerUid: currentUser?.uid,
+      followedUids,
+      reactionCounts: rankingReactionCounts,
+      commentCounts: rankingCommentCounts,
+      authorAffinity,
+      similarAuthorAffinity,
+      now: Date.now()
+    };
+    const normalPosts = rankFeedPosts(phaseBPosts.filter((post) => {
+      const data = post.data();
+      const authorId = data.type === "repost" ? data.originalAuthorId : data.authorId;
+      return authorId === currentUser?.uid || followedUids.has(authorId);
+    }), rankingContext);
+    const normalPaths = new Set(normalPosts.map((post) => post.ref.path));
+    const recommendedCandidates = suggestionPosts.filter((post) => {
+      const data = post.data();
+      const authorId = data.type === "repost" ? data.originalAuthorId : data.authorId;
+      return authorId && authorId !== currentUser?.uid && !followedUids.has(authorId) && !normalPaths.has(post.ref.path);
+    });
+    const recommendedPosts = rankFeedPosts(recommendedCandidates, rankingContext);
+    visiblePosts = normalPosts.length >= 5
+      ? blendRecommendedPosts(normalPosts, recommendedPosts, { interval: 5 }).slice(0, TIMELINE_POST_LIMIT)
+      : rankFeedPosts([...normalPosts, ...recommendedPosts], rankingContext).slice(0, TIMELINE_POST_LIMIT);
+  }
 
   feed.replaceChildren(...visiblePosts.map(renderPost));
   if (suggestedFollowsList) {
@@ -1717,11 +1762,14 @@ const renderFeed = () => {
         uid: profile.id,
         mutuals: visibleFollows().filter((follow) => follow.data().followingId === profile.id && viewerFollowingSet.has(follow.data().followerId)).length,
         sharedTopics: candidateTopics.filter((topic) => viewerTopicSet.has(topic)).length,
-        publicInteractions: publicInteractionCountForCandidate(profile.id),
+        viewerComments: suggestionPosts.filter((post) => post.data().authorId === profile.id).reduce((total, post) => total + postComments(post).filter((comment) => comment.data().uid === currentUser?.uid).length, 0),
+        viewerReactions: suggestionPosts.filter((post) => post.data().authorId === profile.id).reduce((total, post) => total + postReactions(post).filter((reaction) => reaction.data().uid === currentUser?.uid).length, 0),
+        sharedInteractions: publicInteractionCountForCandidate(profile.id),
+        lastAffinityAtMs: lastAffinityByAuthor.get(profile.id) || 0,
         username: profile.data().username
       };
     });
-    const suggestions = suggestFollowCandidates(candidates, { viewerUid: currentUser?.uid, followedUids: followedUidsForSuggestions, blockedUids: new Set(viewerBlocks.blockedUids) }, 5);
+    const suggestions = suggestFollowCandidates(candidates, { viewerUid: currentUser?.uid, followedUids: followedUidsForSuggestions, blockedUids: new Set(viewerBlocks.blockedUids), now: Date.now() }, 5);
     suggestedFollowsList.replaceChildren(...suggestions.map((suggestion) => { const row = document.createElement("div"); const link = document.createElement("a"); link.href = `profile.html?uid=${encodeURIComponent(suggestion.uid)}`; link.textContent = `@${suggestion.username || "anonymous"}`; row.append(link, createFollowControl(suggestion.uid)); return row; }));
   }
   interactionVisibilityObserver?.disconnect();
@@ -1878,7 +1926,7 @@ const syncInteractionListeners = () => {
     queueInteractionRender();
     return;
   }
-  const interactionFeedPosts = ["trending", "popular-today", "topics"].includes(feedMode) ? discoveryTimelinePosts() : allTimelinePosts();
+  const interactionFeedPosts = ["trending", "topics"].includes(feedMode) ? discoveryTimelinePosts() : allTimelinePosts();
   const posts = visibleTimelinePosts(interactionFeedPosts).sort(compareNewestFirst);
   const visibleParents = new Map(posts.map((post) => [interactionParentForPost(post).path, post]));
   const desired = new Map(timelineInteractionPlan(posts, MAX_INTERACTION_PARENTS)
@@ -2070,10 +2118,8 @@ const setFeedView = (mode) => {
   savedFilterPostsButton.setAttribute("aria-pressed", String(mode === "saved"));
   profilePostsButton.setAttribute("aria-pressed", String(mode === "profile"));
   trendingPostsButton?.setAttribute("aria-pressed", String(mode === "trending"));
-  popularTodayPostsButton?.setAttribute("aria-pressed", String(mode === "popular-today"));
   savedPostsButton?.setAttribute("aria-pressed", String(mode === "saved-posts"));
-  historyPostsButton?.setAttribute("aria-pressed", String(mode === "history"));
-  const feedTitles = { "for-you": "For You", latest: "Latest posts", following: "Following", topics: "Chosen Topics", temporary: "Temporary Only", saved: "Saved Filters", trending: "Trending", "popular-today": "Popular Today", "saved-posts": "Saved posts", history: "Viewed history", profile: "My profile posts" };
+  const feedTitles = { "for-you": "For You", latest: "Latest posts", following: "Following", topics: "Chosen Topics", temporary: "Temporary Only", saved: "Saved Filters", trending: "Trending", "saved-posts": "Saved posts", profile: "My profile posts" };
   document.getElementById("feed-title").textContent = feedTitles[mode] || "For You";
   renderFeed();
 };
@@ -2086,9 +2132,7 @@ temporaryPostsButton.addEventListener("click", () => { feedMode = "temporary"; s
 savedFilterPostsButton.addEventListener("click", () => { feedMode = "saved"; setFeedView(feedMode); });
 profilePostsButton.addEventListener("click", () => setFeedView("profile"));
 trendingPostsButton?.addEventListener("click", () => setFeedView("trending"));
-popularTodayPostsButton?.addEventListener("click", () => setFeedView("popular-today"));
 savedPostsButton?.addEventListener("click", () => setFeedView("saved-posts"));
-historyPostsButton?.addEventListener("click", () => setFeedView("history"));
 clearRecentSearchesButton?.addEventListener("click", async () => {
   if (!currentUser) return;
   recentSearches = []; renderRecentSearches();
@@ -2264,7 +2308,7 @@ onAuthStateChanged(auth, async (user) => {
     query(collection(db, "posts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(DISCOVERY_POST_LIMIT)),
     (snapshot) => {
       discoveryPostDocs = snapshot.docs;
-      if (["trending", "popular-today", "topics"].includes(feedMode)) syncInteractionListeners();
+      if (["trending", "topics"].includes(feedMode)) syncInteractionListeners();
       renderPosts();
     },
     () => setStatus("Could not load discovery posts.", true)
@@ -2274,7 +2318,7 @@ onAuthStateChanged(auth, async (user) => {
     query(collection(db, "communityPosts"), where("moderationState", "==", "visible"), orderBy("createdAt", "desc"), limit(DISCOVERY_POST_LIMIT)),
     (snapshot) => {
       discoveryCommunityPostDocs = snapshot.docs;
-      if (["trending", "popular-today", "topics"].includes(feedMode)) syncInteractionListeners();
+      if (["trending", "topics"].includes(feedMode)) syncInteractionListeners();
       renderPosts();
     },
     () => setStatus("Could not load discovery community posts.", true)
