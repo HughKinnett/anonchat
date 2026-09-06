@@ -1,16 +1,14 @@
 export const chooseDurablePersistence = async (setPersistenceFn, auth, candidates) => {
-  const [localPersistence, sessionPersistence] = candidates;
-
-  for (const persistence of [localPersistence, sessionPersistence]) {
+  for (const persistence of candidates) {
     try {
       await setPersistenceFn(auth, persistence);
       return persistence;
     } catch {
-      // Try the other browser-backed store before reporting that both are unavailable.
+      // Try the next available persistence mode before reporting failure.
     }
   }
 
-  const error = new Error("Browser storage is unavailable for durable authentication.");
+  const error = new Error("Authentication storage is unavailable.");
   error.code = "auth/storage-unavailable";
   throw error;
 };
