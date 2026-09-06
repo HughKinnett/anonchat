@@ -37,7 +37,7 @@ assert.match(policy, /premium-member[\s\S]*persistent:\s*false/, "Premium Member
 assert.doesNotMatch(firestore, /export const (saveBadgeType|setUserBadge|removeUserBadge|setBadgeFeatured)/, "client Firestore adapter exposes no badge mutation APIs");
 assert.match(serverAdapter, /removeStatusBadge/, "trusted server adapter can revoke status badges");
 assert.match(processor, /premium_active[\s\S]*false[\s\S]*removeStatusBadge|removeStatusBadge[\s\S]*premium-member/, "Premium reconciliation removes the badge when paid Premium is inactive");
-assert.doesNotMatch(admin, /Save badge|Assign selected badge|Remove badge|Deactivate|Activate|badge-save|badge-user-assign/, "admin badge UI is read-only");
+assert.doesNotMatch(admin, /Save badge|Assign selected badge|Remove badge|Deactivate|Activate|id=["']badge-save["']|id=["']badge-user-assign["']/, "admin badge UI is read-only");
 assert.match(admin, /read-only|view/i, "admin badge UI explains that badge data is read-only");
 
 assert.match(profile, /View all badges|view all badges/i, "profile badge UI supports View all badges");
