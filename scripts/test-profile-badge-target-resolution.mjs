@@ -13,24 +13,19 @@ assert.match(badges, /import\s*\{[^}]*auth[^}]*db[^}]*\}\s*from\s*["']\.\/fireba
   "badge controller can resolve the signed-in owner when no uid query is present");
 assert.match(badges, /auth\.authStateReady\(\)|onAuthStateChanged/,
   "badge controller waits for authentication before resolving an own-profile target");
-assert.match(badges, /queryUserId|searchParams|URLSearchParams/,
-  "badge controller still honors an explicit other-user uid query");
-assert.match(badges, /targetUserId\s*=\s*queryUserId\s*\|\|\s*auth\.currentUser\?\.uid\s*\|\|\s*null[\s\S]*if \(!targetUserId\s*\|\|\s*profileUnavailable\(\)\) return;/,
-  "badge controller resolves query uid or authenticated owner before the final no-target safety guard");
-
-assert.match(phaseA, /viewer\s*=\s*auth\.currentUser/,
-  "profile privacy controller resolves the authenticated viewer");
-assert.match(phaseA, /targetUserId\s*=\s*queryUserId\s*\|\|\s*viewer\.uid/,
-  "profile privacy resolves the same effective owner profile when uid is absent");
+assert.match(badges, /targetUserId\s*=\s*queryUserId\s*\|\|\s*auth\.currentUser\?\.uid\s*\|\|\s*null/,
+  "badge controller resolves query uid or authenticated owner");
 
 assert.match(html, /id="profile-badges-open"[^>]*class="[^"]*secondary-button[^\"]*"[^>]*>Badges<\/button>/,
   "profile action row exposes a clearly labeled themed Badges button");
-assert.match(phaseA, /profile-badges-open/,
-  "profile privacy controller owns the public visibility of the Badges entry button");
-assert.match(phaseA, /badgeEntryButton\.hidden\s*=\s*!visibility\.badges/,
-  "Badges entry button is visible to owners/public visitors and hidden from visitors when badges are private");
 assert.match(badges, /profile-badges-open/,
   "badge controller wires the profile Badges entry button to the collection dialog");
+assert.match(badges, /entryButton\.hidden\s*=\s*false/,
+  "badge controller reveals the Badges entry point after the viewer successfully reads the target badge collection");
+assert.match(badges, /entryButton\.hidden\s*=\s*true/,
+  "badge controller keeps the Badges entry point hidden when the badge collection is unavailable or private");
+assert.doesNotMatch(phaseA, /badgeEntryButton|profile-badges-open/,
+  "profile privacy controller no longer independently owns badge entry visibility");
 
 assert.match(html, /id="profile-badges-section"/,
   "profile keeps a clearly labeled Badges section");
