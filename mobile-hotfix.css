@@ -42,7 +42,11 @@ canvas {
     justify-content: flex-end;
   }
 
-  .content-grid,
+  .content-grid {
+    width: auto;
+    max-width: 100%;
+  }
+
   .profile-page {
     width: 100%;
     max-width: 100%;
