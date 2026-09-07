@@ -1,0 +1,16 @@
+name: Mobile timeline overflow CI
+
+on:
+  push:
+    branches:
+      - fix/mobile-saved-overflow
+
+jobs:
+  mobile-overflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/test-mobile-timeline-overflow.mjs
