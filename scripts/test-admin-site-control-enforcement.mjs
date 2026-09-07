@@ -18,8 +18,10 @@ assert.match(rules, /featureEnabled\('uploadsEnabled'\)/, "Firestore rules enfor
 assert.match(rules, /featureEnabled\('spotifyEmbedsEnabled'\)/, "Firestore rules enforce the Spotify-embed switch");
 
 assert.match(login, /siteSettings["'],\s*["']features/, "signup checks the site feature settings");
-assert.match(login, /registrationsEnabled[^\n]{0,250}(false|paused|registration)/i,
-  "signup stops cleanly when registrations are paused");
+assert.match(login, /snapshot\.exists\(\)\s*&&\s*snapshot\.data\(\)\.registrationsEnabled\s*===\s*true/,
+  "signup availability only opens when registrationsEnabled is explicitly true");
+assert.match(login, /if\s*\(\s*!\(await refreshSignupAvailability\(\)\)\s*\)\s*\{[\s\S]{0,260}?setStatus\([^\n]*registration[^\n]*closed[\s\S]{0,160}?return;/i,
+  "signup stops cleanly before account creation when registrations are paused");
 
 assert.match(announcement, /siteSettings["'],\s*["']announcement/, "site announcement listens to the admin announcement document");
 assert.match(announcement, /onSnapshot/, "site announcement updates live");
